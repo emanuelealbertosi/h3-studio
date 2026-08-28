@@ -3633,10 +3633,10 @@ function AdminPanel() {
     setData(next);
   }
 
-  async function saveSettings() {
-    if (!data) return;
+  async function saveSettings(manageBusy = true) {
+    if (!data) return false;
     const settingsToSave = dataRef.current?.settings ?? data.settings;
-    setSaving(true);
+    if (manageBusy) setSaving(true);
     setMessage("Salvataggio…");
     try {
       const response = await fetch(`${bridgeUrl}/api/admin/engine-settings`, {
@@ -3673,16 +3673,18 @@ function AdminPanel() {
       setMessage(
         `Engine verificati e salvati · Anima ${verified.settings.anima.steps} step / CFG ${verified.settings.anima.cfg} · Flux ${verified.settings.imageEdit.steps} / CFG ${verified.settings.imageEdit.cfg} · Krea ${verified.settings.krea.steps} step`,
       );
+      return true;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Salvataggio fallito");
+      return false;
     } finally {
-      setSaving(false);
+      if (manageBusy) setSaving(false);
     }
   }
 
-  async function saveInstallSettings() {
-    if (!installData) return;
-    setSaving(true);
+  async function saveInstallSettings(manageBusy = true) {
+    if (!installData) return false;
+    if (manageBusy) setSaving(true);
     setMessage("Salvataggio collegamento e workflow…");
     try {
       const response = await fetch(`${bridgeUrl}/api/admin/install-settings`, {
@@ -3695,8 +3697,28 @@ function AdminPanel() {
       if (!response.ok || !payload.settings) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
       setInstallData({ ...installData, settings: payload.settings });
       setMessage(payload.message ?? "Configurazione salvata");
+      return true;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Salvataggio installazione fallito");
+      return false;
+    } finally {
+      if (manageBusy) setSaving(false);
+    }
+  }
+
+  async function saveAllSettings() {
+    if (!data || !installData || saving) return;
+    setSaving(true);
+    setMessage("Salvataggio completo in corso…");
+    try {
+      if (!await saveSettings(false)) return;
+      if (!await saveInstallSettings(false)) return;
+      const current = dataRef.current;
+      setMessage(
+        current
+          ? `Tutto salvato e verificato · Anima ${current.settings.anima.steps} step / CFG ${current.settings.anima.cfg} · Flux ${current.settings.imageEdit.steps} / CFG ${current.settings.imageEdit.cfg} · Krea ${current.settings.krea.steps} step`
+          : "Engine, collegamento e workflow salvati e verificati",
+      );
     } finally {
       setSaving(false);
     }
@@ -3920,7 +3942,9 @@ function AdminPanel() {
               <div className="admin-subheading">
                 <div><span>INSTALLAZIONE</span><h3>ComfyUI e workflow associati</h3></div>
                 <div className="admin-server-actions">
-                  <button disabled={saving || restarting} onClick={() => void saveInstallSettings()} type="button">Salva collegamento</button>
+                  <button disabled={saving || restarting} onClick={() => void saveAllSettings()} type="button">
+                    {saving ? "Salvataggio…" : "Salva tutto"}
+                  </button>
                   <button className="secondary" disabled={saving || restarting} onClick={() => void restartServer()} type="button">
                     {restarting ? "Riavvio…" : "↻ Riavvia server"}
                   </button>
@@ -4487,8 +4511,8 @@ function AdminPanel() {
               <button className="secondary" disabled={saving} onClick={() => void logout()} type="button">
                 Esci Admin
               </button>
-              <button disabled={saving} onClick={saveSettings} type="button">
-                {saving ? "Salvataggio…" : "Salva Engine"}
+              <button disabled={saving} onClick={() => void saveAllSettings()} type="button">
+                {saving ? "Salvataggio…" : "Salva tutto"}
               </button>
             </div>
           </div>
