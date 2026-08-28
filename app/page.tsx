@@ -3321,22 +3321,46 @@ function AdminPanel() {
   async function loadSettings() {
     setMessage("Aggiornamento liste da ComfyUI…");
     try {
-      const [engineResponse, installResponse, llmResponse] = await Promise.all([
+      const [engineResponse, installResponse] = await Promise.all([
         fetch(`${bridgeUrl}/api/admin/engine-settings`, { cache: "no-store", credentials: "include" }),
         fetch(`${bridgeUrl}/api/admin/install-settings`, { cache: "no-store", credentials: "include" }),
-        fetch(`${bridgeUrl}/api/admin/llm-runtime`, { cache: "no-store", credentials: "include" }),
       ]);
-      if (engineResponse.status === 401 || installResponse.status === 401 || llmResponse.status === 401) {
+      if (engineResponse.status === 401 || installResponse.status === 401) {
         setLoginRequired(true);
         setMessage("Inserisci la password Admin");
         return;
       }
       const enginePayload = (await engineResponse.json()) as EngineAdminResponse & { error?: string };
       const installPayload = (await installResponse.json()) as InstallAdminResponse & { error?: string };
-      const llmPayload = (await llmResponse.json()) as { status?: AdminLlmRuntimeStatus; error?: string };
       if (!engineResponse.ok) throw new Error(enginePayload.error ?? `Bridge HTTP ${engineResponse.status}`);
       if (!installResponse.ok) throw new Error(installPayload.error ?? `Bridge HTTP ${installResponse.status}`);
-      if (!llmResponse.ok || !llmPayload.status) throw new Error(llmPayload.error ?? `Bridge HTTP ${llmResponse.status}`);
+
+      let llmStatus: AdminLlmRuntimeStatus | null = null;
+      let llmNotice = "";
+      try {
+        const llmResponse = await fetch(`${bridgeUrl}/api/admin/llm-runtime`, {
+          cache: "no-store",
+          credentials: "include",
+        });
+        if (llmResponse.status === 401) {
+          setLoginRequired(true);
+          setMessage("Inserisci la password Admin");
+          return;
+        }
+        if (llmResponse.status === 404) {
+          llmNotice = "Controllo LLM disponibile dopo il riavvio del bridge";
+        } else {
+          const llmPayload = (await llmResponse.json()) as { status?: AdminLlmRuntimeStatus; error?: string };
+          if (!llmResponse.ok || !llmPayload.status) {
+            throw new Error(llmPayload.error ?? `Bridge HTTP ${llmResponse.status}`);
+          }
+          llmStatus = llmPayload.status;
+        }
+      } catch (error) {
+        llmNotice = error instanceof Error
+          ? `Controllo LLM non disponibile: ${error.message}`
+          : "Controllo LLM non disponibile";
+      }
       const pairedPddFile = preferredPddFileForModel(
         enginePayload.settings.fast.model,
         enginePayload.capabilities.pddFiles,
@@ -3349,9 +3373,9 @@ function AdminPanel() {
       }
       setData(enginePayload);
       setInstallData(installPayload);
-      setLlmRuntime(llmPayload.status);
+      setLlmRuntime(llmStatus);
       setLoginRequired(false);
-      setMessage("Liste, workflow e configurazione aggiornati da ComfyUI");
+      setMessage(llmNotice || "Liste, workflow e configurazione aggiornati da ComfyUI");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Caricamento fallito");
     }

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   LlmRuntimeControl,
   parseNvidiaMemory,
@@ -15,6 +17,10 @@ assert.deepEqual(parseNvidiaMemory("10240, 16303\r\n"), {
   totalMiB: 16303,
 });
 assert.equal(parseNvidiaMemory("N/A, N/A"), null);
+
+const adminSource = readFileSync(path.join(process.cwd(), "app", "page.tsx"), "utf8");
+assert.match(adminSource, /llmResponse\.status === 404/);
+assert.match(adminSource, /Controllo LLM disponibile dopo il riavvio del bridge/);
 
 let active = true;
 const calls: Array<{ file: string; args: string[] }> = [];
