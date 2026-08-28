@@ -45,6 +45,7 @@ type Props = {
   bridgeUrl: string;
   projectId: string;
   projectName?: string | null;
+  initialJobId?: string | null;
 };
 
 const runningStates = new Set(["prepared", "queued", "loading", "running", "finalizing"]);
@@ -59,7 +60,7 @@ function elapsed(seconds?: number | null) {
   return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
 }
 
-export default function AudioStudioPanel({ bridgeUrl, projectId, projectName }: Props) {
+export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, initialJobId = null }: Props) {
   const [kind, setKind] = useState<AudioKind>("tts");
   const [ttsText, setTtsText] = useState("");
   const [ttsIdea, setTtsIdea] = useState("");
@@ -93,7 +94,7 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName }: 
   const latestJob = jobs[0] ?? null;
   const selectedReady = kind === "tts" ? capabilities?.tts.ready : capabilities?.music.ready;
 
-  async function load() {
+  async function load(preferId?: string | null) {
     const [capResponse, jobsResponse, libraryResponse] = await Promise.all([
       fetch(`${bridgeUrl}/api/audio-jobs/capabilities`, { cache: "no-store" }),
       fetch(`${bridgeUrl}/api/audio-jobs?${new URLSearchParams({ projectId, limit: "100" })}`, { cache: "no-store" }),
@@ -106,7 +107,13 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName }: 
     if (!jobsResponse.ok) throw new Error(jobsPayload.error ?? "Job audio non disponibili");
     setCapabilities(capPayload.audioStudio);
     setVoice((current) => current || capPayload.audioStudio!.tts.defaultVoice || capPayload.audioStudio!.tts.voices[0] || "default");
-    setJobs(jobsPayload.jobs ?? []);
+    const loaded = jobsPayload.jobs ?? [];
+    const preferred = preferId ? loaded.find((job) => job.id === preferId) : null;
+    setJobs(preferred ? [preferred, ...loaded.filter((job) => job.id !== preferred.id)] : loaded);
+    if (preferred) {
+      setKind(preferred.kind);
+      setMessage(`Job ${preferred.id.slice(0, 8)} aperto dalla Chat`);
+    }
     if (libraryResponse.ok) setLibrary((libraryPayload.assets ?? []).filter((asset) => asset.kind === "audio"));
   }
 
@@ -114,8 +121,8 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName }: 
     if (!projectId) return;
     // This effect synchronizes the panel with the remote bridge state.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load().catch((error) => setMessage(error instanceof Error ? error.message : "Audio non disponibile"));
-  }, [bridgeUrl, projectId]);
+    void load(initialJobId).catch((error) => setMessage(error instanceof Error ? error.message : "Audio non disponibile"));
+  }, [bridgeUrl, initialJobId, projectId]);
 
   useEffect(() => {
     if (!hasActiveJob) return;

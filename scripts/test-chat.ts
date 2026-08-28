@@ -117,7 +117,7 @@ try {
   assert.equal(shouldRecallMedia("Crea una animazione partendo da questa immagine"), true);
   assert.equal(shouldRecallMedia("Parliamo di regia cinematografica"), false);
 
-  const [server, service, audioService, panel, dialog, styles, node, installer, manifest] = await Promise.all([
+  const [server, service, audioService, panel, dialog, styles, node, installer, manifest, page, imagePanel, audioPanel] = await Promise.all([
     readFile("bridge/server.ts", "utf8"),
     readFile("bridge/chat-service.ts", "utf8"),
     readFile("bridge/audio-studio-service.ts", "utf8"),
@@ -127,6 +127,9 @@ try {
     readFile("comfyui_nodes/H3-Studio-Gemma4-Chat/h3_studio_chat.py", "utf8"),
     readFile("scripts/INSTALL_COMFY_DEPENDENCIES.ps1", "utf8"),
     readFile("workflows/dependencies.json", "utf8"),
+    readFile("app/page.tsx", "utf8"),
+    readFile("app/image-studio-panel.tsx", "utf8"),
+    readFile("app/audio-studio-panel.tsx", "utf8"),
   ]);
   assert.match(server, /\/api\/chat\/:projectId\/messages/);
   assert.match(server, /\/api\/chat\/conversations\/:conversationId/);
@@ -174,6 +177,14 @@ try {
   assert.match(panel, /saveConversationTitle/);
   assert.match(panel, /RegenerateDialog/);
   assert.match(panel, /↻ Rigenera/);
+  assert.match(panel, /onOpenStudio: \(kind: "video" \| "image" \| "audio", jobId: string\)/);
+  assert.match(panel, /onOpenStudio\([\s\S]*?action\.jobId!\)/);
+  assert.match(page, /openChatMediaInStudio/);
+  assert.match(page, /\/api\/jobs\/\$\{jobId\}/);
+  assert.match(page, /initialJobId=\{imageStudioHandoff\?\.jobId\}/);
+  assert.match(page, /initialJobId=\{audioStudioJobId\}/);
+  assert.match(imagePanel, /loadJobs\(initialJobId\)/);
+  assert.match(audioPanel, /const preferred = preferId \? loaded\.find/);
   assert.match(dialog, /Prompt della nuova generazione/);
   assert.match(dialog, /Nuovo casuale/);
   assert.match(styles, /\.chat-render-preview/);

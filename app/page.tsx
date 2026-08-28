@@ -4187,10 +4187,12 @@ function StudioApp() {
   const [activeView, setActiveView] = useState<"chat" | "studio" | "projects" | "montages" | "characters" | "library" | "admin">("studio");
   const [studioMediaMode, setStudioMediaMode] = useState<"video" | "image" | "audio">("video");
   const [audioResetToken, setAudioResetToken] = useState(0);
+  const [audioStudioJobId, setAudioStudioJobId] = useState<string | null>(null);
   const [imageResetToken, setImageResetToken] = useState(0);
   const [imageStudioHandoff, setImageStudioHandoff] = useState<{
     token: number;
     references: ImageStudioIncomingReference[];
+    jobId?: string | null;
   } | null>(null);
   const [libraryInitialKind, setLibraryInitialKind] = useState<"all" | "character" | "object">("all");
   const [montageTarget, setMontageTarget] = useState<{ projectId: string; timelineId: string } | null>(null);
@@ -4605,6 +4607,31 @@ function StudioApp() {
         : `Job ${job.id.slice(0, 8)} aperto dalla cronologia`,
     );
     setActiveView("studio");
+  }
+
+  async function openChatMediaInStudio(kind: "video" | "image" | "audio", jobId: string) {
+    if (kind === "video") {
+      setRunMessage(`Apertura del job ${jobId.slice(0, 8)} dalla Chat…`);
+      try {
+        const response = await fetch(`${bridgeUrl}/api/jobs/${jobId}`, { cache: "no-store" });
+        const payload = await response.json() as { job?: RemoteJob; error?: string };
+        if (!response.ok || !payload.job) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+        openJob(payload.job);
+        setRunMessage(`Job ${jobId.slice(0, 8)} aperto dalla Chat`);
+      } catch (error) {
+        setRunMessage(error instanceof Error ? error.message : "Video Chat non disponibile");
+      }
+      return;
+    }
+    if (kind === "image") {
+      setImageStudioHandoff({ token: Date.now(), references: [], jobId });
+    } else {
+      setAudioStudioJobId(jobId);
+      setAudioResetToken((current) => current + 1);
+    }
+    setStudioMediaMode(kind);
+    setActiveView("studio");
+    setRunMessage(`Job ${jobId.slice(0, 8)} aperto dalla Chat`);
   }
 
   useEffect(() => {
@@ -5349,6 +5376,7 @@ function StudioApp() {
     setImageStudioHandoff({
       token: Date.now(),
       references: imageReferences,
+      jobId: null,
     });
     setImageResetToken((current) => current + 1);
     setActiveView("studio");
@@ -5715,6 +5743,8 @@ function StudioApp() {
                   <select value={studioProjectId} onChange={(event) => {
                     setStudioProjectId(event.target.value);
                     setSourceJobId(null);
+                    setImageStudioHandoff(null);
+                    setAudioStudioJobId(null);
                   }}>
                     {studioProjects.map((project) => (
                       <option key={project.id} value={project.id}>{project.name}</option>
@@ -5726,7 +5756,10 @@ function StudioApp() {
                   else if (studioMediaMode === "image") {
                     setImageStudioHandoff(null);
                     setImageResetToken((current) => current + 1);
-                  } else setAudioResetToken((current) => current + 1);
+                  } else {
+                    setAudioStudioJobId(null);
+                    setAudioResetToken((current) => current + 1);
+                  }
                 }} type="button">{studioMediaMode === "video" ? "Nuovo shot" : studioMediaMode === "image" ? "Nuova immagine" : "Nuovo audio"}</button>}
                 <button onClick={() => void createStudioProject()} title="Crea un nuovo progetto" type="button">＋</button>
               </div>
@@ -5782,10 +5815,12 @@ function StudioApp() {
           ) : activeView === "chat" ? (
             <ChatPanel
               bridgeUrl={bridgeUrl}
-              onOpenStudio={(kind) => { setStudioMediaMode(kind); setActiveView("studio"); }}
+              onOpenStudio={(kind, jobId) => void openChatMediaInStudio(kind, jobId)}
               onSelectProject={(projectId) => {
                 setStudioProjectId(projectId);
                 setSourceJobId(null);
+                setImageStudioHandoff(null);
+                setAudioStudioJobId(null);
               }}
               projectId={studioProjectId}
               projectName={studioProject?.name}
@@ -5797,6 +5832,7 @@ function StudioApp() {
             <ImageStudioPanel
               bridgeUrl={bridgeUrl}
               incomingReferences={imageStudioHandoff?.references}
+              initialJobId={imageStudioHandoff?.jobId}
               key={`${imageResetToken}-${imageStudioHandoff?.token ?? 0}`}
               projectId={studioProjectId}
               projectName={studioProject?.name}
@@ -5806,6 +5842,7 @@ function StudioApp() {
           <div hidden={studioMediaMode !== "audio"}>
             <AudioStudioPanel
               bridgeUrl={bridgeUrl}
+              initialJobId={audioStudioJobId}
               key={`${studioProjectId}-${audioResetToken}`}
               projectId={studioProjectId}
               projectName={studioProject?.name}

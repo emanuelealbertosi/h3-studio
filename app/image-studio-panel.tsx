@@ -86,6 +86,7 @@ type Props = {
   projectId: string;
   projectName?: string | null;
   incomingReferences?: ImageStudioIncomingReference[];
+  initialJobId?: string | null;
 };
 
 export type ImageStudioIncomingReference = {
@@ -233,6 +234,7 @@ export default function ImageStudioPanel({
   projectId,
   projectName,
   incomingReferences = [],
+  initialJobId = null,
 }: Props) {
   const [mode, setMode] = useState<ImageMode>(
     incomingReferences.length ? "edit" : "generate",
@@ -490,10 +492,12 @@ export default function ImageStudioPanel({
     const timer = window.setTimeout(() => {
       setActiveJobId(null);
       setJob(null);
-      void loadJobs().catch((error) => { if (!disposed) setMessage(error instanceof Error ? error.message : "Immagini non disponibili"); });
+      void loadJobs(initialJobId).then(() => {
+        if (!disposed && initialJobId) setMessage(`Job ${initialJobId.slice(0, 8)} aperto dalla Chat`);
+      }).catch((error) => { if (!disposed) setMessage(error instanceof Error ? error.message : "Immagini non disponibili"); });
     }, 0);
     return () => { disposed = true; window.clearTimeout(timer); };
-  }, [projectId]);
+  }, [initialJobId, projectId]);
 
   useEffect(() => {
     let disposed = false;

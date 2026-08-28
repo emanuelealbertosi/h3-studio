@@ -160,7 +160,7 @@ export default function ChatPanel({
   projectName?: string;
   projects: Project[];
   onSelectProject: (projectId: string) => void;
-  onOpenStudio: (kind: "video" | "image" | "audio") => void;
+  onOpenStudio: (kind: "video" | "image" | "audio", jobId: string) => void;
 }) {
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -759,7 +759,7 @@ export default function ChatPanel({
                         onClick={() => setRegenerateTarget({ messageId: message.id, action })}
                         type="button"
                       >↻ Rigenera</button>}
-                      {action.status === "started" && <button onClick={() => onOpenStudio(audioAction(action.type) ? "audio" : action.type === "generate_video" ? "video" : "image")} type="button">Apri nello Studio</button>}
+                      {action.status === "started" && action.jobId && <button onClick={() => onOpenStudio(audioAction(action.type) ? "audio" : action.type === "generate_video" ? "video" : "image", action.jobId!)} type="button">Apri nello Studio</button>}
                     </div>
                   </div>
                   {action.jobId && <div
