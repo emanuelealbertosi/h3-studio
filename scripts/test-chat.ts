@@ -5,7 +5,14 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ChatRepository } from "../bridge/chat-repository.js";
-import { normalizePlan, routeAction, shouldRecallMedia } from "../bridge/chat-service.js";
+import {
+  extractRequestedLyrics,
+  musicInstrumentalIntent,
+  normalizePlan,
+  preserveMusicIntent,
+  routeAction,
+  shouldRecallMedia,
+} from "../bridge/chat-service.js";
 import { JobRepository } from "../bridge/job-repository.js";
 import { ProjectRepository } from "../bridge/project-repository.js";
 import { DEFAULT_RUNTIME_SETTINGS, RuntimeSettingsStore } from "../bridge/runtime-settings.js";
@@ -102,6 +109,17 @@ try {
   assert.equal(routeAction(proposedImage, "music")?.type, "generate_music");
   assert.equal(routeAction(proposedImage, "auto")?.type, "generate_image");
   assert.equal(routeAction(null, "anima"), null);
+  const vocalRequest = 'crea una canzone jazz di 10s cantata da una donna che dice "Buongiornissimo caffè, Buongiornissimo caffeee" in italiano';
+  assert.equal(musicInstrumentalIntent(vocalRequest), false);
+  assert.equal(extractRequestedLyrics(vocalRequest), "Buongiornissimo caffè, Buongiornissimo caffeee");
+  assert.equal(musicInstrumentalIntent("Crea un tema jazz strumentale senza voce"), true);
+  const preservedSong = preserveMusicIntent({
+    type: "generate_music",
+    prompt: "Sophisticated jazz with warm female vocal",
+    instrumental: true,
+  }, vocalRequest);
+  assert.equal(preservedSong?.instrumental, false);
+  assert.equal(preservedSong?.lyrics, "Buongiornissimo caffè, Buongiornissimo caffeee");
   const videoEditAlias = normalizePlan(JSON.stringify({
     reply: "Modifica avviata",
     title: "Goku blu",
@@ -152,6 +170,8 @@ try {
   assert.match(service, /generate_tts/);
   assert.match(service, /generate_music/);
   assert.match(service, /audioStudio\.planMusic/);
+  assert.match(service, /preserveMusicIntent/);
+  assert.match(service, /lyrics: plan\.lyrics/);
   assert.match(service, /referenceFile: reference\?\.file/);
   assert.match(service, /video_editing: \{ type: "generate_video", videoMode: "VIDEO EDITING" \}/);
   assert.match(service, /catch \(error\) \{\s+await this\.comfy\.chatUnload\(\)\.catch/);
@@ -187,6 +207,8 @@ try {
   assert.match(audioPanel, /const preferred = preferId \? loaded\.find/);
   assert.match(dialog, /Prompt della nuova generazione/);
   assert.match(dialog, /Nuovo casuale/);
+  assert.match(dialog, /secondaryLabel/);
+  assert.match(panel, /Lyrics cantate/);
   assert.match(styles, /\.chat-render-preview/);
   assert.match(styles, /\.chat-stop-button/);
   assert.match(styles, /\.chat-thread-sidebar/);

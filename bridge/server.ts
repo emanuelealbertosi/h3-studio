@@ -808,7 +808,7 @@ app.post<{
 
 app.post<{
   Params: { conversationId: string };
-  Body: { messageId?: unknown; prompt?: unknown };
+  Body: { messageId?: unknown; prompt?: unknown; lyrics?: unknown };
 }>("/api/chat/conversations/:conversationId/regenerate", async (request, reply) => {
   try {
     const messageId = typeof request.body?.messageId === "string"
@@ -823,6 +823,7 @@ app.post<{
         request.params.conversationId,
         messageId,
         request.body?.prompt,
+        request.body?.lyrics,
       )),
     };
   } catch (error) {

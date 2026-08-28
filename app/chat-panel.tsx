@@ -34,6 +34,9 @@ type ChatTrackedJob = {
   width?: number;
   height?: number;
   candidates: ChatTrackedCandidate[];
+  prompt?: string;
+  lyrics?: string;
+  audioKind?: "tts" | "music";
   fetchError?: string;
 };
 type Attachment = {
@@ -85,7 +88,8 @@ type VideoJob = {
   } | null }>;
 };
 type AudioJob = {
-  id: string; status: string; phaseLabel?: string | null; progress?: number | null;
+  id: string; kind: "tts" | "music"; status: string; prompt: string; lyrics: string;
+  phaseLabel?: string | null; progress?: number | null;
   error?: string | null; output?: { mediaPath: string; filename?: string } | null;
 };
 
@@ -112,6 +116,9 @@ function trackedAudioJob(job: AudioJob): ChatTrackedJob {
     id: job.id,
     kind: "audio",
     status: job.status,
+    prompt: job.prompt,
+    lyrics: job.lyrics,
+    audioKind: job.kind,
     candidates: [{
       index: 0,
       status: job.status,
@@ -172,6 +179,8 @@ export default function ChatPanel({
   const [regenerateTarget, setRegenerateTarget] = useState<{
     messageId: string;
     action: ChatAction;
+    prompt: string;
+    lyrics?: string;
   } | null>(null);
   const [regeneratingAction, setRegeneratingAction] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -492,7 +501,7 @@ export default function ChatPanel({
     }
   }
 
-  async function regenerateChatAction(prompt: string) {
+  async function regenerateChatAction(prompt: string, lyrics?: string) {
     if (!activeConversationId || !regenerateTarget || regeneratingAction) return;
     setRegeneratingAction(true);
     setNotice("Avvio rigenerazione con un nuovo seed…");
@@ -502,7 +511,7 @@ export default function ChatPanel({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ messageId: regenerateTarget.messageId, prompt }),
+          body: JSON.stringify({ messageId: regenerateTarget.messageId, prompt, lyrics }),
         },
       );
       const payload = await response.json() as {
@@ -756,7 +765,12 @@ export default function ChatPanel({
                       {action.status === "started" && action.jobId && !actionActive && <button
                         className="chat-regenerate-button"
                         disabled={chatLocked}
-                        onClick={() => setRegenerateTarget({ messageId: message.id, action })}
+                        onClick={() => setRegenerateTarget({
+                          messageId: message.id,
+                          action,
+                          prompt: action.type === "generate_music" ? tracked?.prompt ?? action.prompt : action.prompt,
+                          lyrics: action.type === "generate_music" ? tracked?.lyrics ?? "" : undefined,
+                        })}
                         type="button"
                       >↻ Rigenera</button>}
                       {action.status === "started" && action.jobId && <button onClick={() => onOpenStudio(audioAction(action.type) ? "audio" : action.type === "generate_video" ? "video" : "image", action.jobId!)} type="button">Apri nello Studio</button>}
@@ -841,9 +855,11 @@ export default function ChatPanel({
 
       {regenerateTarget && <RegenerateDialog
         busy={regeneratingAction}
-        initialPrompt={regenerateTarget.action.prompt}
+        initialPrompt={regenerateTarget.prompt}
+        initialSecondaryValue={regenerateTarget.lyrics}
         key={`${regenerateTarget.messageId}:${regenerateTarget.action.jobId}`}
         mediaLabel={audioAction(regenerateTarget.action.type) ? "audio" : regenerateTarget.action.type === "generate_video" ? "video" : "immagine"}
+        secondaryLabel={regenerateTarget.action.type === "generate_music" ? "Lyrics cantate (mantieni vuoto solo per un brano strumentale)" : undefined}
         onCancel={() => { if (!regeneratingAction) setRegenerateTarget(null); }}
         onConfirm={regenerateChatAction}
         scopeLabel="Generazione Chat · 1 candidato"

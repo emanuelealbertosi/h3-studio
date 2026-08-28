@@ -6,25 +6,31 @@ import { createPortal } from "react-dom";
 type Props = {
   busy?: boolean;
   initialPrompt: string;
+  initialSecondaryValue?: string;
+  secondaryLabel?: string;
   mediaLabel: string;
   scopeLabel: string;
   onCancel: () => void;
-  onConfirm: (prompt: string) => void | Promise<void>;
+  onConfirm: (prompt: string, secondaryValue?: string) => void | Promise<void>;
 };
 
 export default function RegenerateDialog({
   busy = false,
   initialPrompt,
+  initialSecondaryValue = "",
+  secondaryLabel,
   mediaLabel,
   scopeLabel,
   onCancel,
   onConfirm,
 }: Props) {
   const [prompt, setPrompt] = useState(initialPrompt);
+  const [secondaryValue, setSecondaryValue] = useState(initialSecondaryValue);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const onCancelRef = useRef(onCancel);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const secondaryRef = useRef<HTMLTextAreaElement>(null);
   onCancelRef.current = onCancel;
 
   useEffect(() => {
@@ -47,6 +53,7 @@ export default function RegenerateDialog({
   }, [busy]);
 
   const cleanPrompt = prompt.trim();
+  const cleanSecondaryValue = secondaryValue.trim();
   const dialog = (
     <div
       className="regenerate-dialog-backdrop"
@@ -60,7 +67,7 @@ export default function RegenerateDialog({
         className="regenerate-dialog"
         onKeyDown={(event) => {
           if (event.key !== "Tab") return;
-          const controls = [promptRef.current, cancelRef.current, confirmRef.current]
+          const controls = [promptRef.current, secondaryRef.current, cancelRef.current, confirmRef.current]
             .filter((control): control is HTMLTextAreaElement | HTMLButtonElement =>
               Boolean(control && !control.disabled),
             );
@@ -77,7 +84,7 @@ export default function RegenerateDialog({
         }}
         onSubmit={(event) => {
           event.preventDefault();
-          if (!busy && cleanPrompt.length >= 3) void onConfirm(cleanPrompt);
+          if (!busy && cleanPrompt.length >= 3) void onConfirm(cleanPrompt, secondaryLabel ? cleanSecondaryValue : undefined);
         }}
         role="dialog"
       >
@@ -103,6 +110,18 @@ export default function RegenerateDialog({
           />
           <small>{cleanPrompt.length.toLocaleString("it-IT")} / 20.000 caratteri</small>
         </label>
+        {secondaryLabel && <label>
+          <span>{secondaryLabel}</span>
+          <textarea
+            disabled={busy}
+            maxLength={30_000}
+            onChange={(event) => setSecondaryValue(event.target.value)}
+            ref={secondaryRef}
+            rows={8}
+            value={secondaryValue}
+          />
+          <small>{cleanSecondaryValue.length.toLocaleString("it-IT")} / 30.000 caratteri</small>
+        </label>}
         <div className="regenerate-dialog-summary">
           <span>Ambito</span>
           <strong>{scopeLabel}</strong>

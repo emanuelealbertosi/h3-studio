@@ -413,10 +413,13 @@ export class AudioStudioService {
     return this.repository.get(job.id)!;
   }
 
-  async regenerate(id: string, promptValue: unknown) {
+  async regenerate(id: string, promptValue: unknown, lyricsValue?: unknown) {
     const source = this.repository.get(id);
     if (!source) throw new Error("Job audio da rigenerare non trovato");
     const prompt = text(promptValue, source.kind === "tts" ? "Testo TTS" : "Descrizione musica", 1, source.kind === "tts" ? 20_000 : 10_000);
+    const regeneratedLyrics = typeof lyricsValue === "string"
+      ? lyricsValue.trim().slice(0, 30_000)
+      : source.lyrics;
     if (source.kind === "tts") {
       return this.submit({
         kind: "tts", projectId: source.projectId, text: prompt, voice: source.voice,
@@ -425,7 +428,7 @@ export class AudioStudioService {
     }
     return this.submit({
       kind: "music", projectId: source.projectId, caption: prompt,
-      lyrics: source.lyrics, durationSeconds: source.durationSeconds ?? 30,
+      lyrics: regeneratedLyrics, durationSeconds: source.durationSeconds ?? 30,
     });
   }
 

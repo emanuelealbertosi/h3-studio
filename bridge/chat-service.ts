@@ -16,6 +16,7 @@ type PlannedAction = {
   aspect?: "16:9" | "9:16" | "1:1";
   durationSeconds?: number;
   instrumental?: boolean;
+  lyrics?: string;
 };
 
 type ChatRoute = "auto" | "video" | "krea" | "anima" | "edit" | "tts" | "music";
@@ -131,7 +132,40 @@ export function normalizePlan(text: string): { reply: string; title: string | nu
     ? Math.min(360, Math.max(5, Math.round(requestedDuration)))
     : undefined;
   const instrumental = parsed.action.instrumental !== false;
-  return { reply, title, action: { type: normalizedType.type, prompt, videoMode, aspect, durationSeconds, instrumental } };
+  const lyrics = typeof parsed.action.lyrics === "string"
+    ? parsed.action.lyrics.trim().slice(0, 30_000)
+    : undefined;
+  return { reply, title, action: { type: normalizedType.type, prompt, videoMode, aspect, durationSeconds, instrumental, lyrics } };
+}
+
+const EXPLICIT_INSTRUMENTAL_PATTERN = /\b(?:strumentale|instrumental|senza\s+(?:voce|voci|cantato)|no\s+vocals?|without\s+vocals?)\b/i;
+const VOCAL_MUSIC_PATTERN = /\b(?:canta(?:ta|to|re|nte)?|cantato|cantata|cantante|voce|voci|vocale|vocals?|singer|singing|lyrics?|testo\s+(?:cantato|della\s+canzone)|ritornello|chorus)\b/i;
+
+export function musicInstrumentalIntent(request: string): boolean | null {
+  if (EXPLICIT_INSTRUMENTAL_PATTERN.test(request)) return true;
+  if (VOCAL_MUSIC_PATTERN.test(request)) return false;
+  return null;
+}
+
+export function extractRequestedLyrics(request: string) {
+  const contextual = request.match(/(?:dice|canta|cantando|testo|lyrics?|parole)\s*(?:che\s+dice)?\s*[:=-]?\s*["“«]([^"”»]{1,30000})["”»]/i)?.[1];
+  if (contextual?.trim()) return contextual.trim();
+  const quoted = [...request.matchAll(/["“«]([^"”»]{1,30000})["”»]/g)]
+    .map((match) => match[1]?.trim())
+    .filter((value): value is string => Boolean(value));
+  return VOCAL_MUSIC_PATTERN.test(request) && quoted.length ? quoted.join("\n") : "";
+}
+
+export function preserveMusicIntent(action: PlannedAction | null, request: string) {
+  if (action?.type !== "generate_music") return action;
+  const detected = musicInstrumentalIntent(request);
+  const instrumental = detected ?? action.instrumental ?? true;
+  const preservedLyrics = action.lyrics?.trim() || extractRequestedLyrics(request);
+  return {
+    ...action,
+    instrumental,
+    lyrics: instrumental ? "" : preservedLyrics,
+  };
 }
 
 function normalizeRoute(value: unknown): ChatRoute {
@@ -200,14 +234,14 @@ const CHAT_SYSTEM_PROMPT = `You are H3 Studio, a concise Italian-speaking creati
 Always return exactly one JSON object and no markdown:
 {"reply":"natural Italian reply","title":"concise 3-7 word Italian conversation title","action":null}
 or
-{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1","durationSeconds":30,"instrumental":true}}
+{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1","durationSeconds":30,"instrumental":true,"lyrics":"exact requested words to sing or empty string"}}
 
 Only create an action when the user explicitly asks to generate, animate, continue or edit media. Questions and ordinary conversation use action:null.
 The title describes the main topic, never starts with "Chat" and never contains quotation marks.
 For video default to 10 seconds, one candidate, 0.5 MP and the FAST 8-step engine; these execution values are enforced by the server and must not be invented in JSON.
 Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures. Use I2V when one attached picture is the start frame, R2V for broader references, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for editing one. Video editing and extension still use action type generate_video; never invent video_editing, edit_video or continue_video action types.
 Use generate_tts when the user asks for speech, narration, dubbing, reading or voice cloning. For TTS, prompt is the exact text to speak in the requested language, not an English description. An attached Audio 1 is the voice reference and is transcribed automatically.
-Use generate_music when the user asks for a song, soundtrack, instrumental or music. Put the musical request in prompt, set durationSeconds when requested (default 30), and set instrumental:false only when vocals or lyrics are wanted.
+Use generate_music when the user asks for a song, soundtrack, instrumental or music. Put the musical request in prompt, set durationSeconds when requested (default 30), and set instrumental:false whenever singing, a singer, a voice, vocals, lyrics or words to sing are requested. For a vocal song, copy every user-supplied lyric verbatim into lyrics, preserving its language and wording; never translate, summarize or omit quoted words. Use lyrics:"" only for instrumental music or when the user did not supply exact words.
 Write rich, production-ready prompts in English except the exact spoken TTS script. When attachments are present, refer to them as Picture 1, Picture 2, Video 1 or Audio 1 in attachment order. Never invent file paths, model names, LoRAs, workflow nodes or numeric engine settings.`;
 
 const MEMORY_SYSTEM_PROMPT = `You maintain compact long-term memory for one H3 Studio creative project.
@@ -264,6 +298,7 @@ export class ChatService {
     conversationId: string,
     messageId: string,
     promptValue: unknown,
+    lyricsValue?: unknown,
   ) {
     const conversation = this.repository.getConversation(conversationId);
     if (!conversation) throw new Error("Conversazione Chat non trovata");
@@ -285,7 +320,7 @@ export class ChatService {
     const job = source.action.type === "generate_video"
       ? await this.studioJobs.regenerate(source.action.jobId, 1, prompt)
       : source.action.type === "generate_tts" || source.action.type === "generate_music"
-        ? await this.audioStudio.regenerate(source.action.jobId, prompt)
+        ? await this.audioStudio.regenerate(source.action.jobId, prompt, lyricsValue)
         : await this.imageStudio.regenerate(source.action.jobId, 1, prompt);
     if (!job?.id) throw new Error("Rigenerazione non avviata");
     const assistant = this.repository.add({
@@ -381,9 +416,10 @@ export class ChatService {
       if (!response.ok || !response.text) throw new Error(response.error ?? "LLM non ha risposto");
       rawText = response.text;
       const parsedPlan = normalizePlan(rawText);
-      const plan = { ...parsedPlan, action: routeAction(parsedPlan.action, route) };
+      const routedAction = routeAction(parsedPlan.action, route);
+      const plan = { ...parsedPlan, action: preserveMusicIntent(routedAction, content) };
       this.repository.maybeAutoTitle(conversation.id, plan.title ?? content);
-      const action = plan.action ? await this.executeAction(projectId, plan.action, attachments) : null;
+      const action = plan.action ? await this.executeAction(projectId, plan.action, attachments, content) : null;
       const assistant = this.repository.add({
         projectId,
         conversationId: conversation.id,
@@ -535,14 +571,16 @@ export class ChatService {
     projectId: string,
     plan: PlannedAction,
     attachments: ChatAttachment[],
+    originalRequest?: string,
   ): Promise<ChatActionRecord> {
     try {
       if (plan.type === "generate_music") {
         const durationSeconds = plan.durationSeconds ?? 30;
         const musicPlan = await this.audioStudio.planMusic({
-          idea: plan.prompt,
+          idea: originalRequest?.trim() || plan.prompt,
           instrumental: plan.instrumental !== false,
           durationSeconds,
+          lyrics: plan.lyrics,
         });
         const job = await this.audioStudio.submit({
           kind: "music", projectId, caption: musicPlan.caption, lyrics: musicPlan.lyrics, durationSeconds,

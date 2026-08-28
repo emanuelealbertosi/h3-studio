@@ -278,3 +278,10 @@
 - Ogni montaggio in Libreria dispone ora di cestino con conferma esplicita e supporta anche la selezione multipla.
 - L'eliminazione rimuove atomicamente timeline e collegamenti delle clip; video sorgente, varianti e media del progetto restano invariati.
 - Aggiunti endpoint DELETE, test della cascata SQLite e regressione UI.
+
+
+### 28 agosto 2026 — Cantato e lyrics preservate in Chat
+- Il routing musicale riconosce deterministicamente cantato, voce, vocalist, testo e ritornello, evitando il precedente fallback strumentale.
+- Le parole quotate dall'utente vengono preservate letteralmente e passate al Music Planner come lyrics separate; la richiesta originale resta disponibile al secondo planner.
+- Il popup Rigenera dei job musicali mostra e trasmette separatamente caption e lyrics modificabili.
+- Aggiunti test sul caso italiano «Buongiornissimo caffè» e sulle richieste esplicitamente strumentali.

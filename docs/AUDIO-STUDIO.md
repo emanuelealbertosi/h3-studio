@@ -47,6 +47,11 @@ un seed. Per i brani cantati, le lyrics possono usare sezioni come `[Intro]`,
 `[Verse]`, `[Chorus]`, `[Bridge]` e `[Outro]`. Il decode tiled è attivo per
 default per ridurre i picchi di memoria.
 
+Nella Chat, richieste esplicite di voce o cantato disattivano
+deterministicamente la modalità strumentale e le parole fornite dall'utente
+vengono conservate nella loro lingua. Il popup **Rigenera** mostra separatamente
+caption tecnica e lyrics, entrambe modificabili.
+
 ## Stati e cancellazione
 
 Ogni job espone fase e percentuale quando il motore la rende disponibile.
