@@ -203,6 +203,56 @@ async function removeComfyOutputFiles(
   return { removedFiles, warnings };
 }
 
+async function deleteChatMedia(conversationId: string) {
+  const references = chat.mediaJobs(conversationId);
+  const videoJobs: Array<NonNullable<Awaited<ReturnType<typeof studioJobs.get>>>> = [];
+  const imageJobs: Array<NonNullable<Awaited<ReturnType<typeof imageStudio.get>>>> = [];
+
+  for (const reference of references) {
+    if (reference.kind === "video") {
+      const job = await studioJobs.get(reference.jobId);
+      if (!job) continue;
+      if (job.candidates.some((candidate) => !["ready", "failed"].includes(candidate.status))) {
+        throw new Error("Attendi o interrompi i video della Chat prima di eliminarne anche i media");
+      }
+      const variants = await postprocess.listForJob(job.id);
+      if (variants.some((variant) => !["ready", "failed"].includes(variant.status))) {
+        throw new Error("Attendi la fine di Face/Upscale prima di eliminare i media della Chat");
+      }
+      videoJobs.push(job);
+      continue;
+    }
+    const job = await imageStudio.get(reference.jobId);
+    if (!job) continue;
+    if (job.candidates.some((candidate) => !["ready", "failed", "cancelled"].includes(candidate.status))) {
+      throw new Error("Attendi o interrompi le immagini della Chat prima di eliminarne anche i media");
+    }
+    imageJobs.push(job);
+  }
+
+  const files: Array<{ filename: string; subfolder: string; type: string }> = [];
+  let removedClips = 0;
+  for (const job of videoJobs) {
+    for (const candidate of [...job.candidates].sort((left, right) => right.index - left.index)) {
+      const deleted = jobRepository.deleteCandidate(job.id, candidate.index);
+      removedClips += deleted.removedClips;
+      files.push(...deleted.files);
+    }
+  }
+  for (const job of imageJobs) {
+    for (const candidate of [...job.candidates].sort((left, right) => right.index - left.index)) {
+      const deleted = imageStudio.deleteCandidate(job.id, candidate.index);
+      files.push(...deleted.files);
+    }
+  }
+  const storage = await removeComfyOutputFiles(files);
+  return {
+    removedJobs: videoJobs.length + imageJobs.length,
+    removedClips,
+    ...storage,
+  };
+}
+
 await app.register(cors, {
   origin(origin, callback) {
     if (!origin || config.webOrigins.includes(origin)) {
@@ -211,7 +261,7 @@ await app.register(cors, {
     }
     callback(new Error("Origin non autorizzata"), false);
   },
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   credentials: true,
 });
 
@@ -522,6 +572,104 @@ app.post("/api/image-jobs", async (request, reply) => {
 });
 
 app.get("/api/chat/status", async () => ({ ok: true, chat: await chat.status() }));
+
+app.get<{ Querystring: { projectId?: string } }>(
+  "/api/chat/conversations",
+  async (request) => ({
+    ok: true,
+    conversations: chat.conversations(request.query.projectId?.trim() || null),
+  }),
+);
+
+app.post<{
+  Params: { projectId: string };
+  Body: { title?: unknown };
+}>("/api/chat/:projectId/conversations", async (request, reply) => {
+  try {
+    return {
+      ok: true,
+      conversation: chat.createConversation(request.params.projectId, request.body?.title),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Conversazione Chat non creata";
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
+app.get<{ Params: { conversationId: string } }>(
+  "/api/chat/conversations/:conversationId",
+  async (request, reply) => {
+    try {
+      return { ok: true, ...chat.conversation(request.params.conversationId) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Conversazione Chat non disponibile";
+      return reply.status(404).send({ ok: false, error: message });
+    }
+  },
+);
+
+app.patch<{
+  Params: { conversationId: string };
+  Body: { title?: unknown };
+}>("/api/chat/conversations/:conversationId", async (request, reply) => {
+  try {
+    return {
+      ok: true,
+      conversation: chat.renameConversation(request.params.conversationId, request.body?.title),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Conversazione Chat non rinominata";
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
+app.post<{
+  Params: { conversationId: string };
+  Body: { content?: unknown; attachments?: unknown; route?: unknown };
+}>("/api/chat/conversations/:conversationId/messages", async (request, reply) => {
+  try {
+    const conversation = chat.conversation(request.params.conversationId).conversation;
+    return {
+      ok: true,
+      ...(await chat.send(conversation.projectId, request.body ?? {}, conversation.id)),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Messaggio Chat fallito";
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
+app.delete<{
+  Params: { conversationId: string };
+}>("/api/chat/conversations/:conversationId/messages", async (request, reply) => {
+  try {
+    const conversation = chat.conversation(request.params.conversationId).conversation;
+    return {
+      ok: true,
+      ...chat.clear(conversation.projectId, conversation.id),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Messaggi Chat non cancellati";
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
+app.delete<{
+  Params: { conversationId: string };
+  Body: { preserveMedia?: unknown };
+}>("/api/chat/conversations/:conversationId", async (request, reply) => {
+  try {
+    const preserveMedia = request.body?.preserveMedia !== false;
+    const media = preserveMedia
+      ? { removedJobs: 0, removedClips: 0, removedFiles: 0, warnings: [] as string[] }
+      : await deleteChatMedia(request.params.conversationId);
+    const conversation = chat.deleteConversation(request.params.conversationId);
+    return { ok: true, conversation, preserveMedia, ...media };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Conversazione Chat non eliminata";
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
 
 app.get<{ Params: { projectId: string } }>(
   "/api/chat/:projectId",

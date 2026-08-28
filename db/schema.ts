@@ -501,7 +501,42 @@ export const JOB_DATABASE_MIGRATIONS = [
        ADD COLUMN memory_summary TEXT NOT NULL DEFAULT ''`,
       `ALTER TABLE chat_threads
        ADD COLUMN memory_sequence INTEGER NOT NULL DEFAULT 0
-       CHECK (memory_sequence >= 0)`,
+      CHECK (memory_sequence >= 0)`,
+    ],
+  },
+  {
+    version: 20,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS chat_conversations (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        title_is_auto INTEGER NOT NULL DEFAULT 1 CHECK (title_is_auto IN (0, 1)),
+        memory_summary TEXT NOT NULL DEFAULT '',
+        memory_sequence INTEGER NOT NULL DEFAULT 0 CHECK (memory_sequence >= 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      ) STRICT`,
+      `INSERT INTO chat_conversations(
+         id, project_id, title, title_is_auto, memory_summary, memory_sequence, created_at, updated_at
+       )
+       SELECT project_id, project_id, 'Chat principale', 0,
+              memory_summary, memory_sequence, created_at, updated_at
+       FROM chat_threads
+       WHERE NOT EXISTS (
+         SELECT 1 FROM chat_conversations
+         WHERE chat_conversations.project_id = chat_threads.project_id
+       )`,
+      `ALTER TABLE chat_messages
+       ADD COLUMN conversation_id TEXT
+       REFERENCES chat_conversations(id) ON DELETE CASCADE`,
+      `UPDATE chat_messages
+       SET conversation_id = project_id
+       WHERE conversation_id IS NULL`,
+      `CREATE INDEX IF NOT EXISTS idx_chat_conversations_project_updated
+       ON chat_conversations(project_id, updated_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation_created
+       ON chat_messages(conversation_id, created_at)`,
     ],
   },
 ] as const;

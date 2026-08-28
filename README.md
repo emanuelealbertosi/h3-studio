@@ -11,8 +11,9 @@ Vedi [LICENSE](LICENSE) e le note nelle rispettive cartelle.
 
 Il prodotto organizza prompt, personaggi, asset, candidati e continuazioni. ComfyUI rimane il motore di rendering; H3 Studio gestisce progetti, coda, confronto, crediti e riproducibilità.
 
-La voce **Chat** aggiunge un assistente Gemma 4 Vision locale e separato per
-progetto. Può conversare, analizzare fino a quattro immagini della Libreria e,
+La voce **Chat** aggiunge un assistente Gemma 4 Vision locale con conversazioni
+multiple raggruppate per progetto, titoli automatici modificabili e memoria
+indipendente. Può conversare, analizzare fino a quattro immagini della Libreria e,
 su richiesta esplicita, avviare Video H3, immagini Krea, edit Flux.2 Klein o
 immagini Anima. I video avviati dalla Chat usano il profilo rapido controllato
 dal server: 10 secondi, un candidato, 0,5 MP e FAST 8-step. Il modello resta

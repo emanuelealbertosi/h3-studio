@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { ChatRepository } from "../bridge/chat-repository.js";
 import { routeAction, shouldRecallMedia } from "../bridge/chat-service.js";
 import { JobRepository } from "../bridge/job-repository.js";
@@ -16,36 +17,69 @@ try {
   const project = projects.create("Chat test");
   assert.ok(project?.id);
   const chat = new ChatRepository(jobs.databasePath);
-  chat.add({ projectId: project!.id, role: "user", content: "Ciao" });
+  const primary = chat.createConversation(project!.id);
+  assert.equal(primary.title, "Nuova chat");
   chat.add({
     projectId: project!.id,
+    conversationId: primary.id,
+    role: "user",
+    content: "Crea un castello luminoso nel cielo",
+  });
+  const titled = chat.maybeAutoTitle(primary.id, "Crea un castello luminoso nel cielo");
+  assert.match(titled?.title ?? "", /Castello luminoso/i);
+  chat.add({
+    projectId: project!.id,
+    conversationId: primary.id,
     role: "assistant",
     content: "Ciao!",
     action: { type: "generate_video", prompt: "A bright cinematic shot", status: "started", jobId: "job-1" },
   });
-  const messages = chat.list(project!.id);
+  const messages = chat.list(project!.id, primary.id);
   assert.equal(messages.length, 2);
   assert.equal(messages[1].action?.jobId, "job-1");
+  assert.deepEqual(chat.mediaJobs(primary.id), [{ kind: "video", jobId: "job-1" }]);
   chat.add({
     projectId: project!.id,
+    conversationId: primary.id,
     role: "user",
     content: "Analizza questa immagine",
     attachments: [{ kind: "picture", file: "chat/test.png [input]", name: "Test" }],
   });
-  const recalled = chat.latestAttachments(project!.id);
+  const recalled = chat.latestAttachments(project!.id, primary.id);
   assert.equal(recalled.length, 1);
   assert.equal(recalled[0].remembered, true);
-  const initialContext = chat.context(project!.id);
+  const initialContext = chat.context(project!.id, primary.id);
   assert.equal(initialContext.summary, "");
   assert.equal(initialContext.messages.length, 3);
-  chat.updateMemory(project!.id, "Il progetto usa uno stile anime luminoso.", initialContext.messages[0].sequence);
-  const compactedContext = chat.context(project!.id);
+  chat.updateMemory(
+    project!.id,
+    primary.id,
+    "Il progetto usa uno stile anime luminoso.",
+    initialContext.messages[0].sequence,
+  );
+  const compactedContext = chat.context(project!.id, primary.id);
   assert.match(compactedContext.summary, /stile anime/);
   assert.equal(compactedContext.messages.length, 2);
-  assert.equal(chat.memoryStatus(project!.id).summarizedMessages, 1);
-  chat.clear(project!.id);
-  assert.equal(chat.list(project!.id).length, 0);
-  assert.equal(chat.memoryStatus(project!.id).active, false);
+  assert.equal(chat.memoryStatus(project!.id, primary.id).summarizedMessages, 1);
+  const secondary = chat.createConversation(project!.id, "Seconda idea");
+  chat.add({
+    projectId: project!.id,
+    conversationId: secondary.id,
+    role: "user",
+    content: "Questa cronologia è separata",
+  });
+  assert.equal(chat.list(project!.id, secondary.id).length, 1);
+  assert.equal(chat.list(project!.id, primary.id).length, 3);
+  assert.equal(chat.listConversations(project!.id).length, 2);
+  assert.equal(chat.renameConversation(secondary.id, "Titolo modificato").title, "Titolo modificato");
+  chat.clear(project!.id, primary.id);
+  assert.equal(chat.list(project!.id, primary.id).length, 0);
+  assert.equal(chat.memoryStatus(project!.id, primary.id).active, false);
+  assert.equal(chat.deleteConversation(secondary.id).deleted, true);
+  const migration = new DatabaseSync(jobs.databasePath, { readOnly: true });
+  assert.ok(migration.prepare("SELECT version FROM schema_migrations WHERE version = 20").get());
+  assert.equal(migration.prepare("PRAGMA foreign_key_check").all().length, 0);
+  migration.close();
   chat.close(); projects.close(); jobs.close();
 
   const runtime = await new RuntimeSettingsStore(temp).get();
@@ -77,6 +111,9 @@ try {
     readFile("workflows/dependencies.json", "utf8"),
   ]);
   assert.match(server, /\/api\/chat\/:projectId\/messages/);
+  assert.match(server, /\/api\/chat\/conversations\/:conversationId/);
+  assert.match(server, /preserveMedia/);
+  assert.match(server, /deleteChatMedia/);
   assert.match(server, /await comfy\.chatUnload\(\)\.catch/);
   assert.ok((server.match(/await comfy\.chatUnload\(\)\.catch/g) ?? []).length >= 5);
   assert.match(service, /durationSeconds: 10/);
@@ -95,8 +132,14 @@ try {
   assert.match(panel, /chat-render-preview/);
   assert.match(panel, /Interrompi/);
   assert.match(panel, /disabled=\{chatLocked\}/);
+  assert.match(panel, /chat-thread-sidebar/);
+  assert.match(panel, /Nuova Chat/);
+  assert.match(panel, /Conserva i media generati/);
+  assert.match(panel, /saveConversationTitle/);
   assert.match(styles, /\.chat-render-preview/);
   assert.match(styles, /\.chat-stop-button/);
+  assert.match(styles, /\.chat-thread-sidebar/);
+  assert.match(styles, /\.chat-delete-dialog/);
   assert.match(node, /llama-server/);
   assert.match(node, /--reasoning", "off"/);
   assert.match(node, /H3_CHAT_LLAMA_SERVER/);

@@ -3,6 +3,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type Project = { id: string; name: string };
+type ChatConversation = {
+  id: string;
+  projectId: string;
+  projectName: string;
+  title: string;
+  titleIsAuto: boolean;
+  memoryActive: boolean;
+  messageCount: number;
+  lastMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
 type ChatRoute = "auto" | "video" | "krea" | "anima" | "edit";
 type ChatMemory = { active: boolean; summarizedMessages: number; summary: string };
 type ChatTrackedCandidate = {
@@ -110,14 +122,24 @@ export default function ChatPanel({
   bridgeUrl,
   projectId,
   projectName,
+  projects,
+  onSelectProject,
   onOpenStudio,
 }: {
   bridgeUrl: string;
   projectId: string;
   projectName?: string;
   projects: Project[];
+  onSelectProject: (projectId: string) => void;
   onOpenStudio: (kind: "video" | "image") => void;
 }) {
+  const [conversations, setConversations] = useState<ChatConversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<ChatConversation | null>(null);
+  const [preserveMedia, setPreserveMedia] = useState(true);
+  const [deletingConversation, setDeletingConversation] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [route, setRoute] = useState<ChatRoute>("auto");
@@ -131,28 +153,50 @@ export default function ChatPanel({
   const [notice, setNotice] = useState("Caricamento Chat locale…");
   const [runtime, setRuntime] = useState<{ ready: boolean; loaded: boolean; error?: string | null } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const pendingConversationRef = useRef<string | null>(null);
+  const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId) ?? null;
 
   const trackedActions = useMemo(() => messages
     .flatMap((message) => message.action?.jobId ? [{ ...message.action, messageId: message.id }] : [])
     .slice(-20), [messages]);
   const trackedActionKey = trackedActions.map((action) => `${action.jobId}:${action.type}`).join("|");
   const renderActive = trackedActions.some((action) => trackedJobActive(jobStates[action.jobId!]));
-  const chatLocked = busy || renderActive || cancellingJobId !== null;
+  const chatLocked = busy || renderActive || cancellingJobId !== null || deletingConversation;
 
   useEffect(() => {
     let disposed = false;
     if (!projectId) return;
     setAttachments([]);
     Promise.all([
-      fetch(`${bridgeUrl}/api/chat/${projectId}`, { cache: "no-store" }),
+      fetch(`${bridgeUrl}/api/chat/conversations`, { cache: "no-store" }),
       fetch(`${bridgeUrl}/api/chat/status`, { cache: "no-store" }),
-    ]).then(async ([messageResponse, statusResponse]) => {
-      const messagePayload = await messageResponse.json() as { messages?: ChatMessage[]; memory?: ChatMemory; error?: string };
+    ]).then(async ([conversationResponse, statusResponse]) => {
+      const conversationPayload = await conversationResponse.json() as { conversations?: ChatConversation[]; error?: string };
       const statusPayload = await statusResponse.json() as { chat?: { ready: boolean; loaded: boolean; error?: string | null } };
-      if (!messageResponse.ok) throw new Error(messagePayload.error ?? "Chat non disponibile");
+      if (!conversationResponse.ok) throw new Error(conversationPayload.error ?? "Chat non disponibile");
+      let available = conversationPayload.conversations ?? [];
+      const pendingId = pendingConversationRef.current;
+      let selected = pendingId
+        ? available.find((conversation) => conversation.id === pendingId && conversation.projectId === projectId)
+        : undefined;
+      selected ??= available.find((conversation) => conversation.projectId === projectId);
+      if (!selected) {
+        const createResponse = await fetch(`${bridgeUrl}/api/chat/${projectId}/conversations`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        const createPayload = await createResponse.json() as { conversation?: ChatConversation; error?: string };
+        if (!createResponse.ok || !createPayload.conversation) {
+          throw new Error(createPayload.error ?? "Nuova Chat non creata");
+        }
+        selected = createPayload.conversation;
+        available = [selected, ...available];
+      }
       if (disposed) return;
-      setMessages(messagePayload.messages ?? []);
-      setMemory(messagePayload.memory ?? null);
+      pendingConversationRef.current = null;
+      setConversations(available);
+      setActiveConversationId(selected.id);
       setRuntime(statusPayload.chat ?? null);
       setNotice(statusPayload.chat?.ready
         ? "Gemma 4 Vision pronta · il modello resta caricato tra i messaggi e viene liberato prima dei render"
@@ -160,6 +204,36 @@ export default function ChatPanel({
     }).catch((error) => !disposed && setNotice(error instanceof Error ? error.message : "Chat non disponibile"));
     return () => { disposed = true; };
   }, [bridgeUrl, projectId]);
+
+  useEffect(() => {
+    if (!activeConversationId) {
+      setMessages([]);
+      setMemory(null);
+      return;
+    }
+    let disposed = false;
+    fetch(`${bridgeUrl}/api/chat/conversations/${activeConversationId}`, { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as {
+          conversation?: ChatConversation;
+          messages?: ChatMessage[];
+          memory?: ChatMemory;
+          error?: string;
+        };
+        if (!response.ok || !payload.conversation) {
+          throw new Error(payload.error ?? "Conversazione Chat non disponibile");
+        }
+        if (disposed) return;
+        setMessages(payload.messages ?? []);
+        setMemory(payload.memory ?? null);
+        setConversations((current) => current.map((conversation) =>
+          conversation.id === payload.conversation!.id ? payload.conversation! : conversation
+        ));
+        setNotice("Chat pronta");
+      })
+      .catch((error) => !disposed && setNotice(error instanceof Error ? error.message : "Chat non disponibile"));
+    return () => { disposed = true; };
+  }, [activeConversationId, bridgeUrl]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, busy]);
 
@@ -246,20 +320,136 @@ export default function ChatPanel({
     setPickerOpen(false);
   }
 
+  function selectConversation(conversation: ChatConversation) {
+    if (chatLocked) return;
+    pendingConversationRef.current = conversation.id;
+    setActiveConversationId(conversation.id);
+    setAttachments([]);
+    setText("");
+    if (conversation.projectId !== projectId) onSelectProject(conversation.projectId);
+  }
+
+  async function createConversationForProject(targetProjectId: string, ignoreLock = false) {
+    if (chatLocked && !ignoreLock) return null;
+    setNotice("Creazione nuova Chat…");
+    const response = await fetch(`${bridgeUrl}/api/chat/${targetProjectId}/conversations`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const payload = await response.json() as { conversation?: ChatConversation; error?: string };
+    if (!response.ok || !payload.conversation) {
+      throw new Error(payload.error ?? "Nuova Chat non creata");
+    }
+    const conversation = payload.conversation;
+    pendingConversationRef.current = conversation.id;
+    setConversations((current) => [conversation, ...current]);
+    setActiveConversationId(conversation.id);
+    setMessages([]);
+    setMemory(null);
+    setAttachments([]);
+    setText("");
+    if (targetProjectId !== projectId) onSelectProject(targetProjectId);
+    setNotice("Nuova Chat pronta");
+    return conversation;
+  }
+
+  async function saveConversationTitle(conversationId: string) {
+    const title = editingTitle.trim();
+    if (!title) return;
+    const response = await fetch(`${bridgeUrl}/api/chat/conversations/${conversationId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    const payload = await response.json() as { conversation?: ChatConversation; error?: string };
+    if (!response.ok || !payload.conversation) {
+      setNotice(payload.error ?? "Rinomina fallita");
+      return;
+    }
+    setConversations((current) => current.map((conversation) =>
+      conversation.id === conversationId ? payload.conversation! : conversation
+    ));
+    setEditingConversationId(null);
+    setNotice("Titolo Chat aggiornato");
+  }
+
+  function requestConversationDeletion(conversation: ChatConversation) {
+    if (conversation.id === activeConversationId && chatLocked) {
+      setNotice("Interrompi prima la produzione attiva");
+      return;
+    }
+    setPreserveMedia(true);
+    setDeleteTarget(conversation);
+  }
+
+  async function confirmConversationDeletion() {
+    if (!deleteTarget || deletingConversation) return;
+    setDeletingConversation(true);
+    setNotice("Eliminazione conversazione…");
+    try {
+      const response = await fetch(`${bridgeUrl}/api/chat/conversations/${deleteTarget.id}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ preserveMedia }),
+      });
+      const payload = await response.json() as {
+        removedJobs?: number;
+        removedClips?: number;
+        removedFiles?: number;
+        warnings?: string[];
+        error?: string;
+      };
+      if (!response.ok) throw new Error(payload.error ?? "Conversazione non eliminata");
+      const remaining = conversations.filter((conversation) => conversation.id !== deleteTarget.id);
+      setConversations(remaining);
+      if (activeConversationId === deleteTarget.id) {
+        const next = remaining.find((conversation) => conversation.projectId === deleteTarget.projectId);
+        if (next) {
+          pendingConversationRef.current = next.id;
+          setActiveConversationId(next.id);
+        } else {
+          await createConversationForProject(deleteTarget.projectId, true);
+        }
+      }
+      setDeleteTarget(null);
+      setNotice(preserveMedia
+        ? "Chat eliminata · media conservati in Libreria"
+        : `Chat e media eliminati · ${payload.removedJobs ?? 0} job · ${payload.removedFiles ?? 0} file` +
+          (payload.warnings?.length ? ` · ${payload.warnings.join(" · ")}` : ""));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Conversazione non eliminata");
+    } finally {
+      setDeletingConversation(false);
+    }
+  }
+
   async function send() {
-    if (!projectId || !text.trim() || chatLocked) return;
+    if (!projectId || !activeConversationId || !text.trim() || chatLocked) return;
     setBusy(true);
     setNotice("Gemma 4 sta preparando la risposta…");
     try {
-      const response = await fetch(`${bridgeUrl}/api/chat/${projectId}/messages`, {
+      const response = await fetch(`${bridgeUrl}/api/chat/conversations/${activeConversationId}/messages`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ content: text.trim(), attachments, route }),
       });
-      const payload = await response.json() as { messages?: ChatMessage[]; memory?: ChatMemory; reusedAttachments?: boolean; error?: string };
+      const payload = await response.json() as {
+        conversation?: ChatConversation;
+        messages?: ChatMessage[];
+        memory?: ChatMemory;
+        reusedAttachments?: boolean;
+        error?: string;
+      };
       if (!response.ok || !payload.messages) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
       setMessages(payload.messages);
       setMemory(payload.memory ?? null);
+      if (payload.conversation) {
+        setConversations((current) => [
+          payload.conversation!,
+          ...current.filter((conversation) => conversation.id !== payload.conversation!.id),
+        ]);
+      }
       setText("");
       setAttachments([]);
       const last = payload.messages.at(-1);
@@ -275,9 +465,23 @@ export default function ChatPanel({
   }
 
   async function clearChat() {
-    if (!projectId || !window.confirm(`Cancellare la conversazione del progetto “${projectName ?? "corrente"}”?`)) return;
-    const response = await fetch(`${bridgeUrl}/api/chat/${projectId}`, { method: "DELETE" });
-    if (response.ok) { setMessages([]); setMemory(null); setNotice("Conversazione e memoria cancellate"); }
+    if (!projectId || !activeConversationId || !window.confirm(
+      `Cancellare tutti i messaggi di “${activeConversation?.title ?? "questa Chat"}”? I media prodotti resteranno in Libreria.`,
+    )) return;
+    const response = await fetch(
+      `${bridgeUrl}/api/chat/conversations/${activeConversationId}/messages`,
+      { method: "DELETE" },
+    );
+    if (response.ok) {
+      setMessages([]);
+      setMemory(null);
+      setConversations((current) => current.map((conversation) =>
+        conversation.id === activeConversationId
+          ? { ...conversation, messageCount: 0, memoryActive: false, lastMessage: null, updatedAt: new Date().toISOString() }
+          : conversation
+      ));
+      setNotice("Conversazione e memoria cancellate");
+    }
   }
 
   async function cancelAction(action: NonNullable<ChatMessage["action"]>) {
@@ -315,9 +519,83 @@ export default function ChatPanel({
   ];
 
   return (
-    <section className="chat-panel">
+    <section className="chat-workspace">
+      <aside className="chat-thread-sidebar" aria-label="Conversazioni per progetto">
+        <header>
+          <div><span className="section-index">CHAT</span><h3>Conversazioni</h3></div>
+          <small>{conversations.length} totali</small>
+        </header>
+        <div className="chat-thread-groups">
+          {projects.map((project) => {
+            const projectConversations = conversations.filter(
+              (conversation) => conversation.projectId === project.id,
+            );
+            return <section className="chat-thread-project" key={project.id}>
+              <header>
+                <strong title={project.name}>{project.name}</strong>
+                <button
+                  aria-label={`Nuova Chat in ${project.name}`}
+                  disabled={chatLocked}
+                  onClick={() => void createConversationForProject(project.id).catch((error) =>
+                    setNotice(error instanceof Error ? error.message : "Nuova Chat non creata")
+                  )}
+                  title="Nuova Chat"
+                  type="button"
+                >＋</button>
+              </header>
+              <div>
+                {projectConversations.map((conversation) => (
+                  <div className={`chat-thread-item ${conversation.id === activeConversationId ? "active" : ""}`} key={conversation.id}>
+                    {editingConversationId === conversation.id ? (
+                      <input
+                        autoFocus
+                        maxLength={80}
+                        onBlur={() => void saveConversationTitle(conversation.id)}
+                        onChange={(event) => setEditingTitle(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") event.currentTarget.blur();
+                          if (event.key === "Escape") setEditingConversationId(null);
+                        }}
+                        value={editingTitle}
+                      />
+                    ) : (
+                      <button className="chat-thread-main" disabled={chatLocked} onClick={() => selectConversation(conversation)} type="button">
+                        <strong>{conversation.title}</strong>
+                        <small>{conversation.messageCount} messaggi{conversation.memoryActive ? " · memoria" : ""}</small>
+                      </button>
+                    )}
+                    <div className="chat-thread-actions">
+                      <button
+                        aria-label={`Rinomina ${conversation.title}`}
+                        disabled={chatLocked}
+                        onClick={() => {
+                          setEditingConversationId(conversation.id);
+                          setEditingTitle(conversation.title);
+                        }}
+                        title="Rinomina"
+                        type="button"
+                      >✎</button>
+                      <button
+                        aria-label={`Elimina ${conversation.title}`}
+                        className="danger"
+                        disabled={conversation.id === activeConversationId && chatLocked}
+                        onClick={() => requestConversationDeletion(conversation)}
+                        title="Elimina Chat"
+                        type="button"
+                      >⌫</button>
+                    </div>
+                  </div>
+                ))}
+                {!projectConversations.length && <small className="chat-thread-empty">Nessuna Chat</small>}
+              </div>
+            </section>;
+          })}
+        </div>
+      </aside>
+
+      <section className="chat-panel">
       <header className="chat-heading">
-        <div><span className="section-index">CHAT · {projectName ?? "PROGETTO"}</span><h2>Gemma 4 Vision</h2><p>{notice}</p></div>
+        <div><span className="section-index">CHAT · {projectName ?? "PROGETTO"}</span><h2>{activeConversation?.title ?? "Gemma 4 Vision"}</h2><p>{notice}</p></div>
         <div className="chat-heading-actions">
           {memory?.active && (
             <span className="chat-memory" title={memory.summary}>⌁ Memoria · {memory.summarizedMessages}</span>
@@ -434,6 +712,38 @@ export default function ChatPanel({
             </button>
           ))}</div>
           {!library.length && <p className="chat-picker-empty">Nessun media disponibile in questo progetto o tra gli Esterni.</p>}
+        </section>
+      </div>}
+      </section>
+
+      {deleteTarget && <div
+        className="chat-delete-backdrop"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !deletingConversation) setDeleteTarget(null);
+        }}
+      >
+        <section className="chat-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="chat-delete-title">
+          <span className="section-index">ELIMINA CHAT</span>
+          <h3 id="chat-delete-title">Eliminare “{deleteTarget.title}”?</h3>
+          <p>Verranno cancellati messaggi e memoria di questa conversazione.</p>
+          <label>
+            <input
+              checked={preserveMedia}
+              disabled={deletingConversation}
+              onChange={(event) => setPreserveMedia(event.target.checked)}
+              type="checkbox"
+            />
+            <span><strong>Conserva i media generati</strong><small>Consigliato · immagini e video restano nel progetto e nella Libreria.</small></span>
+          </label>
+          {!preserveMedia && <div className="chat-delete-warning">
+            Verranno eliminati anche i job prodotti da questa Chat, i relativi file, le varianti Face/Upscale e le clip presenti nei Montaggi.
+          </div>}
+          <footer>
+            <button disabled={deletingConversation} onClick={() => setDeleteTarget(null)} type="button">Annulla</button>
+            <button className="danger" disabled={deletingConversation} onClick={() => void confirmConversationDeletion()} type="button">
+              {deletingConversation ? "Eliminazione…" : "Elimina Chat"}
+            </button>
+          </footer>
         </section>
       </div>}
     </section>

@@ -1,11 +1,19 @@
 # Chat locale
 
-La voce **Chat** usa Gemma 4 Vision come assistente locale del progetto attivo.
-La cronologia non viene condivisa con altri progetti e rimane in SQLite dopo il
-riavvio di H3 Studio.
+La voce **Chat** usa Gemma 4 Vision come assistente locale. Ogni progetto può
+contenere più conversazioni indipendenti, persistenti in SQLite dopo il riavvio
+di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
 
 ## Uso
 
+- Premi `+` accanto a un progetto per creare una nuova conversazione. Il titolo
+  viene proposto da Gemma durante la prima risposta, senza una seconda inferenza,
+  e può essere modificato con la matita.
+- Il cestino elimina la conversazione dopo un popup di conferma. **Conserva i
+  media generati** è selezionato per impostazione predefinita: messaggi e memoria
+  vengono rimossi, mentre immagini e video rimangono nel progetto e nella
+  Libreria. Deselezionandolo vengono rimossi anche i job generati dalla Chat,
+  i relativi file, le varianti Face/Upscale e le clip che li usano nei Montaggi.
 - Scrivi normalmente per discutere un'idea, migliorare un prompt o chiedere
   consigli; nessun job parte se non chiedi esplicitamente di creare o modificare
   un media.
@@ -42,14 +50,14 @@ dell'assistente resta in italiano.
 
 ## Runtime e memoria
 
-La conversazione completa rimane in SQLite, ma non viene reinviata integralmente
-al modello. Quando la finestra recente supera 16 messaggi o il budget derivato
-da `n_ctx`, Gemma consolida i messaggi meno recenti in una memoria persistente
-del progetto. La richiesta successiva contiene:
+Ogni conversazione conserva cronologia e memoria proprie in SQLite, ma non viene
+reinviata integralmente al modello. Quando la finestra recente supera 16
+messaggi o il budget derivato da `n_ctx`, Gemma consolida i messaggi meno recenti
+in una memoria persistente della conversazione. La richiesta successiva contiene:
 
 1. regole del router;
 2. motore scelto nell'interfaccia;
-3. memoria compatta del progetto;
+3. memoria compatta della conversazione;
 4. messaggi recenti entro il budget;
 5. allegati Vision del messaggio corrente.
 
@@ -58,8 +66,8 @@ e attività aperte; elimina saluti e ripetizioni. Il badge **Memoria · N** most
 quanti messaggi sono già stati assimilati e, passando il mouse, permette di
 leggere il riassunto. **Pulisci** elimina sia cronologia sia memoria.
 
-La Chat ricorda inoltre l'ultimo gruppo di media allegato nel progetto. Non lo
-reinvia a ogni turno: lo recupera soltanto quando un messaggio senza nuovi
+La Chat ricorda inoltre l'ultimo gruppo di media allegato nella conversazione.
+Non lo reinvia a ogni turno: lo recupera soltanto quando un messaggio senza nuovi
 allegati contiene un riferimento esplicito, per esempio “modificala”, “animala”,
 “questa immagine”, “quel video”, “usala” o “continualo”. Il messaggio registrato
 mostra **Memoria** sulla miniatura recuperata, così è sempre evidente quale file

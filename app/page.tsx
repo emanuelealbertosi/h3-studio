@@ -5443,6 +5443,10 @@ function StudioApp() {
             <ChatPanel
               bridgeUrl={bridgeUrl}
               onOpenStudio={(kind) => { setStudioMediaMode(kind); setActiveView("studio"); }}
+              onSelectProject={(projectId) => {
+                setStudioProjectId(projectId);
+                setSourceJobId(null);
+              }}
               projectId={studioProjectId}
               projectName={studioProject?.name}
               projects={studioProjects}
