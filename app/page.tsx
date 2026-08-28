@@ -5418,7 +5418,7 @@ function StudioApp() {
           </div>
         </header>
 
-        <div className="content">
+        <div className={`content ${activeView === "chat" ? "chat-content" : ""}`}>
           {activeView === "admin" ? (
             <AdminPanel />
           ) : activeView === "projects" ? (

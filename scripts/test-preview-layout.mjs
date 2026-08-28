@@ -19,6 +19,9 @@ assert.match(page, /<RegenerateDialog/);
 assert.match(imageStudio, /<RegenerateDialog/);
 assert.match(regenerateDialog, /Prompt della nuova generazione/);
 assert.match(regenerateDialog, /l’originale resterà invariato/);
+assert.match(page, /className=\{`content \$\{activeView === "chat" \? "chat-content" : ""\}`\}/);
+assert.match(css, /\.content\.chat-content\s*\{[^}]*width:\s*100%[^}]*padding-left:\s*0/s);
+assert.match(css, /\.chat-thread-sidebar\s*\{[^}]*position:\s*sticky[^}]*top:\s*88px/s);
 
 assert.match(css, /\.candidate-footer\s*\{[^}]*flex-direction:\s*column/s);
 assert.match(

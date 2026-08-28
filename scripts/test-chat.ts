@@ -150,6 +150,9 @@ try {
   assert.match(styles, /\.chat-render-preview/);
   assert.match(styles, /\.chat-stop-button/);
   assert.match(styles, /\.chat-thread-sidebar/);
+  assert.match(styles, /\.content\.chat-content\s*\{[\s\S]*?width:\s*100%[\s\S]*?padding-left:\s*0/);
+  assert.match(styles, /\.chat-thread-sidebar\s*\{[\s\S]*?position:\s*sticky[\s\S]*?top:\s*88px/);
+  assert.match(styles, /\.chat-thread-groups[^}]*overflow-y:\s*auto/);
   assert.match(styles, /\.chat-delete-dialog/);
   assert.match(node, /llama-server/);
   assert.match(node, /--reasoning", "off"/);

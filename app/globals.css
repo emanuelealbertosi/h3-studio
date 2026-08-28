@@ -377,6 +377,12 @@ a:focus-visible {
   flex-direction: column;
 }
 
+.content.chat-content {
+  width: 100%;
+  padding-right: 0;
+  padding-left: 0;
+}
+
 .composer {
   order: 2;
   position: sticky;
@@ -3892,8 +3898,12 @@ a:focus-visible {
 }
 
 .chat-thread-sidebar {
+  position: sticky;
+  top: 88px;
+  align-self: start;
+  height: calc(100vh - 88px);
   min-width: 0;
-  max-height: calc(100vh - 78px);
+  max-height: calc(100vh - 88px);
   border-right: 1px solid var(--line);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -4271,7 +4281,8 @@ a:focus-visible {
 
 @media (max-width: 760px) {
   .chat-workspace { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
-  .chat-thread-sidebar { max-height: 250px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .content.chat-content { padding-right: 0; padding-left: 0; }
+  .chat-thread-sidebar { position: static; height: auto; max-height: 250px; border-right: 0; border-bottom: 1px solid var(--line); }
   .chat-thread-groups { display: flex; gap: 10px; overflow-x: auto; }
   .chat-thread-project { min-width: 220px; margin-bottom: 0; }
   .chat-heading { align-items: flex-start; padding: 14px; }
