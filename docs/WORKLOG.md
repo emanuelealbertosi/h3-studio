@@ -263,3 +263,9 @@
 - Il TTS Planner mantiene la lingua pronunciata, separa regia e copione e usa soltanto la whitelist reale di token Higgs per emotion, prosody, style e sfx.
 - Aggiunta trascrizione automatica delle reference con `openai/whisper-small`: processo Python separato, cache locale, testo correggibile, fallback manuale e rilascio VRAM prima di Higgs.
 - Verificati realmente TTS Planner italiano, Flux Edit da richiesta italiana, `loaded: false` dopo Gemma e trascrizione Whisper con processo terminato.
+
+### 28 agosto 2026 — Libreria immagini sincronizzata e tag Luoghi
+
+- La Libreria usa ora la stessa sorgente dei job immagine mostrati in Assets: Personaggi, Oggetti e Luoghi collegati compaiono in entrambe le viste senza duplicare i file.
+- Le immagini senza tag restano visibili in una sezione dedicata; rinomina, eliminazione, selezione multipla e Manda a Studio operano sul medesimo record.
+- L'etichetta utente Paesaggio è stata rinominata Luogo; il valore persistito `background` e il ruolo reference Sfondo restano invariati per compatibilità.

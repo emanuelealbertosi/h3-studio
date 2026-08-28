@@ -83,8 +83,8 @@ export const IMAGE_COMPOSITION_PRESETS = [
   },
   {
     value: "landscape",
-    label: "Paesaggio",
-    shortLabel: "Paesaggio",
+    label: "Luogo",
+    shortLabel: "Luogo",
     description: "Inquadratura ampia con profondita e ambiente protagonista.",
     promptAddition:
       "Composition: a wide establishing landscape view with a clear foreground, middle ground and background. Make the environment the main subject, preserve a strong sense of scale and depth, and avoid close-up portrait framing.",

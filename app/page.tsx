@@ -300,6 +300,35 @@ function imageCandidateTag(candidate: ImagePickerCandidate, projectId: string) {
   return tag && tag !== "untagged" ? tag : undefined;
 }
 
+function generatedAssetImages(imageJobs: ImagePickerJob[]) {
+  const collected: AssetLibraryImage[] = [];
+  const seen = new Set<string>();
+  for (const job of imageJobs) {
+    for (const candidate of job.candidates) {
+      if (candidate.status !== "ready" || !candidate.output) continue;
+      const file = imageReferenceFile(candidate.output);
+      const key = file.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      collected.push({
+        id: `generated:${job.id}:${candidate.index}`,
+        name: candidate.displayName ?? `Immagine ${job.id.slice(0, 8)} · candidato ${candidate.index}`,
+        detail: job.prompt,
+        file,
+        mediaPath: candidate.output.mediaPath,
+        width: candidate.output.width ?? job.width,
+        height: candidate.output.height ?? job.height,
+        tag: imageCandidateTag(candidate, "") ?? "untagged",
+        projectName: job.originProjectName,
+        source: "image-studio",
+        jobId: job.id,
+        candidateIndex: candidate.index,
+      });
+    }
+  }
+  return collected;
+}
+
 function buildReferenceRoles(assets: MediaAsset[], fallback: string) {
   if (!assets.length) return fallback || "AUTO";
   return assets
@@ -1797,12 +1826,14 @@ function MediaLibraryPanel({
   onUseReferences,
   onUseVideo,
   onUseExternal,
+  onUseImage,
   onOpenMontage,
   onVideoDeleted,
 }: {
   onUseReferences: (asset: CreativeAsset, references: CreativeReference[]) => void;
   onUseVideo: (job: RemoteJob, candidate: RemoteJob["candidates"][number]) => void;
   onUseExternal: (asset: ExternalMediaAsset) => void;
+  onUseImage: (image: AssetLibraryImage) => void;
   onOpenMontage: (projectId: string, timelineId: string) => void;
   onVideoDeleted: (
     jobId: string,
@@ -1811,6 +1842,7 @@ function MediaLibraryPanel({
   ) => void;
 }) {
   const [assets, setAssets] = useState<CreativeAsset[]>([]);
+  const [imageJobs, setImageJobs] = useState<ImagePickerJob[]>([]);
   const [jobs, setJobs] = useState<RemoteJob[]>([]);
   const [externalAssets, setExternalAssets] = useState<ExternalMediaAsset[]>([]);
   const [montages, setMontages] = useState<TimelineDetail[]>([]);
@@ -1825,13 +1857,15 @@ function MediaLibraryPanel({
     let disposed = false;
     const load = async () => {
       try {
-        const [assetResponse, jobResponse, projectResponse, externalResponse] = await Promise.all([
+        const [assetResponse, imageResponse, jobResponse, projectResponse, externalResponse] = await Promise.all([
           fetch(`${bridgeUrl}/api/library`, { cache: "no-store" }),
+          fetch(`${bridgeUrl}/api/image-jobs?limit=200`, { cache: "no-store" }),
           fetch(`${bridgeUrl}/api/jobs?limit=40`, { cache: "no-store" }),
           fetch(`${bridgeUrl}/api/projects`, { cache: "no-store" }),
           fetch(`${bridgeUrl}/api/external-media`, { cache: "no-store" }),
         ]);
         const assetPayload = (await assetResponse.json()) as { assets?: CreativeAsset[] };
+        const imagePayload = (await imageResponse.json()) as { jobs?: ImagePickerJob[]; error?: string };
         const jobPayload = (await jobResponse.json()) as { jobs?: RemoteJob[] };
         const projectPayload = (await projectResponse.json()) as { projects?: ProjectSummary[] };
         const externalPayload = (await externalResponse.json()) as { assets?: ExternalMediaAsset[] };
@@ -1845,8 +1879,10 @@ function MediaLibraryPanel({
           const payload = (await response.json()) as { timeline?: TimelineDetail };
           return payload.timeline ?? null;
         }));
+        if (!imageResponse.ok) throw new Error(imagePayload.error ?? `Bridge HTTP ${imageResponse.status}`);
         if (disposed) return;
         setAssets(assetPayload.assets ?? []);
+        setImageJobs(imagePayload.jobs ?? []);
         setJobs(jobPayload.jobs ?? []);
         setExternalAssets(externalPayload.assets ?? []);
         setMontages(timelineDetails.filter((item): item is TimelineDetail => Boolean(item)));
@@ -2009,6 +2045,60 @@ function MediaLibraryPanel({
       setRenamingMedia(null);
     }
   }
+  async function renameGeneratedImage(image: AssetLibraryImage) {
+    if (!image.jobId || image.candidateIndex === undefined) return;
+    const name = window.prompt("Nuovo nome dell'immagine", image.name)?.trim();
+    if (!name || name === image.name) return;
+    const key = `image:${image.jobId}:${image.candidateIndex}`;
+    setRenamingMedia(key);
+    try {
+      const response = await fetch(`${bridgeUrl}/api/image-jobs/${image.jobId}/candidates/${image.candidateIndex}/rename`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const payload = await response.json() as { job?: ImagePickerJob; error?: string };
+      if (!response.ok || !payload.job) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+      setImageJobs((current) => current.map((job) => job.id === image.jobId ? payload.job! : job));
+      setMessage(`Immagine rinominata “${name}”`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Rinomina immagine fallita");
+    } finally {
+      setRenamingMedia(null);
+    }
+  }
+
+  async function removeGeneratedImage(image: AssetLibraryImage) {
+    if (!image.jobId || image.candidateIndex === undefined) throw new Error("Immagine non valida");
+    const response = await fetch(`${bridgeUrl}/api/image-jobs/${image.jobId}/candidates/${image.candidateIndex}/delete`, {
+      method: "POST",
+    });
+    const payload = await response.json() as { error?: string; jobDeleted?: boolean; job?: ImagePickerJob | null };
+    if (!response.ok) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+    setImageJobs((current) => {
+      if (payload.jobDeleted) return current.filter((job) => job.id !== image.jobId);
+      if (payload.job) return current.map((job) => job.id === image.jobId ? payload.job! : job);
+      return current.map((job) => job.id === image.jobId
+        ? { ...job, candidates: job.candidates.filter((candidate) => candidate.index !== image.candidateIndex) }
+        : job);
+    });
+  }
+
+  async function deleteGeneratedImage(image: AssetLibraryImage) {
+    if (!window.confirm(`Eliminare definitivamente “${image.name}” da Assets e Libreria?`)) return;
+    const key = `image:${image.jobId}:${image.candidateIndex}`;
+    setDeletingVideo(key);
+    try {
+      await removeGeneratedImage(image);
+      setLibraryBulkSelected((current) => current.filter((item) => item !== key));
+      setMessage(`“${image.name}” eliminata da Assets e Libreria`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Eliminazione immagine fallita");
+    } finally {
+      setDeletingVideo(null);
+    }
+  }
+
   function toggleLibraryBulk(key: string) {
     setLibraryBulkSelected((current) => current.includes(key)
       ? current.filter((item) => item !== key)
@@ -2038,6 +2128,11 @@ function MediaLibraryPanel({
           const payload = await response.json() as { error?: string };
           if (!response.ok) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
           setAssets((current) => current.filter((item) => item.id !== id));
+        } else if (key.startsWith("image:")) {
+          const [, jobId, indexValue] = key.split(":");
+          const image = generatedImages.find((item) => item.jobId === jobId && item.candidateIndex === Number(indexValue));
+          if (!image) throw new Error("Immagine selezionata non trovata");
+          await removeGeneratedImage(image);
         } else if (key.startsWith("external:")) {
           const id = key.slice("external:".length);
           const response = await fetch(`${bridgeUrl}/api/external-media/${id}/delete`, { method: "POST" });
@@ -2064,6 +2159,9 @@ function MediaLibraryPanel({
     setLibraryBulkDeleting(false);
     setMessage(`${deleted} elementi eliminati${removedClips ? ` · ${removedClips} clip rimosse dai montaggi` : ""}${failed.length ? ` · ${failed.length} non eliminati` : ""}`);
   }
+  const generatedImages = useMemo(() => generatedAssetImages(imageJobs), [imageJobs]);
+  const taggedGeneratedImages = generatedImages.filter((image) => image.tag !== "untagged");
+  const untaggedGeneratedImages = generatedImages.filter((image) => image.tag === "untagged");
   const videos = jobs.flatMap((job) =>
     job.candidates.filter((candidate) => candidate.output).map((candidate) => ({ job, candidate })),
   );
@@ -2099,7 +2197,7 @@ function MediaLibraryPanel({
       </section>
 
       <section className="media-library-section">
-        <div><h3>Personaggi e oggetti</h3><span>{assets.length} asset</span></div>
+        <div><h3>Personaggi, oggetti e luoghi</h3><span>{assets.length + taggedGeneratedImages.length} asset</span></div>
         <div className="media-library-grid">
           {assets.map((asset) => (
             <article className={libraryBulkSelected.includes(`creative:${asset.id}`) ? "bulk-selected" : ""} key={asset.id}>
@@ -2108,14 +2206,52 @@ function MediaLibraryPanel({
                 {libraryBulkMode && <button aria-label={`Seleziona ${asset.name}`} aria-pressed={libraryBulkSelected.includes(`creative:${asset.id}`)} className="bulk-select-button" onClick={() => toggleLibraryBulk(`creative:${asset.id}`)} type="button">{libraryBulkSelected.includes(`creative:${asset.id}`) ? "✓" : ""}</button>}
                 <button aria-label={`Rinomina ${asset.name}`} className="media-rename-button" disabled={renamingMedia === `creative:${asset.id}`} onClick={() => void renameCreativeAsset(asset)} title="Rinomina asset" type="button">✎</button>
               </div>
-              <div><strong>{asset.name}</strong><small>{asset.referenceCount} reference</small></div>
+              <div><strong>{asset.name}</strong><small>{asset.kind === "character" ? "Personaggio" : "Oggetto"} · {asset.referenceCount} reference</small></div>
               <button disabled={!asset.referenceCount} onClick={() => void useAsset(asset)} type="button">Usa nello Studio</button>
             </article>
           ))}
-          {!assets.length && <div className="media-library-empty">Nessun personaggio o oggetto</div>}
+          {taggedGeneratedImages.map((image) => {
+            const key = `image:${image.jobId}:${image.candidateIndex}`;
+            const typeLabel = image.tag === "character" ? "Personaggio" : image.tag === "object" ? "Oggetto" : "Luogo";
+            return (
+              <article className={libraryBulkSelected.includes(key) ? "bulk-selected" : ""} key={image.id}>
+                <div className="media-library-preview">
+                  <img alt={image.name} src={`${bridgeUrl}${image.mediaPath}`} />
+                  {libraryBulkMode && <button aria-label={`Seleziona ${image.name}`} aria-pressed={libraryBulkSelected.includes(key)} className="bulk-select-button" onClick={() => toggleLibraryBulk(key)} type="button">{libraryBulkSelected.includes(key) ? "✓" : ""}</button>}
+                  <button aria-label={`Rinomina ${image.name}`} className="media-rename-button" disabled={renamingMedia === key} onClick={() => void renameGeneratedImage(image)} title="Rinomina immagine" type="button">✎</button>
+                  <button aria-label={`Elimina ${image.name}`} className="video-trash-button" disabled={deletingVideo === key} onClick={() => void deleteGeneratedImage(image)} title="Elimina da Assets e Libreria" type="button">🗑</button>
+                </div>
+                <div><strong>{image.name}</strong><small>{typeLabel} · {image.projectName ?? "Condiviso"}</small></div>
+                <button onClick={() => onUseImage(image)} type="button">Manda a Studio<span>Allegato immagine</span></button>
+              </article>
+            );
+          })}
+          {!assets.length && !taggedGeneratedImages.length && <div className="media-library-empty">Nessun personaggio, oggetto o luogo</div>}
         </div>
       </section>
 
+      {untaggedGeneratedImages.length > 0 && (
+        <section className="media-library-section">
+          <div><h3>Immagini senza tag</h3><span>{untaggedGeneratedImages.length} immagini</span></div>
+          <div className="media-library-grid">
+            {untaggedGeneratedImages.map((image) => {
+              const key = `image:${image.jobId}:${image.candidateIndex}`;
+              return (
+                <article className={libraryBulkSelected.includes(key) ? "bulk-selected" : ""} key={image.id}>
+                  <div className="media-library-preview">
+                    <img alt={image.name} src={`${bridgeUrl}${image.mediaPath}`} />
+                    {libraryBulkMode && <button aria-label={`Seleziona ${image.name}`} aria-pressed={libraryBulkSelected.includes(key)} className="bulk-select-button" onClick={() => toggleLibraryBulk(key)} type="button">{libraryBulkSelected.includes(key) ? "✓" : ""}</button>}
+                    <button aria-label={`Rinomina ${image.name}`} className="media-rename-button" disabled={renamingMedia === key} onClick={() => void renameGeneratedImage(image)} title="Rinomina immagine" type="button">✎</button>
+                    <button aria-label={`Elimina ${image.name}`} className="video-trash-button" disabled={deletingVideo === key} onClick={() => void deleteGeneratedImage(image)} title="Elimina da Assets e Libreria" type="button">🗑</button>
+                  </div>
+                  <div><strong>{image.name}</strong><small>Immagine · {image.projectName ?? "Senza progetto"}</small></div>
+                  <button onClick={() => onUseImage(image)} type="button">Manda a Studio<span>Allegato immagine</span></button>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
       <section className="media-library-section">
         <div><h3>Esterni</h3><span>{externalAssets.length} media</span></div>
         <div className="media-library-grid">
@@ -2276,31 +2412,8 @@ function AssetLibraryPanel({
   }, [previewImage]);
 
   const images = useMemo(() => {
-    const collected: AssetLibraryImage[] = [];
-    const seen = new Set<string>();
-    for (const job of imageJobs) {
-      for (const candidate of job.candidates) {
-        if (candidate.status !== "ready" || !candidate.output) continue;
-        const file = imageReferenceFile(candidate.output);
-        const key = file.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        collected.push({
-          id: `generated:${job.id}:${candidate.index}`,
-          name: candidate.displayName ?? `Immagine ${job.id.slice(0, 8)} · candidato ${candidate.index}`,
-          detail: job.prompt,
-          file,
-          mediaPath: candidate.output.mediaPath,
-          width: candidate.output.width ?? job.width,
-          height: candidate.output.height ?? job.height,
-          tag: imageCandidateTag(candidate, "") ?? "untagged",
-          projectName: job.originProjectName,
-          source: "image-studio",
-          jobId: job.id,
-          candidateIndex: candidate.index,
-        });
-      }
-    }
+    const collected = generatedAssetImages(imageJobs);
+    const seen = new Set(collected.map((image) => image.file.toLowerCase()));
     for (const asset of legacyAssets) {
       for (const reference of asset.references ?? []) {
         const key = reference.file.toLowerCase();
@@ -2515,7 +2628,7 @@ function AssetLibraryPanel({
     { value: "all", label: "Tutte" },
     { value: "character", label: "Personaggi" },
     { value: "object", label: "Oggetti" },
-    { value: "background", label: "Paesaggi" },
+    { value: "background", label: "Luoghi" },
     { value: "untagged", label: "Senza tag" },
   ];
 
@@ -2586,7 +2699,7 @@ function AssetLibraryPanel({
                 >
                   <div className="asset-library-thumbnail">
                     <img alt={image.name} src={`${bridgeUrl}${image.mediaPath}`} />
-                    <span>{assetBulkMode ? (assetBulkSelected.includes(image.id) ? "✓ Da eliminare" : "Seleziona") : selected ? "✓ Selezionata" : image.tag === "background" ? "Paesaggio" : image.tag === "untagged" ? "Immagine" : image.tag === "character" ? "Personaggio" : "Oggetto"}</span>
+                    <span>{assetBulkMode ? (assetBulkSelected.includes(image.id) ? "✓ Da eliminare" : "Seleziona") : selected ? "✓ Selezionata" : image.tag === "background" ? "Luogo" : image.tag === "untagged" ? "Immagine" : image.tag === "character" ? "Personaggio" : "Oggetto"}</span>
                   </div>
                   <strong>{image.name}</strong>
                   <small>{image.projectName ?? (image.source === "legacy" ? "Asset precedente" : "Senza progetto")}</small>
@@ -5966,6 +6079,7 @@ function StudioApp() {
           ) : activeView === "library" ? (
             <MediaLibraryPanel
               onUseExternal={addExternalMedia}
+              onUseImage={(image) => sendAssetImagesToStudio([image])}
               onUseReferences={useCreativeReferences}
               onUseVideo={addRecentVideo}
               onVideoDeleted={applyCandidateDeletion}

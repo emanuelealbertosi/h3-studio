@@ -62,7 +62,7 @@ try {
   assert.equal(plannedEdit.mode, "image_edit");
   assert.match(
     imageStudioSource,
-    /const tags:[\s\S]*?value: "background", label: "Paesaggio"[\s\S]*?\];/,
+    /const tags:[\s\S]*?value: "background", label: "Luogo"[\s\S]*?\];/,
   );
   assert.match(
     imageStudioSource,
@@ -90,6 +90,13 @@ try {
   );
   assert.match(pageSource, /<span className="rail-icon">◉<\/span>\s*Assets/);
   assert.match(pageSource, /function AssetLibraryPanel\(/);
+  assert.match(pageSource, /function generatedAssetImages\(imageJobs: ImagePickerJob\[\]\)/);
+  assert.match(pageSource, /function MediaLibraryPanel\([\s\S]*?fetch\(`\$\{bridgeUrl\}\/api\/image-jobs\?limit=200`/);
+  assert.match(pageSource, /Personaggi, oggetti e luoghi/);
+  assert.match(pageSource, /taggedGeneratedImages\.map/);
+  assert.match(pageSource, /untaggedGeneratedImages\.map/);
+  assert.match(pageSource, /onUseImage=\{\(image\) => sendAssetImagesToStudio\(\[image\]\)\}/);
+  assert.match(pageSource, /async function removeGeneratedImage/);
   assert.match(pageSource, /fetch\(`\$\{bridgeUrl\}\/api\/image-jobs\?limit=200`/);
   assert.match(pageSource, /application\/x-h3-asset-id/);
   assert.match(pageSource, /onSendToStudio\(selectedImages\)/);
@@ -115,6 +122,10 @@ try {
   assert.ok(Math.abs(landscapeKeep.width / landscapeKeep.height - 16 / 9) < 0.02);
   assert.equal(imageEditKeepAspectDimensions(null, 1080), null);
   assert.equal(IMAGE_EDIT_KEEP_ASPECT_FORMAT, "keep-source-aspect");
+  assert.equal(
+    IMAGE_COMPOSITION_PRESETS.find((preset) => preset.value === "landscape")?.label,
+    "Luogo",
+  );
   assert.match(imageStudioSource, /incomingReferences\?: ImageStudioIncomingReference\[\]/);
   assert.match(imageStudioSource, /incomingReferences\.length \? "edit" : "generate"/);
   assert.match(imageStudioSource, /asset ricevuti dalla libreria/);

@@ -13,13 +13,13 @@ separata.
 - I preset 1:1, 16:9, 9:16, 4:3 e 3:4 restano sotto circa 1,8 megapixel e usano
   dimensioni multiple di 16.
 
-I tag Personaggio, Oggetto e Paesaggio sono metadati del progetto: servono a
+I tag Personaggio, Oggetto e Luogo sono metadati del progetto: servono a
 classificare e riusare l’immagine, ma non cambiano da soli il render.
 
 ## Preset di composizione
 
 Il composer offre **Libero**, **Character sheet / turnaround**, **Primo piano**,
-**Mezzo busto**, **Figura intera**, **Oggetto sheet** e **Paesaggio**. Libero
+**Mezzo busto**, **Figura intera**, **Oggetto sheet** e **Luogo**. Libero
 invia il testo invariato; gli altri preset aggiungono in coda una direttiva di
 inquadratura adatta al caso scelto. Il testo scritto dall'utente non viene
 sostituito e rimane modificabile separatamente.
