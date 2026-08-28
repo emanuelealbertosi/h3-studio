@@ -67,10 +67,11 @@ try {
   assert.equal(shouldRecallMedia("Crea una animazione partendo da questa immagine"), true);
   assert.equal(shouldRecallMedia("Parliamo di regia cinematografica"), false);
 
-  const [server, service, panel, node, installer, manifest] = await Promise.all([
+  const [server, service, panel, styles, node, installer, manifest] = await Promise.all([
     readFile("bridge/server.ts", "utf8"),
     readFile("bridge/chat-service.ts", "utf8"),
     readFile("app/chat-panel.tsx", "utf8"),
+    readFile("app/globals.css", "utf8"),
     readFile("comfyui_nodes/H3-Studio-Gemma4-Chat/h3_studio_chat.py", "utf8"),
     readFile("scripts/INSTALL_COMFY_DEPENDENCIES.ps1", "utf8"),
     readFile("workflows/dependencies.json", "utf8"),
@@ -88,6 +89,14 @@ try {
   assert.match(panel, /chat-picker-grid/);
   assert.match(panel, /Crea con/);
   assert.match(panel, /"auto" \| "video" \| "krea" \| "anima" \| "edit"/);
+  assert.match(panel, /trackedActions/);
+  assert.match(panel, /\/api\/image-jobs\/\$\{action\.jobId\}/);
+  assert.match(panel, /cancelAction/);
+  assert.match(panel, /chat-render-preview/);
+  assert.match(panel, /Interrompi/);
+  assert.match(panel, /disabled=\{chatLocked\}/);
+  assert.match(styles, /\.chat-render-preview/);
+  assert.match(styles, /\.chat-stop-button/);
   assert.match(node, /llama-server/);
   assert.match(node, /--reasoning", "off"/);
   assert.match(node, /H3_CHAT_LLAMA_SERVER/);

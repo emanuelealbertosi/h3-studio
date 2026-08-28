@@ -3827,15 +3827,61 @@ a:focus-visible {
 
 .chat-action-card {
   margin-top: 12px; border: 1px solid rgba(215, 255, 82, .3); border-radius: 12px;
-  padding: 10px 11px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 11px; display: grid; gap: 10px;
   background: rgba(215, 255, 82, .035);
 }
 .chat-action-card.failed { border-color: rgba(255, 112, 112, .3); background: rgba(255, 112, 112, .035); }
-.chat-action-card div { display: grid; gap: 3px; }
 .chat-action-card strong { font-size: 9px; color: var(--accent); }
 .chat-action-card.failed strong { color: #ff9b9b; }
 .chat-action-card small { color: var(--muted); font-size: 8px; }
 .chat-action-card button { min-height: 32px; border: 0; border-radius: 8px; padding: 0 11px; background: var(--accent); color: var(--accent-ink); font-size: 8px; font-weight: 850; }
+.chat-action-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.chat-action-heading > div:first-child { min-width: 0; display: grid; gap: 3px; }
+.chat-action-heading small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-action-buttons { display: flex; flex: 0 0 auto; gap: 7px; }
+.chat-action-buttons .chat-stop-button {
+  border: 1px solid rgba(255, 112, 112, .32);
+  background: rgba(255, 112, 112, .08);
+  color: #ffaaaa;
+}
+.chat-action-buttons .chat-stop-button:disabled { opacity: .55; }
+.chat-render-preview {
+  position: relative;
+  width: 100%;
+  min-height: 260px;
+  max-height: 560px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .07);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 26% 34%, rgba(215, 255, 82, .16), transparent 28%),
+    radial-gradient(circle at 70% 60%, rgba(60, 105, 180, .22), transparent 34%),
+    #07080a;
+}
+.chat-render-preview.failed { border-color: rgba(255, 112, 112, .24); }
+.chat-render-preview > a { width: 100%; height: 100%; display: block; }
+.chat-render-preview img,
+.chat-render-preview video {
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
+  max-height: inherit;
+  display: block;
+  object-fit: contain;
+  background: #050506;
+}
+.chat-render-preview .progress-overlay { padding: 20px; }
+.chat-render-preview .progress-overlay > span {
+  max-width: min(420px, 82%);
+  margin-top: 9px;
+  color: rgba(255, 255, 255, .68);
+  font-size: 9px;
+  line-height: 1.4;
+}
+.chat-thinking-body { width: min(100%, 700px); }
+.chat-thinking-body > small { display: block; margin-top: 6px; color: var(--muted); font-size: 8px; }
+.chat-thinking-preview { min-height: 220px; }
 
 .chat-composer {
   position: sticky; z-index: 8; bottom: 0;
@@ -3849,6 +3895,8 @@ a:focus-visible {
 .chat-route-bar button { min-height: 28px; border: 1px solid var(--line); border-radius: 8px; padding: 0 9px; background: #151619; color: #898b90; font-size: 8px; font-weight: 800; }
 .chat-route-bar button:hover { border-color: rgba(215, 255, 82, .3); color: #dfe1e4; }
 .chat-route-bar button.active { border-color: rgba(215, 255, 82, .46); background: rgba(215, 255, 82, .1); color: var(--accent); }
+.chat-route-bar button:disabled,
+.chat-library-button:disabled { cursor: not-allowed; opacity: .38; }
 .chat-route-bar > small { overflow: hidden; color: #686a70; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
 .chat-input-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) 82px; gap: 8px; align-items: end; }
 .chat-input-row textarea { min-height: 56px; max-height: 180px; resize: vertical; border: 0; outline: 0; padding: 9px 4px; background: transparent; color: var(--ink); font: inherit; font-size: 11px; line-height: 1.5; }
@@ -3887,6 +3935,9 @@ a:focus-visible {
   .chat-heading-actions { flex-direction: column; align-items: flex-end; }
   .chat-messages { width: calc(100% - 20px); padding-top: 24px; }
   .chat-message.user > div { width: 92%; }
+  .chat-action-heading { align-items: stretch; flex-direction: column; }
+  .chat-action-buttons { justify-content: flex-end; }
+  .chat-render-preview { min-height: 200px; }
   .chat-composer { width: calc(100% - 16px); }
   .chat-route-bar { grid-template-columns: 1fr; }
   .chat-route-bar > div { overflow-x: auto; }

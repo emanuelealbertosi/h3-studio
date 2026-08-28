@@ -5,6 +5,24 @@ import { useEffect, useMemo, useRef, useState } from "react";
 type Project = { id: string; name: string };
 type ChatRoute = "auto" | "video" | "krea" | "anima" | "edit";
 type ChatMemory = { active: boolean; summarizedMessages: number; summary: string };
+type ChatTrackedCandidate = {
+  index: number;
+  status: string;
+  phaseLabel?: string | null;
+  progress?: number | null;
+  progressExact?: boolean;
+  error?: string | null;
+  output?: { mediaPath: string; filename?: string } | null;
+};
+type ChatTrackedJob = {
+  id: string;
+  kind: "video" | "image";
+  status: string;
+  width?: number;
+  height?: number;
+  candidates: ChatTrackedCandidate[];
+  fetchError?: string;
+};
 type Attachment = {
   id: string;
   kind: "picture" | "video" | "audio";
@@ -65,6 +83,29 @@ function actionLabel(type: NonNullable<ChatMessage["action"]>["type"]) {
   return "Immagine Krea";
 }
 
+function terminalCandidate(candidate: ChatTrackedCandidate | undefined) {
+  return Boolean(candidate && ["ready", "failed", "cancelled"].includes(candidate.status));
+}
+
+function trackedJobActive(job: ChatTrackedJob | undefined) {
+  if (!job) return true;
+  if (job.fetchError) return false;
+  return job.candidates.length > 0 && job.candidates.some((candidate) => !terminalCandidate(candidate));
+}
+
+function trackedStatus(candidate: ChatTrackedCandidate | undefined, thinking = false) {
+  if (thinking) return "Gemma sta preparando prompt e motore";
+  if (!candidate) return "Collegamento alla coda…";
+  if (candidate.phaseLabel) return candidate.phaseLabel;
+  if (["prepared", "submitted"].includes(candidate.status)) return "Invio a ComfyUI";
+  if (candidate.status === "queued") return "In coda";
+  if (["running", "rendering", "processing"].includes(candidate.status)) return "Generazione in corso";
+  if (candidate.status === "ready") return "Completato";
+  if (candidate.status === "cancelled") return "Interrotto";
+  if (candidate.status === "failed") return "Generazione fallita";
+  return candidate.status;
+}
+
 export default function ChatPanel({
   bridgeUrl,
   projectId,
@@ -81,6 +122,8 @@ export default function ChatPanel({
   const [text, setText] = useState("");
   const [route, setRoute] = useState<ChatRoute>("auto");
   const [memory, setMemory] = useState<ChatMemory | null>(null);
+  const [jobStates, setJobStates] = useState<Record<string, ChatTrackedJob>>({});
+  const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [library, setLibrary] = useState<Attachment[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -88,6 +131,13 @@ export default function ChatPanel({
   const [notice, setNotice] = useState("Caricamento Chat locale…");
   const [runtime, setRuntime] = useState<{ ready: boolean; loaded: boolean; error?: string | null } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const trackedActions = useMemo(() => messages
+    .flatMap((message) => message.action?.jobId ? [{ ...message.action, messageId: message.id }] : [])
+    .slice(-20), [messages]);
+  const trackedActionKey = trackedActions.map((action) => `${action.jobId}:${action.type}`).join("|");
+  const renderActive = trackedActions.some((action) => trackedJobActive(jobStates[action.jobId!]));
+  const chatLocked = busy || renderActive || cancellingJobId !== null;
 
   useEffect(() => {
     let disposed = false;
@@ -112,6 +162,39 @@ export default function ChatPanel({
   }, [bridgeUrl, projectId]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, busy]);
+
+  useEffect(() => {
+    if (!trackedActions.length) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const poll = async () => {
+      const updates = await Promise.all(trackedActions.map(async (action): Promise<[string, ChatTrackedJob]> => {
+        const kind = action.type === "generate_video" ? "video" : "image";
+        const endpoint = kind === "video" ? `/api/jobs/${action.jobId}` : `/api/image-jobs/${action.jobId}`;
+        try {
+          const response = await fetch(`${bridgeUrl}${endpoint}`, { cache: "no-store" });
+          const payload = await response.json() as { job?: Omit<ChatTrackedJob, "kind">; error?: string };
+          if (!response.ok || !payload.job) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+          return [action.jobId!, { ...payload.job, kind }];
+        } catch (error) {
+          return [action.jobId!, {
+            id: action.jobId!, kind, status: "failed", candidates: [],
+            fetchError: error instanceof Error ? error.message : "Job non disponibile",
+          }];
+        }
+      }));
+      if (disposed) return;
+      setJobStates((current) => ({ ...current, ...Object.fromEntries(updates) }));
+      if (updates.some(([, job]) => trackedJobActive(job))) {
+        timer = setTimeout(() => void poll(), 1_000);
+      }
+    };
+    void poll();
+    return () => {
+      disposed = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [bridgeUrl, trackedActionKey, trackedActions]);
 
   async function loadLibrary() {
     setPickerOpen(true);
@@ -164,7 +247,7 @@ export default function ChatPanel({
   }
 
   async function send() {
-    if (!projectId || !text.trim() || busy) return;
+    if (!projectId || !text.trim() || chatLocked) return;
     setBusy(true);
     setNotice("Gemma 4 sta preparando la risposta…");
     try {
@@ -197,6 +280,27 @@ export default function ChatPanel({
     if (response.ok) { setMessages([]); setMemory(null); setNotice("Conversazione e memoria cancellate"); }
   }
 
+  async function cancelAction(action: NonNullable<ChatMessage["action"]>) {
+    if (!action.jobId || cancellingJobId) return;
+    setCancellingJobId(action.jobId);
+    setNotice("Interruzione del job Chat…");
+    try {
+      const endpoint = action.type === "generate_video"
+        ? `/api/jobs/${action.jobId}/cancel`
+        : `/api/image-jobs/${action.jobId}/cancel`;
+      const response = await fetch(`${bridgeUrl}${endpoint}`, { method: "POST" });
+      const payload = await response.json() as { job?: Omit<ChatTrackedJob, "kind">; error?: string };
+      if (!response.ok || !payload.job) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+      const kind = action.type === "generate_video" ? "video" : "image";
+      setJobStates((current) => ({ ...current, [action.jobId!]: { ...payload.job!, kind } }));
+      setNotice("Produzione interrotta");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Interruzione fallita");
+    } finally {
+      setCancellingJobId(null);
+    }
+  }
+
   const suggestions = useMemo(() => [
     "Creami un video di 10 secondi con…",
     "Genera un'immagine fotorealistica di…",
@@ -219,7 +323,7 @@ export default function ChatPanel({
             <span className="chat-memory" title={memory.summary}>⌁ Memoria · {memory.summarizedMessages}</span>
           )}
           <span className={runtime?.ready ? "chat-runtime ready" : "chat-runtime error"}>{runtime?.ready ? runtime.loaded ? "● Modello caricato" : "○ Pronto" : "! Setup richiesto"}</span>
-          <button disabled={!messages.length || busy} onClick={() => void clearChat()} type="button">Pulisci</button>
+          <button disabled={!messages.length || chatLocked} onClick={() => void clearChat()} type="button">Pulisci</button>
         </div>
       </header>
 
@@ -228,26 +332,62 @@ export default function ChatPanel({
           <div className="chat-welcome">
             <span>H3</span><h3>Parlami normalmente.</h3>
             <p>Posso ragionare con te oppure avviare direttamente Video H3, immagini Krea, edit Flux.2 Klein e immagini Anima. Scegli “Anima” sotto al messaggio quando vuoi garantire un disegno o un’illustrazione.</p>
-            <div>{suggestions.map((suggestion) => <button key={suggestion} onClick={() => setText(suggestion)} type="button">{suggestion}</button>)}</div>
+            <div>{suggestions.map((suggestion) => <button disabled={chatLocked} key={suggestion} onClick={() => setText(suggestion)} type="button">{suggestion}</button>)}</div>
           </div>
         )}
-        {messages.map((message) => (
-          <article className={`chat-message ${message.role} ${message.status}`} key={message.id}>
-            <span>{message.role === "assistant" ? "H3" : "TU"}</span>
-            <div>
-              {message.attachments?.length > 0 && <div className="chat-message-media">{message.attachments.map((item) => (
-                <div key={item.file}>{item.kind === "picture" ? <img alt="" src={`${bridgeUrl}${item.mediaPath}`} /> : item.kind === "video" ? <video muted src={`${bridgeUrl}${item.mediaPath}`} /> : <b>♪</b>}<small>{item.remembered ? "⌁ Memoria · " : ""}{item.name}</small></div>
-              ))}</div>}
-              <p>{message.content}</p>
-              {message.action && <div className={`chat-action-card ${message.action.status}`}>
-                <div><strong>{actionLabel(message.action.type)}</strong><small>{message.action.status === "started" ? `Job ${message.action.jobId?.slice(0, 8)} avviato` : message.action.error}</small></div>
-                {message.action.status === "started" && <button onClick={() => onOpenStudio(message.action!.type === "generate_video" ? "video" : "image")} type="button">Apri nello Studio</button>}
-              </div>}
-              <time>{new Date(message.createdAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</time>
-            </div>
-          </article>
-        ))}
-        {busy && <article className="chat-message assistant thinking"><span>H3</span><div><p><i /><i /><i /></p><small>Caricamento / inferenza locale…</small></div></article>}
+        {messages.map((message) => {
+          const action = message.action;
+          const tracked = action?.jobId ? jobStates[action.jobId] : undefined;
+          const candidate = tracked?.candidates[0];
+          const actionActive = Boolean(action?.jobId && trackedJobActive(tracked));
+          const ready = candidate?.status === "ready" && Boolean(candidate.output?.mediaPath);
+          const failed = Boolean(tracked?.fetchError || action?.status === "failed" || candidate?.status === "failed" || candidate?.status === "cancelled");
+          const progress = typeof candidate?.progress === "number" ? Math.max(0, Math.min(100, Math.round(candidate.progress))) : null;
+          const exact = candidate?.progressExact === true && progress !== null;
+          const mediaUrl = candidate?.output?.mediaPath ? `${bridgeUrl}${candidate.output.mediaPath}` : null;
+          return (
+            <article className={`chat-message ${message.role} ${message.status}`} key={message.id}>
+              <span>{message.role === "assistant" ? "H3" : "TU"}</span>
+              <div>
+                {message.attachments?.length > 0 && <div className="chat-message-media">{message.attachments.map((item) => (
+                  <div key={item.file}>{item.kind === "picture" ? <img alt="" src={`${bridgeUrl}${item.mediaPath}`} /> : item.kind === "video" ? <video muted src={`${bridgeUrl}${item.mediaPath}`} /> : <b>♪</b>}<small>{item.remembered ? "⌁ Memoria · " : ""}{item.name}</small></div>
+                ))}</div>}
+                <p>{message.content}</p>
+                {action && <div className={`chat-action-card ${failed ? "failed" : action.status}`}>
+                  <div className="chat-action-heading">
+                    <div>
+                      <strong>{actionLabel(action.type)}</strong>
+                      <small>{action.jobId ? `Job ${action.jobId.slice(0, 8)} · ${tracked?.fetchError ?? candidate?.error ?? trackedStatus(candidate)}` : action.error}</small>
+                    </div>
+                    <div className="chat-action-buttons">
+                      {actionActive && <button className="chat-stop-button" disabled={cancellingJobId === action.jobId} onClick={() => void cancelAction(action)} type="button">■ {cancellingJobId === action.jobId ? "Interruzione…" : "Interrompi"}</button>}
+                      {action.status === "started" && <button onClick={() => onOpenStudio(action.type === "generate_video" ? "video" : "image")} type="button">Apri nello Studio</button>}
+                    </div>
+                  </div>
+                  {action.jobId && <div
+                    className={`chat-render-preview ${ready ? "ready" : failed ? "failed" : "working"}`}
+                    style={tracked?.kind === "image" && tracked.width && tracked.height ? { aspectRatio: `${tracked.width} / ${tracked.height}` } : undefined}
+                  >
+                    {ready && mediaUrl ? tracked?.kind === "video"
+                      ? <video controls playsInline preload="metadata" src={mediaUrl} />
+                      : <a href={mediaUrl} rel="noreferrer" target="_blank"><img alt={candidate?.output?.filename ?? actionLabel(action.type)} src={mediaUrl} /></a>
+                      : <>
+                        <div className="video-noise" />
+                        <div className="video-blur" />
+                        <div className="progress-overlay">
+                          <strong>{failed ? "!" : exact ? `${progress}%` : "H3"}</strong>
+                          <span>{tracked?.fetchError ?? candidate?.error ?? trackedStatus(candidate)}</span>
+                          {!failed && <div className={`progress-track ${exact ? "" : "indeterminate"}`}><i style={exact ? { width: `${progress}%` } : undefined} /></div>}
+                        </div>
+                      </>}
+                  </div>}
+                </div>}
+                <time>{new Date(message.createdAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</time>
+              </div>
+            </article>
+          );
+        })}
+        {busy && <article className="chat-message assistant thinking"><span>H3</span><div className="chat-thinking-body"><div className="chat-render-preview chat-thinking-preview working"><div className="video-noise" /><div className="video-blur" /><div className="progress-overlay"><strong>H3</strong><span>{trackedStatus(undefined, true)}</span><div className="progress-track indeterminate"><i /></div></div></div><small>Caricamento / inferenza locale…</small></div></article>}
         <div ref={bottomRef} />
       </div>
 
@@ -257,6 +397,7 @@ export default function ChatPanel({
           <div>{routes.map((item) => (
             <button
               className={route === item.id ? "active" : ""}
+              disabled={chatLocked}
               key={item.id}
               onClick={() => setRoute(item.id)}
               title={item.help}
@@ -266,21 +407,21 @@ export default function ChatPanel({
           <small>{routes.find((item) => item.id === route)?.help}</small>
         </div>
         {attachments.length > 0 && <div className="chat-attachment-strip">{attachments.map((item, index) => (
-          <div key={item.file}>{item.kind === "picture" ? <img alt="" src={`${bridgeUrl}${item.mediaPath}`} /> : item.kind === "video" ? <video muted src={`${bridgeUrl}${item.mediaPath}`} /> : <span>♪</span>}<b>{index + 1}</b><small>{item.name}</small><button aria-label={`Rimuovi ${item.name}`} onClick={() => setAttachments((current) => current.filter((entry) => entry.file !== item.file))} type="button">×</button></div>
+          <div key={item.file}>{item.kind === "picture" ? <img alt="" src={`${bridgeUrl}${item.mediaPath}`} /> : item.kind === "video" ? <video muted src={`${bridgeUrl}${item.mediaPath}`} /> : <span>♪</span>}<b>{index + 1}</b><small>{item.name}</small><button aria-label={`Rimuovi ${item.name}`} disabled={chatLocked} onClick={() => setAttachments((current) => current.filter((entry) => entry.file !== item.file))} type="button">×</button></div>
         ))}</div>}
         <div className="chat-input-row">
-          <button className="chat-library-button" onClick={() => void loadLibrary()} title="Scegli dalla Libreria" type="button">＋</button>
+          <button className="chat-library-button" disabled={chatLocked} onClick={() => void loadLibrary()} title="Scegli dalla Libreria" type="button">＋</button>
           <textarea
-            disabled={busy}
+            disabled={chatLocked}
             onChange={(event) => { const value = event.target.value; setText(value); if (/(^|\s)@$/.test(value)) void loadLibrary(); }}
             onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }}
             placeholder="Scrivi un messaggio oppure usa @ per allegare media…"
             rows={2}
             value={text}
           />
-          <button className="chat-send-button" disabled={busy || !text.trim() || !runtime?.ready} onClick={() => void send()} type="button">{busy ? "…" : "Invia ↗"}</button>
+          <button className="chat-send-button" disabled={chatLocked || !text.trim() || !runtime?.ready} onClick={() => void send()} type="button">{chatLocked ? "…" : "Invia ↗"}</button>
         </div>
-        <small>Invio per mandare · Shift+Invio per andare a capo · la memoria lunga viene riassunta automaticamente · max 4 immagini vision / 8 media per azione</small>
+        <small>{renderActive ? "Produzione in corso: la Chat resta bloccata fino al termine oppure premi Interrompi." : "Invio per mandare · Shift+Invio per andare a capo · la memoria lunga viene riassunta automaticamente · max 4 immagini vision / 8 media per azione"}</small>
       </footer>
 
       {pickerOpen && <div className="chat-picker-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPickerOpen(false); }}>

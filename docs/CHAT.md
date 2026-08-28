@@ -24,8 +24,20 @@ riavvio di H3 Studio.
 - Una richiesta esplicita di video usa 10 secondi, un candidato, 0,5 MP e FAST
   8-step. Per cambiare questi parametri apri poi il job nello Studio.
 
-Le azioni compaiono come schede nella conversazione con il pulsante **Apri nello
-Studio**. I prompt di produzione sono generati in inglese, mentre la risposta
+Le azioni compaiono come schede vive nella conversazione. Durante la preparazione
+di Gemma e poi durante la produzione, il riquadro mostra lo splash sfocato, la
+fase corrente e la percentuale quando ComfyUI la rende disponibile. Al termine
+lo stesso riquadro viene popolato con l'immagine o con il player video: non serve
+aprire lo Studio per vedere il risultato.
+
+Mentre una produzione è attiva, il compositore della Chat rimane bloccato per
+evitare richieste sovrapposte. **Interrompi** cancella soltanto quel job; al
+termine, in caso di errore o dopo l'annullamento il compositore torna disponibile.
+Il pulsante **Apri nello Studio** resta disponibile per continuare il lavoro con
+tutti i controlli avanzati. Se si ricarica la pagina, la Chat recupera lo stato
+del job dal suo identificatore e riprende l'aggiornamento della scheda.
+
+I prompt di produzione sono generati in inglese, mentre la risposta
 dell'assistente resta in italiano.
 
 ## Runtime e memoria
