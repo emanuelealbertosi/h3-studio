@@ -37,6 +37,7 @@
     "test:postprocess": "tsx scripts/test-postprocess-variants.ts",
     "test:repair-processing-times": "tsx scripts/test-repair-processing-times.ts",
     "test:setup": "tsx scripts/test-setup-auth.ts",
+    "test:llm-runtime": "tsx scripts/test-llm-runtime.ts",
     "repair:processing-times": "tsx scripts/repair-processing-times.ts",
     "sanitize:workflows": "tsx scripts/sanitize-bundled-workflows.ts",
     "typecheck": "tsc --noEmit --pretty false",

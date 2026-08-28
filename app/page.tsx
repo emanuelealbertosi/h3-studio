@@ -542,6 +542,12 @@ type EngineAdminResponse = {
   };
 };
 
+type AdminLlmRuntimeStatus = {
+  supported: boolean;
+  processes: Array<{ pid: number; name: string }>;
+  gpu: { usedMiB: number; totalMiB: number } | null;
+};
+
 type WorkflowCatalogItem = {
   id: string;
   role: "video" | "fast" | "image" | "image_edit" | "image_anima";
@@ -3307,25 +3313,30 @@ function AdminPanel() {
   const [message, setMessage] = useState("Caricamento configurazione…");
   const [saving, setSaving] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  const [llmBusyPid, setLlmBusyPid] = useState<number | null>(null);
+  const [llmRuntime, setLlmRuntime] = useState<AdminLlmRuntimeStatus | null>(null);
   const [loginRequired, setLoginRequired] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
 
   async function loadSettings() {
     setMessage("Aggiornamento liste da ComfyUI…");
     try {
-      const [engineResponse, installResponse] = await Promise.all([
+      const [engineResponse, installResponse, llmResponse] = await Promise.all([
         fetch(`${bridgeUrl}/api/admin/engine-settings`, { cache: "no-store", credentials: "include" }),
         fetch(`${bridgeUrl}/api/admin/install-settings`, { cache: "no-store", credentials: "include" }),
+        fetch(`${bridgeUrl}/api/admin/llm-runtime`, { cache: "no-store", credentials: "include" }),
       ]);
-      if (engineResponse.status === 401 || installResponse.status === 401) {
+      if (engineResponse.status === 401 || installResponse.status === 401 || llmResponse.status === 401) {
         setLoginRequired(true);
         setMessage("Inserisci la password Admin");
         return;
       }
       const enginePayload = (await engineResponse.json()) as EngineAdminResponse & { error?: string };
       const installPayload = (await installResponse.json()) as InstallAdminResponse & { error?: string };
+      const llmPayload = (await llmResponse.json()) as { status?: AdminLlmRuntimeStatus; error?: string };
       if (!engineResponse.ok) throw new Error(enginePayload.error ?? `Bridge HTTP ${engineResponse.status}`);
       if (!installResponse.ok) throw new Error(installPayload.error ?? `Bridge HTTP ${installResponse.status}`);
+      if (!llmResponse.ok || !llmPayload.status) throw new Error(llmPayload.error ?? `Bridge HTTP ${llmResponse.status}`);
       const pairedPddFile = preferredPddFileForModel(
         enginePayload.settings.fast.model,
         enginePayload.capabilities.pddFiles,
@@ -3338,6 +3349,7 @@ function AdminPanel() {
       }
       setData(enginePayload);
       setInstallData(installPayload);
+      setLlmRuntime(llmPayload.status);
       setLoginRequired(false);
       setMessage("Liste, workflow e configurazione aggiornati da ComfyUI");
     } catch (error) {
@@ -3493,6 +3505,58 @@ function AdminPanel() {
     }
   }
 
+  async function refreshLlmStatus(silent = false) {
+    if (!silent) setMessage("Controllo processi LLM e VRAM…");
+    try {
+      const response = await fetch(`${bridgeUrl}/api/admin/llm-runtime`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const payload = (await response.json()) as { status?: AdminLlmRuntimeStatus; error?: string };
+      if (!response.ok || !payload.status) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+      setLlmRuntime(payload.status);
+      if (!silent) {
+        setMessage(payload.status.processes.length > 0
+          ? `${payload.status.processes.length} processo/i LLM attivo/i`
+          : "Nessun processo llama-server attivo");
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Stato LLM non disponibile");
+    }
+  }
+
+  async function unloadLlm(pid: number) {
+    const confirmed = window.confirm(
+      `Terminare llama-server PID ${pid}?\n\nIl modello LLM verrà scaricato dalla VRAM. ComfyUI resterà attiva, ma anche un modello aperto in LM Studio dovrà essere ricaricato al prossimo utilizzo.`,
+    );
+    if (!confirmed) return;
+    setLlmBusyPid(pid);
+    setMessage(`Scaricamento LLM PID ${pid}…`);
+    try {
+      const response = await fetch(`${bridgeUrl}/api/admin/llm-runtime/unload`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pid }),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        message?: string;
+        after?: AdminLlmRuntimeStatus;
+      };
+      if (!response.ok || !payload.ok) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+      if (payload.after) setLlmRuntime(payload.after);
+      setMessage(payload.message ?? "LLM scaricato");
+      window.setTimeout(() => void refreshLlmStatus(true), 1_000);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "LLM non scaricato");
+      await refreshLlmStatus(true);
+    } finally {
+      setLlmBusyPid(null);
+    }
+  }
+
   async function logout() {
     await fetch(`${bridgeUrl}/api/auth/logout`, { method: "POST", credentials: "include" });
     setData(null);
@@ -3630,6 +3694,31 @@ function AdminPanel() {
                     {restarting ? "Riavvio…" : "↻ Riavvia server"}
                   </button>
                 </div>
+              </div>
+              <div className="admin-llm-runtime">
+                <div className="admin-llm-summary">
+                  <div>
+                    <span>MEMORIA LLM</span>
+                    <strong>{llmRuntime?.processes.length ? `${llmRuntime.processes.length} llama-server attivo/i` : "Nessun llama-server attivo"}</strong>
+                    <small>
+                      {llmRuntime?.gpu
+                        ? `VRAM GPU: ${(llmRuntime.gpu.usedMiB / 1024).toFixed(1)} / ${(llmRuntime.gpu.totalMiB / 1024).toFixed(1)} GB`
+                        : "VRAM non disponibile"}
+                    </small>
+                  </div>
+                  <button className="secondary" disabled={llmBusyPid !== null} onClick={() => void refreshLlmStatus()} type="button">
+                    ↻ Aggiorna stato
+                  </button>
+                </div>
+                {llmRuntime?.processes.map((process) => (
+                  <div className="admin-llm-process" key={process.pid}>
+                    <div><strong>{process.name}</strong><small>PID {process.pid} · Planner H3 o modello aperto in LM Studio</small></div>
+                    <button className="danger" disabled={llmBusyPid !== null} onClick={() => void unloadLlm(process.pid)} type="button">
+                      {llmBusyPid === process.pid ? "Scaricamento…" : "Libera VRAM LLM"}
+                    </button>
+                  </div>
+                ))}
+                <p>Termina soltanto il PID llama-server scelto. ComfyUI e il bridge H3 Studio restano in esecuzione.</p>
               </div>
               <div className="admin-install-grid">
                 <label>

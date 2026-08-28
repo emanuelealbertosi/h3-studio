@@ -2592,6 +2592,75 @@ a:focus-visible {
   padding: 0 14px;
 }
 
+.admin-llm-runtime {
+  margin: 14px 16px 0;
+  padding: 13px;
+  border: 1px solid rgba(255, 181, 71, 0.28);
+  border-radius: 13px;
+  background: rgba(255, 181, 71, 0.035);
+  display: grid;
+  gap: 10px;
+}
+
+.admin-llm-summary,
+.admin-llm-process {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-llm-summary > div,
+.admin-llm-process > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.admin-llm-summary span {
+  color: #ffb547;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: .1em;
+}
+
+.admin-llm-summary small,
+.admin-llm-process small,
+.admin-llm-runtime > p {
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.admin-llm-runtime > p { margin: 0; }
+
+.admin-llm-summary button,
+.admin-llm-process button {
+  min-height: 36px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  padding: 0 12px;
+  font-size: 8px;
+  font-weight: 850;
+}
+
+.admin-llm-summary button.secondary {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+}
+
+.admin-llm-process {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.admin-llm-process button.danger {
+  border: 1px solid rgba(255, 93, 93, .48);
+  background: rgba(255, 93, 93, .12);
+  color: #ff8d8d;
+}
+
 .admin-install-grid {
   padding: 16px;
   display: grid;

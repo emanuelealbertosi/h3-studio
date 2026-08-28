@@ -33,6 +33,7 @@ import { ChatService } from "./chat-service.js";
 import { AudioJobRepository } from "./audio-job-repository.js";
 import { AudioStudioService } from "./audio-studio-service.js";
 import { PromptPlannerService } from "./prompt-planner.js";
+import { LlmRuntimeControl } from "./llm-runtime-control.js";
 import {
   InstallSettingsStore,
   WORKFLOW_CATALOG,
@@ -99,6 +100,7 @@ const fastWorkflowStore = new FastWorkflowStore(
 );
 const runtimeSettings = new RuntimeSettingsStore(config.dataDir);
 const promptPlanner = new PromptPlannerService(comfy, runtimeSettings);
+const llmRuntime = new LlmRuntimeControl();
 const progressTracker = new ComfyProgressTracker(installSettings.comfyUrl);
 progressTracker.start();
 const jobRepository = new JobRepository(config.dataDir);
@@ -1788,6 +1790,41 @@ app.post("/api/admin/server/restart", async () => {
     message: "Riavvio del bridge H3 avviato. ComfyUI resta in esecuzione.",
   };
 });
+app.get("/api/admin/llm-runtime", async (request, reply) => {
+  if (!adminAuth.isAuthenticated(request.headers.cookie)) {
+    return reply.status(401).send({ ok: false, error: "Accesso Admin richiesto" });
+  }
+  return { ok: true, status: await llmRuntime.status() };
+});
+
+app.post<{ Body: { pid?: unknown } }>(
+  "/api/admin/llm-runtime/unload",
+  async (request, reply) => {
+    if (!adminAuth.isAuthenticated(request.headers.cookie)) {
+      return reply.status(401).send({ ok: false, error: "Accesso Admin richiesto" });
+    }
+    const pid = Number(request.body?.pid);
+    try {
+      const before = await llmRuntime.status();
+      if (!before.processes.some((process) => process.pid === pid)) {
+        throw new Error("Il PID scelto non è un processo llama-server attivo");
+      }
+      await comfy.chatUnload().catch(() => undefined);
+      const afterComfyUnload = await llmRuntime.status();
+      const result = afterComfyUnload.processes.some((process) => process.pid === pid)
+        ? await llmRuntime.terminate(pid)
+        : { before, after: afterComfyUnload, terminatedPid: pid };
+      return {
+        ok: true,
+        ...result,
+        message: "LLM scaricato: terminato llama-server PID " + pid + ". ComfyUI è rimasta attiva.",
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "LLM non scaricato";
+      return reply.status(400).send({ ok: false, error: message });
+    }
+  },
+);
 
 app.put<{ Body: { currentPassword?: unknown; nextPassword?: unknown } }>(
   "/api/admin/password",

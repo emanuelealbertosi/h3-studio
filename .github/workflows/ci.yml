@@ -19,6 +19,7 @@ jobs:
       - run: git diff --exit-code -- workflows
       - run: npm run typecheck
       - run: npm run test:setup
+      - run: npm run test:llm-runtime
       - run: npm run test:projects
       - run: npm run test:postprocess
       - run: npm run test:repair-processing-times
