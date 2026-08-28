@@ -145,6 +145,11 @@ function recentMessagesWithinBudget<T extends { content: string }>(messages: T[]
   return selected;
 }
 
+function outputFile(output: { filename: string; subfolder?: string | null; type?: string | null }) {
+  const path = [output.subfolder ?? "", output.filename].filter(Boolean).join("/");
+  return `${path} [${output.type ?? "output"}]`;
+}
+
 const CHAT_SYSTEM_PROMPT = `You are H3 Studio, a concise Italian-speaking creative assistant and a safe workflow router.
 Always return exactly one JSON object and no markdown:
 {"reply":"natural Italian reply","title":"concise 3-7 word Italian conversation title","action":null}
@@ -206,6 +211,52 @@ export class ChatService {
     return this.repository.deleteConversation(conversationId);
   }
 
+  async regenerateConversationAction(
+    conversationId: string,
+    messageId: string,
+    promptValue: unknown,
+  ) {
+    const conversation = this.repository.getConversation(conversationId);
+    if (!conversation) throw new Error("Conversazione Chat non trovata");
+    const source = this.repository.get(messageId);
+    if (
+      !source ||
+      source.conversationId !== conversation.id ||
+      source.role !== "assistant" ||
+      source.action?.status !== "started" ||
+      !source.action.jobId
+    ) {
+      throw new Error("Generazione Chat da rigenerare non trovata");
+    }
+    const prompt = typeof promptValue === "string" ? promptValue.trim() : "";
+    if (prompt.length < 3 || prompt.length > 20_000) {
+      throw new Error("Il prompt deve contenere da 3 a 20.000 caratteri");
+    }
+    await this.comfy.chatUnload().catch(() => undefined);
+    const job = source.action.type === "generate_video"
+      ? await this.studioJobs.regenerate(source.action.jobId, 1, prompt)
+      : await this.imageStudio.regenerate(source.action.jobId, 1, prompt);
+    if (!job?.id) throw new Error("Rigenerazione non avviata");
+    const assistant = this.repository.add({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      role: "assistant",
+      content: "Rigenerazione avviata con un nuovo seed.",
+      action: {
+        type: source.action.type,
+        prompt,
+        jobId: job.id,
+        status: "started",
+      },
+    });
+    return {
+      conversation: this.repository.getConversation(conversation.id),
+      messages: this.repository.list(conversation.projectId, conversation.id),
+      memory: this.repository.memoryStatus(conversation.projectId, conversation.id),
+      assistant,
+    };
+  }
+
   async status() {
     const [settings, runtime] = await Promise.all([
       this.runtimeSettings.get(),
@@ -234,7 +285,7 @@ export class ChatService {
     }
     const providedAttachments = rawAttachments.map(normalizeAttachment);
     const rememberedAttachments = providedAttachments.length === 0 && shouldRecallMedia(content)
-      ? this.repository.latestAttachments(projectId, conversation.id)
+      ? await this.recallLatestMedia(projectId, conversation.id)
       : [];
     const attachments = providedAttachments.length ? providedAttachments : rememberedAttachments;
     const reusedAttachments = rememberedAttachments.length > 0;
@@ -365,6 +416,54 @@ export class ChatService {
     const summary = response.text.trim().slice(0, MAX_MEMORY_CHARACTERS);
     const throughSequence = compactable.at(-1)?.sequence ?? context.sequence;
     return this.repository.updateMemory(projectId, conversationId, summary, throughSequence);
+  }
+
+  private async recallLatestMedia(projectId: string, conversationId: string) {
+    for (const source of this.repository.recentMediaSources(projectId, conversationId)) {
+      const action = source.action;
+      if (action?.status === "started" && action.jobId) {
+        if (action.type === "generate_video") {
+          const job = await this.studioJobs.get(action.jobId).catch(() => null);
+          const candidate = job?.candidates.find((item) =>
+            item.index === job.selectedCandidateIndex && item.status === "ready" && item.output,
+          ) ?? job?.candidates.find((item) => item.status === "ready" && item.output);
+          if (job && candidate?.output) {
+            return [{
+              kind: "video" as const,
+              file: outputFile(candidate.output),
+              name: `Video ${job.id.slice(0, 8)} · candidato ${candidate.index}`,
+              mediaPath: candidate.output.mediaPath,
+              duration: job.request.durationSeconds,
+              hasAudio: true,
+              remembered: true,
+            }];
+          }
+        } else {
+          const job = await this.imageStudio.get(action.jobId).catch(() => null);
+          const candidate = job?.candidates.find((item) =>
+            item.index === job.selectedCandidateIndex && item.status === "ready" && item.output,
+          ) ?? job?.candidates.find((item) => item.status === "ready" && item.output);
+          if (job && candidate?.output) {
+            return [{
+              kind: "picture" as const,
+              file: outputFile(candidate.output),
+              name: `Immagine ${job.id.slice(0, 8)} · candidato ${candidate.index}`,
+              mediaPath: candidate.output.mediaPath,
+              width: job.width,
+              height: job.height,
+              remembered: true,
+            }];
+          }
+        }
+      }
+      if (source.attachments.length) {
+        return source.attachments.slice(0, 8).map((attachment) => ({
+          ...attachment,
+          remembered: true,
+        }));
+      }
+    }
+    return [];
   }
 
   private async executeAction(

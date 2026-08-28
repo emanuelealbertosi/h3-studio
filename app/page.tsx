@@ -6,6 +6,7 @@ import ImageStudioPanel, {
   type ImageStudioIncomingReference,
 } from "./image-studio-panel";
 import ChatPanel from "./chat-panel";
+import RegenerateDialog from "./regenerate-dialog";
 import {
   compatiblePddFilesForModel,
   fastPddPairForModel,
@@ -3917,6 +3918,10 @@ function StudioApp() {
   const [postprocessContract, setPostprocessContract] = useState(0);
   const [pendingUpscaleRequest, setPendingUpscaleRequest] =
     useState<PendingUpscaleRequest | null>(null);
+  const [regenerateTarget, setRegenerateTarget] = useState<{
+    candidateId?: number;
+    prompt: string;
+  } | null>(null);
   const [runMessage, setRunMessage] = useState<string | null>(null);
   const [candidates, setCandidates] = useState(initialCandidates);
   const [connection, setConnection] = useState<{
@@ -5071,8 +5076,9 @@ function StudioApp() {
     }
   }
 
-  async function regenerateVideo(candidateId?: number) {
+  async function regenerateVideo(promptOverride: string) {
     if (!currentJobId || isRunning) return;
+    const candidateId = regenerateTarget?.candidateId;
     setIsRunning(true);
     setRunMessage(candidateId === undefined
       ? "Rigenerazione batch con nuovi seed…"
@@ -5081,7 +5087,10 @@ function StudioApp() {
       const response = await fetch(`${bridgeUrl}/api/jobs/${currentJobId}/regenerate`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(candidateId === undefined ? {} : { candidateIndex: candidateId }),
+        body: JSON.stringify({
+          ...(candidateId === undefined ? {} : { candidateIndex: candidateId }),
+          prompt: promptOverride,
+        }),
       });
       const payload = (await response.json()) as { job?: RemoteJob; error?: string };
       if (!response.ok || !payload.job) {
@@ -5089,6 +5098,7 @@ function StudioApp() {
       }
       setProjectJobs((current) => [payload.job!, ...current.filter((item) => item.id !== payload.job!.id)]);
       openJob(payload.job);
+      setRegenerateTarget(null);
       setRunMessage(candidateId === undefined
         ? `Nuovo batch ${payload.job.id.slice(0, 8)} avviato con seed nuovi`
         : `Nuovo candidato ${payload.job.id.slice(0, 8)} avviato con un seed nuovo`);
@@ -6039,7 +6049,7 @@ function StudioApp() {
                   </div>
                 )}
                 {currentJobId && !isRunning && candidates.some((candidate) => candidate.status === "ready" || candidate.status === "failed") && (
-                  <button className="regenerate-button" onClick={() => void regenerateVideo()} type="button">↻ Rigenera batch</button>
+                  <button className="regenerate-button" onClick={() => setRegenerateTarget({ prompt })} type="button">↻ Rigenera batch</button>
                 )}
                 <div className="queue-status">
                   <span className={isRunning ? "pulse" : ""} />
@@ -6309,8 +6319,8 @@ function StudioApp() {
                             >
                               Edita
                             </button>
-                            <button className="regenerate-action" disabled={isRunning} onClick={() => void regenerateVideo(candidate.id)} type="button">
-                              ↻ Rigenera con nuovo seed
+                            <button className="regenerate-action" disabled={isRunning} onClick={() => setRegenerateTarget({ candidateId: candidate.id, prompt })} type="button">
+                              ↻ Rigenera
                             </button>
                           </div>
                         </div>
@@ -6329,6 +6339,15 @@ function StudioApp() {
           )}
         </div>
       </section>
+      {regenerateTarget && <RegenerateDialog
+        busy={isRunning}
+        initialPrompt={regenerateTarget.prompt}
+        key={`${currentJobId ?? "video"}:${regenerateTarget.candidateId ?? "batch"}`}
+        mediaLabel={regenerateTarget.candidateId === undefined ? "batch video" : `video ${regenerateTarget.candidateId}`}
+        onCancel={() => { if (!isRunning) setRegenerateTarget(null); }}
+        onConfirm={regenerateVideo}
+        scopeLabel={regenerateTarget.candidateId === undefined ? `${candidateCount} candidati` : `Candidato ${regenerateTarget.candidateId}`}
+      />}
       {pendingUpscaleRequest && (
         <div
           className="upscale-confirm-backdrop"

@@ -270,6 +270,27 @@ export class ChatRepository {
       .map((attachment) => ({ ...attachment, remembered: true }));
   }
 
+  recentMediaSources(projectId: string, conversationId?: string | null, limit = 20) {
+    const conversation = this.ensureConversation(projectId, conversationId);
+    const safeLimit = Math.min(50, Math.max(1, Math.trunc(limit)));
+    const rows = this.database.prepare(
+      `SELECT rowid AS sequence, attachments_json, action_json
+       FROM chat_messages
+       WHERE conversation_id = ?
+         AND (attachments_json <> '[]' OR action_json IS NOT NULL)
+       ORDER BY rowid DESC LIMIT ?`,
+    ).all(conversation.id, safeLimit) as unknown as Array<{
+      sequence: number;
+      attachments_json: string;
+      action_json: string | null;
+    }>;
+    return rows.map((row) => ({
+      sequence: row.sequence,
+      attachments: parseJson<ChatAttachment[]>(row.attachments_json, []),
+      action: parseJson<ChatActionRecord | null>(row.action_json, null),
+    }));
+  }
+
   context(projectId: string, conversationId?: string | null) {
     const conversation = this.ensureConversation(projectId, conversationId);
     const memory = this.database.prepare(

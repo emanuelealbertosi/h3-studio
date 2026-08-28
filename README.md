@@ -18,7 +18,9 @@ su richiesta esplicita, avviare Video H3, immagini Krea, edit Flux.2 Klein o
 immagini Anima. I video avviati dalla Chat usano il profilo rapido controllato
 dal server: 10 secondi, un candidato, 0,5 MP e FAST 8-step. Il modello resta
 caricato fra i messaggi, ma viene scaricato automaticamente prima di ogni render
-per restituire VRAM a ComfyUI.
+per restituire VRAM a ComfyUI. I riferimenti impliciti come “modificala” usano
+l'ultimo media generato o allegato nella conversazione; **Rigenera** permette di
+correggere il prompt in un popup e avviare una variante con seed nuovo.
 
 ## Stato
 

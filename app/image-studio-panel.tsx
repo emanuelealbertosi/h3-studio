@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import RegenerateDialog from "./regenerate-dialog";
 import {
   composeImagePrompt,
   IMAGE_EDIT_KEEP_ASPECT_FORMAT,
@@ -257,6 +258,9 @@ export default function ImageStudioPanel({
   const [job, setJob] = useState<ImageJob | null>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [regenerateTarget, setRegenerateTarget] = useState<{
+    candidateIndex?: number;
+  } | null>(null);
   const [shareTargets, setShareTargets] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string | null>(
     incomingReferences.length
@@ -604,8 +608,9 @@ export default function ImageStudioPanel({
     setJob(payload.job); setJobs((current) => [payload.job!, ...current.filter((item) => item.id !== payload.job!.id)]);
   }
 
-  async function regenerate(candidateIndex?: number) {
+  async function regenerate(promptOverride: string) {
     if (!job || active(job)) return;
+    const candidateIndex = regenerateTarget?.candidateIndex;
     const key = candidateIndex === undefined ? "regenerate-batch" : `regenerate-${candidateIndex}`;
     setBusy(key);
     setMessage(candidateIndex === undefined ? "Rigenerazione batch con nuovi seed…" : `Rigenerazione candidato ${candidateIndex} con un nuovo seed…`);
@@ -613,7 +618,10 @@ export default function ImageStudioPanel({
       const response = await fetch(`${bridgeUrl}/api/image-jobs/${job.id}/regenerate`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(candidateIndex === undefined ? {} : { candidateIndex }),
+        body: JSON.stringify({
+          ...(candidateIndex === undefined ? {} : { candidateIndex }),
+          prompt: promptOverride,
+        }),
       });
       const payload = (await response.json()) as { job?: ImageJob; error?: string };
       if (!response.ok || !payload.job) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
@@ -621,6 +629,8 @@ export default function ImageStudioPanel({
       setJobs((current) => [payload.job!, ...current.filter((item) => item.id !== payload.job!.id)]);
       setCandidateCount(payload.job.candidateCount);
       setActiveJobId(payload.job.id);
+      setPrompt(payload.job.prompt);
+      setRegenerateTarget(null);
       setMessage(candidateIndex === undefined
         ? `Nuovo batch ${payload.job.id.slice(0, 8)} avviato`
         : `Nuova variante ${payload.job.id.slice(0, 8)} avviata`);
@@ -769,7 +779,7 @@ export default function ImageStudioPanel({
         <div className="results-heading">
           <div><span className="section-index">01</span><h2 id="image-results-title">Candidati immagine</h2><span className="result-count">{visibleCandidates.length}</span></div>
           <div className="results-tools">
-            {job && !active(job) && <button className="regenerate-button" disabled={busy === "regenerate-batch"} onClick={() => void regenerate()} type="button">{busy === "regenerate-batch" ? "Rigenerazione…" : `↻ Rigenera batch (${job.candidateCount})`}</button>}
+            {job && !active(job) && <button className="regenerate-button" disabled={busy === "regenerate-batch"} onClick={() => setRegenerateTarget({})} type="button">{busy === "regenerate-batch" ? "Rigenerazione…" : `↻ Rigenera batch (${job.candidateCount})`}</button>}
             <div className="queue-status"><span className={active(job) ? "pulse" : ""} />{active(job) ? "Coda attiva" : "Coda pronta"}</div>
             {active(job) && job && <button className="stop-run-button" disabled={busy === "cancel"} onClick={() => void cancel()} type="button">{busy === "cancel" ? "Interruzione…" : "■ Interrompi"}</button>}
           </div>
@@ -820,7 +830,7 @@ export default function ImageStudioPanel({
                         <button className={chosen ? "primary-action selected" : "primary-action"} disabled={busy === `select-${candidate.index}`} onClick={() => void select(candidate.index)} type="button">{chosen ? "Selezionata" : "Scegli"}</button>
                         <button onClick={() => editCandidate(candidate)} type="button">Edita questa</button>
                         <button disabled={references.length >= 4} onClick={() => addCandidateReference(candidate)} type="button">+ Reference</button>
-                        <button className="regenerate-action" disabled={busy === `regenerate-${candidate.index}`} onClick={() => void regenerate(candidate.index)} type="button">{busy === `regenerate-${candidate.index}` ? "Rigenerazione…" : "↻ Rigenera con nuovo seed"}</button>
+                        <button className="regenerate-action" disabled={busy === `regenerate-${candidate.index}`} onClick={() => setRegenerateTarget({ candidateIndex: candidate.index })} type="button">{busy === `regenerate-${candidate.index}` ? "Rigenerazione…" : "↻ Rigenera"}</button>
                       </div>
                       <div className="image-share-row">
                         <select aria-label="Progetto di destinazione" onChange={(event) => setShareTargets((current) => ({ ...current, [shareKey]: event.target.value }))} value={shareTarget}>{orderedProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
@@ -993,6 +1003,15 @@ export default function ImageStudioPanel({
         </div>
         {message && <div className="run-message">{message}</div>}
       </section>
+      {job && regenerateTarget && <RegenerateDialog
+        busy={busy?.startsWith("regenerate-") === true}
+        initialPrompt={job.prompt}
+        key={`${job.id}:${regenerateTarget.candidateIndex ?? "batch"}`}
+        mediaLabel={regenerateTarget.candidateIndex === undefined ? "batch immagini" : `immagine ${regenerateTarget.candidateIndex}`}
+        onCancel={() => { if (!busy?.startsWith("regenerate-")) setRegenerateTarget(null); }}
+        onConfirm={regenerate}
+        scopeLabel={regenerateTarget.candidateIndex === undefined ? `${job.candidateCount} candidati` : `Candidato ${regenerateTarget.candidateIndex}`}
+      />}
     </>
   );
 }

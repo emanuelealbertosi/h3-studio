@@ -45,10 +45,11 @@ function reference(index: number): ImageJobReferenceInput {
 }
 
 try {
-  const [imageStudioSource, pageSource, serverSource] = await Promise.all([
+  const [imageStudioSource, pageSource, serverSource, regenerateDialogSource] = await Promise.all([
     readFile(path.join(process.cwd(), "app", "image-studio-panel.tsx"), "utf8"),
     readFile(path.join(process.cwd(), "app", "page.tsx"), "utf8"),
     readFile(path.join(process.cwd(), "bridge", "server.ts"), "utf8"),
+    readFile(path.join(process.cwd(), "app", "regenerate-dialog.tsx"), "utf8"),
   ]);
   assert.match(
     imageStudioSource,
@@ -62,11 +63,14 @@ try {
   assert.match(imageStudioSource, /type ImageMode = "generate" \| "edit" \| "anima"/);
   assert.match(imageStudioSource, />Anima<\/button>/);
   assert.match(imageStudioSource, /api\/image-jobs\/\$\{job\.id\}\/regenerate/);
-  assert.match(imageStudioSource, /Rigenera con nuovo seed/);
+  assert.match(imageStudioSource, /RegenerateDialog/);
   assert.match(pageSource, /ANIME IMAGE ENGINE/);
   assert.match(pageSource, /nova\.\*am/);
   assert.match(pageSource, /api\/jobs\/\$\{currentJobId\}\/regenerate/);
   assert.match(pageSource, /Rigenera batch/);
+  assert.match(pageSource, /RegenerateDialog/);
+  assert.match(regenerateDialogSource, /initialPrompt/);
+  assert.match(regenerateDialogSource, /Nuovo casuale/);
   assert.match(serverSource, /\/api\/jobs\/:jobId\/regenerate/);
   assert.match(serverSource, /\/api\/image-jobs\/:jobId\/regenerate/);
   assert.match(imageStudioSource, /Mantieni proporzioni · Reference 1/);
@@ -311,14 +315,17 @@ try {
       steps: 12,
     },
   });
+  const editedRegenerationPrompt = "A luminous explorer turnaround in a white studio";
   const regeneratedComposition = await imageService.regenerate(
     preparedComposition.id,
     1,
+    editedRegenerationPrompt,
   );
   assert.equal(regeneratedComposition.candidateCount, 1);
   assert.equal(regeneratedComposition.mode, "generate");
   assert.notEqual(regeneratedComposition.candidates[0].seed, 99);
-  assert.equal(regeneratedComposition.prompt, storedComposition.prompt);
+  assert.equal(regeneratedComposition.prompt, editedRegenerationPrompt);
+  assert.match(regeneratedComposition.effectivePrompt, /luminous explorer turnaround/i);
   assert.equal(
     regeneratedComposition.engine.model,
     storedComposition.engine.model,

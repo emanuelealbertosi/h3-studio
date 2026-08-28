@@ -714,7 +714,7 @@ export class StudioJobService {
     return this.submitPrepared(prepared);
   }
 
-  async regenerate(jobId: string, candidateIndex?: number) {
+  async regenerate(jobId: string, candidateIndex?: number, promptValue?: unknown) {
     const original = this.jobs.get(jobId);
     if (!original) throw new Error("Job video da rigenerare non trovato");
     if (
@@ -726,6 +726,14 @@ export class StudioJobService {
     const candidateCount = candidateIndex === undefined
       ? original.request.candidateCount
       : 1;
+    const prompt = promptValue === undefined
+      ? original.request.prompt
+      : typeof promptValue === "string"
+        ? promptValue.trim()
+        : "";
+    if (prompt.length < 3 || prompt.length > 20_000) {
+      throw new Error("Il prompt video deve contenere da 3 a 20.000 caratteri");
+    }
     const currentSettings = await this.runtimeSettings.get();
     const preservedSettings: RuntimeSettings = original.engine.profile === "fast"
       ? {
@@ -748,6 +756,7 @@ export class StudioJobService {
     const { prepared } = await this.prepare(
       {
         ...original.request,
+        prompt,
         candidateCount,
         seedMode: "random",
         seed: undefined,

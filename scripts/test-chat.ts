@@ -38,6 +38,9 @@ try {
   assert.equal(messages.length, 2);
   assert.equal(messages[1].action?.jobId, "job-1");
   assert.deepEqual(chat.mediaJobs(primary.id), [{ kind: "video", jobId: "job-1" }]);
+  const actionSources = chat.recentMediaSources(project!.id, primary.id);
+  assert.equal(actionSources[0].action?.jobId, "job-1");
+  assert.deepEqual(actionSources[0].attachments, []);
   chat.add({
     projectId: project!.id,
     conversationId: primary.id,
@@ -101,10 +104,11 @@ try {
   assert.equal(shouldRecallMedia("Crea una animazione partendo da questa immagine"), true);
   assert.equal(shouldRecallMedia("Parliamo di regia cinematografica"), false);
 
-  const [server, service, panel, styles, node, installer, manifest] = await Promise.all([
+  const [server, service, panel, dialog, styles, node, installer, manifest] = await Promise.all([
     readFile("bridge/server.ts", "utf8"),
     readFile("bridge/chat-service.ts", "utf8"),
     readFile("app/chat-panel.tsx", "utf8"),
+    readFile("app/regenerate-dialog.tsx", "utf8"),
     readFile("app/globals.css", "utf8"),
     readFile("comfyui_nodes/H3-Studio-Gemma4-Chat/h3_studio_chat.py", "utf8"),
     readFile("scripts/INSTALL_COMFY_DEPENDENCIES.ps1", "utf8"),
@@ -112,6 +116,7 @@ try {
   ]);
   assert.match(server, /\/api\/chat\/:projectId\/messages/);
   assert.match(server, /\/api\/chat\/conversations\/:conversationId/);
+  assert.match(server, /\/api\/chat\/conversations\/:conversationId\/regenerate/);
   assert.match(server, /preserveMedia/);
   assert.match(server, /deleteChatMedia/);
   assert.match(server, /await comfy\.chatUnload\(\)\.catch/);
@@ -121,6 +126,8 @@ try {
   assert.match(service, /qualityMode: "fast"/);
   assert.match(service, /ROUTE_OVERRIDE/);
   assert.match(service, /MEMORY_SYSTEM_PROMPT/);
+  assert.match(service, /recallLatestMedia/);
+  assert.match(service, /recentMediaSources/);
   assert.match(service, /generate_anima for anime, manga, illustration, drawing or cartoon-style/);
   assert.match(panel, /\(\^\|\\s\)@\$/);
   assert.match(panel, /chat-picker-grid/);
@@ -136,6 +143,10 @@ try {
   assert.match(panel, /Nuova Chat/);
   assert.match(panel, /Conserva i media generati/);
   assert.match(panel, /saveConversationTitle/);
+  assert.match(panel, /RegenerateDialog/);
+  assert.match(panel, /↻ Rigenera/);
+  assert.match(dialog, /Prompt della nuova generazione/);
+  assert.match(dialog, /Nuovo casuale/);
   assert.match(styles, /\.chat-render-preview/);
   assert.match(styles, /\.chat-stop-button/);
   assert.match(styles, /\.chat-thread-sidebar/);

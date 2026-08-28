@@ -45,6 +45,11 @@ Il pulsante **Apri nello Studio** resta disponibile per continuare il lavoro con
 tutti i controlli avanzati. Se si ricarica la pagina, la Chat recupera lo stato
 del job dal suo identificatore e riprende l'aggiornamento della scheda.
 
+Quando il job è terminato, **Rigenera** apre un popup con il prompt usato già
+compilato. È possibile correggerlo o riscriverlo prima della conferma; la nuova
+generazione usa un seed casuale e non modifica il media originale. Lo stesso
+popup è disponibile per candidati e batch negli Studio Video e Immagini.
+
 I prompt di produzione sono generati in inglese, mentre la risposta
 dell'assistente resta in italiano.
 
@@ -66,12 +71,17 @@ e attività aperte; elimina saluti e ripetizioni. Il badge **Memoria · N** most
 quanti messaggi sono già stati assimilati e, passando il mouse, permette di
 leggere il riassunto. **Pulisci** elimina sia cronologia sia memoria.
 
-La Chat ricorda inoltre l'ultimo gruppo di media allegato nella conversazione.
+La Chat ricorda inoltre l'ultimo media disponibile nella conversazione: prima
+considera immagini e video prodotti dalle azioni della Chat e poi gli allegati
+caricati dall'utente, rispettando l'ordine cronologico.
 Non lo reinvia a ogni turno: lo recupera soltanto quando un messaggio senza nuovi
 allegati contiene un riferimento esplicito, per esempio “modificala”, “animala”,
 “questa immagine”, “quel video”, “usala” o “continualo”. Il messaggio registrato
 mostra **Memoria** sulla miniatura recuperata, così è sempre evidente quale file
-verrà usato. Un nuovo allegato sostituisce naturalmente il gruppo ricordato.
+verrà usato. Per esempio, dopo aver creato un'immagine si può scrivere
+“modificala rendendo il gatto blu” senza allegarla di nuovo: l'edit userà
+automaticamente quell'output. Un nuovo allegato o un nuovo output diventa il
+riferimento più recente.
 
 Questo meccanismo non consuma continuamente il contesto Vision: al massimo
 quattro immagini vengono inviate al modello e soltanto nel turno che le usa;

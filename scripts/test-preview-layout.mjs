@@ -1,15 +1,24 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [rawCss, rawPage, rawImageStudio] = await Promise.all([
+const [rawCss, rawPage, rawImageStudio, rawRegenerateDialog] = await Promise.all([
   readFile("app/globals.css", "utf8"),
   readFile("app/page.tsx", "utf8"),
   readFile("app/image-studio-panel.tsx", "utf8"),
+  readFile("app/regenerate-dialog.tsx", "utf8"),
 ]);
 const normalizeNewlines = (value) => value.replace(/\r\n?/g, "\n");
 const css = normalizeNewlines(rawCss);
 const page = normalizeNewlines(rawPage);
 const imageStudio = normalizeNewlines(rawImageStudio);
+const regenerateDialog = normalizeNewlines(rawRegenerateDialog);
+
+assert.match(css, /\.regenerate-dialog-backdrop\s*\{[^}]*position:\s*fixed/s);
+assert.match(css, /\.regenerate-dialog\s*\{[^}]*max-height:/s);
+assert.match(page, /<RegenerateDialog/);
+assert.match(imageStudio, /<RegenerateDialog/);
+assert.match(regenerateDialog, /Prompt della nuova generazione/);
+assert.match(regenerateDialog, /l’originale resterà invariato/);
 
 assert.match(css, /\.candidate-footer\s*\{[^}]*flex-direction:\s*column/s);
 assert.match(

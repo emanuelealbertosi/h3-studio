@@ -439,13 +439,21 @@ export class ImageStudioService {
     return this.submitPrepared(prepared);
   }
 
-  async regenerate(jobId: string, candidateIndex?: number) {
+  async regenerate(jobId: string, candidateIndex?: number, promptValue?: unknown) {
     const original = this.repository.get(jobId);
     if (!original) throw new Error("Job immagine da rigenerare non trovato");
     const sourceCandidate = candidateIndex === undefined
       ? original.candidates[0]
       : original.candidates.find((candidate) => candidate.index === candidateIndex);
     if (!sourceCandidate) throw new Error("Candidato immagine da rigenerare non trovato");
+    const prompt = promptValue === undefined
+      ? original.prompt
+      : typeof promptValue === "string"
+        ? promptValue.trim()
+        : "";
+    if (prompt.length < 3 || prompt.length > 20_000) {
+      throw new Error("Il prompt immagine deve contenere da 3 a 20.000 caratteri");
+    }
     const originLink = sourceCandidate.projectLinks.find(
       (link) => link.projectId === original.originProjectId,
     );
@@ -490,8 +498,7 @@ export class ImageStudioService {
       {
         projectId: original.originProjectId,
         mode,
-        prompt: original.prompt,
-        effectivePrompt: original.effectivePrompt,
+        prompt,
         compositionPreset: original.compositionPreset,
         candidateCount: candidateIndex === undefined ? original.candidateCount : 1,
         aspectFormat: original.aspectFormat,

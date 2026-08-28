@@ -481,7 +481,7 @@ app.post("/api/jobs", async (request, reply) => {
 
 app.post<{
   Params: { jobId: string };
-  Body: { candidateIndex?: number };
+  Body: { candidateIndex?: number; prompt?: unknown };
 }>("/api/jobs/:jobId/regenerate", async (request, reply) => {
   try {
     await comfy.chatUnload().catch(() => undefined);
@@ -493,7 +493,11 @@ app.post<{
     ) {
       return reply.status(400).send({ ok: false, error: "Candidato video non valido" });
     }
-    const job = await studioJobs.regenerate(request.params.jobId, candidateIndex);
+    const job = await studioJobs.regenerate(
+      request.params.jobId,
+      candidateIndex,
+      request.body?.prompt,
+    );
     return reply.status(202).send({
       ok: true,
       job: { ...job, variants: [] },
@@ -639,6 +643,31 @@ app.post<{
   }
 });
 
+app.post<{
+  Params: { conversationId: string };
+  Body: { messageId?: unknown; prompt?: unknown };
+}>("/api/chat/conversations/:conversationId/regenerate", async (request, reply) => {
+  try {
+    const messageId = typeof request.body?.messageId === "string"
+      ? request.body.messageId.trim()
+      : "";
+    if (!messageId) {
+      return reply.status(400).send({ ok: false, error: "Messaggio Chat mancante" });
+    }
+    return {
+      ok: true,
+      ...(await chat.regenerateConversationAction(
+        request.params.conversationId,
+        messageId,
+        request.body?.prompt,
+      )),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Rigenerazione Chat fallita";
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
 app.delete<{
   Params: { conversationId: string };
 }>("/api/chat/conversations/:conversationId/messages", async (request, reply) => {
@@ -713,7 +742,7 @@ app.delete<{ Params: { projectId: string } }>(
 
 app.post<{
   Params: { jobId: string };
-  Body: { candidateIndex?: number };
+  Body: { candidateIndex?: number; prompt?: unknown };
 }>("/api/image-jobs/:jobId/regenerate", async (request, reply) => {
   try {
     await comfy.chatUnload().catch(() => undefined);
@@ -725,7 +754,11 @@ app.post<{
     ) {
       return reply.status(400).send({ ok: false, error: "Candidato immagine non valido" });
     }
-    const job = await imageStudio.regenerate(request.params.jobId, candidateIndex);
+    const job = await imageStudio.regenerate(
+      request.params.jobId,
+      candidateIndex,
+      request.body?.prompt,
+    );
     return reply.status(202).send({
       ok: true,
       job,

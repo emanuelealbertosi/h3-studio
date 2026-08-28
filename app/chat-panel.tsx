@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import RegenerateDialog from "./regenerate-dialog";
 
 type Project = { id: string; name: string };
 type ChatConversation = {
@@ -63,6 +64,7 @@ type ChatMessage = {
   error?: string | null;
   createdAt: string;
 };
+type ChatAction = NonNullable<ChatMessage["action"]>;
 type ExternalAsset = {
   id: string; kind: Attachment["kind"]; file: string; name: string;
   originalName?: string; mediaPath: string; width?: number | null;
@@ -140,6 +142,11 @@ export default function ChatPanel({
   const [deleteTarget, setDeleteTarget] = useState<ChatConversation | null>(null);
   const [preserveMedia, setPreserveMedia] = useState(true);
   const [deletingConversation, setDeletingConversation] = useState(false);
+  const [regenerateTarget, setRegenerateTarget] = useState<{
+    messageId: string;
+    action: ChatAction;
+  } | null>(null);
+  const [regeneratingAction, setRegeneratingAction] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [route, setRoute] = useState<ChatRoute>("auto");
@@ -161,7 +168,7 @@ export default function ChatPanel({
     .slice(-20), [messages]);
   const trackedActionKey = trackedActions.map((action) => `${action.jobId}:${action.type}`).join("|");
   const renderActive = trackedActions.some((action) => trackedJobActive(jobStates[action.jobId!]));
-  const chatLocked = busy || renderActive || cancellingJobId !== null || deletingConversation;
+  const chatLocked = busy || renderActive || cancellingJobId !== null || deletingConversation || regeneratingAction;
 
   useEffect(() => {
     let disposed = false;
@@ -424,6 +431,45 @@ export default function ChatPanel({
     }
   }
 
+  async function regenerateChatAction(prompt: string) {
+    if (!activeConversationId || !regenerateTarget || regeneratingAction) return;
+    setRegeneratingAction(true);
+    setNotice("Avvio rigenerazione con un nuovo seed…");
+    try {
+      const response = await fetch(
+        `${bridgeUrl}/api/chat/conversations/${activeConversationId}/regenerate`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ messageId: regenerateTarget.messageId, prompt }),
+        },
+      );
+      const payload = await response.json() as {
+        conversation?: ChatConversation;
+        messages?: ChatMessage[];
+        memory?: ChatMemory;
+        error?: string;
+      };
+      if (!response.ok || !payload.messages) {
+        throw new Error(payload.error ?? "Rigenerazione Chat non avviata");
+      }
+      setMessages(payload.messages);
+      setMemory(payload.memory ?? null);
+      if (payload.conversation) {
+        setConversations((current) => [
+          payload.conversation!,
+          ...current.filter((conversation) => conversation.id !== payload.conversation!.id),
+        ]);
+      }
+      setRegenerateTarget(null);
+      setNotice("Rigenerazione avviata · nuovo seed");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Rigenerazione Chat non avviata");
+    } finally {
+      setRegeneratingAction(false);
+    }
+  }
+
   async function send() {
     if (!projectId || !activeConversationId || !text.trim() || chatLocked) return;
     setBusy(true);
@@ -639,6 +685,12 @@ export default function ChatPanel({
                     </div>
                     <div className="chat-action-buttons">
                       {actionActive && <button className="chat-stop-button" disabled={cancellingJobId === action.jobId} onClick={() => void cancelAction(action)} type="button">■ {cancellingJobId === action.jobId ? "Interruzione…" : "Interrompi"}</button>}
+                      {action.status === "started" && action.jobId && !actionActive && <button
+                        className="chat-regenerate-button"
+                        disabled={chatLocked}
+                        onClick={() => setRegenerateTarget({ messageId: message.id, action })}
+                        type="button"
+                      >↻ Rigenera</button>}
                       {action.status === "started" && <button onClick={() => onOpenStudio(action.type === "generate_video" ? "video" : "image")} type="button">Apri nello Studio</button>}
                     </div>
                   </div>
@@ -715,6 +767,16 @@ export default function ChatPanel({
         </section>
       </div>}
       </section>
+
+      {regenerateTarget && <RegenerateDialog
+        busy={regeneratingAction}
+        initialPrompt={regenerateTarget.action.prompt}
+        key={`${regenerateTarget.messageId}:${regenerateTarget.action.jobId}`}
+        mediaLabel={regenerateTarget.action.type === "generate_video" ? "video" : "immagine"}
+        onCancel={() => { if (!regeneratingAction) setRegenerateTarget(null); }}
+        onConfirm={regenerateChatAction}
+        scopeLabel="Generazione Chat · 1 candidato"
+      />}
 
       {deleteTarget && <div
         className="chat-delete-backdrop"
