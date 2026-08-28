@@ -1389,6 +1389,20 @@ app.post<{
   }
 });
 
+app.delete<{ Params: { timelineId: string } }>(
+  "/api/timelines/:timelineId",
+  async (request, reply) => {
+    try {
+      return {
+        ok: true,
+        deletion: projectRepository.deleteTimeline(request.params.timelineId),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Eliminazione montaggio fallita";
+      return reply.status(404).send({ ok: false, error: message });
+    }
+  },
+);
 app.post<{
   Params: { timelineId: string };
   Body: { jobId?: string; candidateIndex?: number; label?: string; variantId?: string | null };

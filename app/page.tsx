@@ -1848,6 +1848,7 @@ function MediaLibraryPanel({
   const [montages, setMontages] = useState<TimelineDetail[]>([]);
   const [message, setMessage] = useState("Caricamento libreria media…");
   const [deletingVideo, setDeletingVideo] = useState<string | null>(null);
+  const [deletingTimeline, setDeletingTimeline] = useState<string | null>(null);
   const [renamingMedia, setRenamingMedia] = useState<string | null>(null);
   const [libraryBulkMode, setLibraryBulkMode] = useState(false);
   const [libraryBulkSelected, setLibraryBulkSelected] = useState<string[]>([]);
@@ -1979,6 +1980,36 @@ function MediaLibraryPanel({
       setMessage(error instanceof Error ? error.message : "Rinomina montaggio fallita");
     } finally {
       setRenamingMedia(null);
+    }
+  }
+  async function removeTimeline(timeline: TimelineDetail) {
+    const response = await fetch(`${bridgeUrl}/api/timelines/${timeline.id}`, {
+      method: "DELETE",
+    });
+    const payload = await response.json() as {
+      deletion?: { id: string; projectId: string; name: string; removedClips: number };
+      error?: string;
+    };
+    if (!response.ok || !payload.deletion) {
+      throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+    }
+    setMontages((current) => current.filter((item) => item.id !== timeline.id));
+    return payload.deletion;
+  }
+
+  async function deleteTimelineFromLibrary(timeline: TimelineDetail) {
+    if (!window.confirm(
+      `Eliminare definitivamente il montaggio “${timeline.name}”?\n\nLe clip verranno scollegate, ma tutti i video sorgente resteranno nel progetto e nella Libreria.`,
+    )) return;
+    setDeletingTimeline(timeline.id);
+    try {
+      const deletion = await removeTimeline(timeline);
+      setLibraryBulkSelected((current) => current.filter((item) => item !== `timeline:${timeline.id}`));
+      setMessage(`Montaggio “${timeline.name}” eliminato · ${deletion.removedClips} clip scollegate · video sorgente conservati`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Eliminazione montaggio fallita");
+    } finally {
+      setDeletingTimeline(null);
     }
   }
   async function renameCreativeAsset(asset: CreativeAsset) {
@@ -2113,7 +2144,7 @@ function MediaLibraryPanel({
   async function deleteLibrarySelection() {
     if (!libraryBulkSelected.length) return;
     if (!window.confirm(
-      `Eliminare definitivamente ${libraryBulkSelected.length} elementi selezionati? I video saranno rimossi anche dai montaggi.`,
+      `Eliminare definitivamente ${libraryBulkSelected.length} elementi selezionati? I video eliminati saranno rimossi dai montaggi; eliminare un montaggio non cancella i suoi video sorgente.`,
     )) return;
     setLibraryBulkDeleting(true);
     setMessage(`Eliminazione di ${libraryBulkSelected.length} elementi…`);
@@ -2133,6 +2164,12 @@ function MediaLibraryPanel({
           const image = generatedImages.find((item) => item.jobId === jobId && item.candidateIndex === Number(indexValue));
           if (!image) throw new Error("Immagine selezionata non trovata");
           await removeGeneratedImage(image);
+        } else if (key.startsWith("timeline:")) {
+          const id = key.slice("timeline:".length);
+          const timeline = montages.find((item) => item.id === id);
+          if (!timeline) throw new Error("Montaggio selezionato non trovato");
+          const deletion = await removeTimeline(timeline);
+          removedClips += deletion.removedClips;
         } else if (key.startsWith("external:")) {
           const id = key.slice("external:".length);
           const response = await fetch(`${bridgeUrl}/api/external-media/${id}/delete`, { method: "POST" });
@@ -2183,10 +2220,12 @@ function MediaLibraryPanel({
         <div><h3>Montaggi</h3><span>{montages.length} timeline</span></div>
         <div className="media-library-grid">
           {montages.map((timeline) => (
-            <article key={timeline.id}>
+            <article className={libraryBulkSelected.includes(`timeline:${timeline.id}`) ? "bulk-selected" : ""} key={timeline.id}>
               <div className="media-library-preview">
                 {timeline.clips[0] ? <video muted playsInline preload="metadata" src={`${bridgeUrl}${timeline.clips[0].output.mediaPath}`} /> : <span>≋</span>}
+                {libraryBulkMode && <button aria-label={`Seleziona ${timeline.name}`} aria-pressed={libraryBulkSelected.includes(`timeline:${timeline.id}`)} className="bulk-select-button" onClick={() => toggleLibraryBulk(`timeline:${timeline.id}`)} type="button">{libraryBulkSelected.includes(`timeline:${timeline.id}`) ? "✓" : ""}</button>}
                 <button aria-label={`Rinomina ${timeline.name}`} className="media-rename-button" disabled={renamingMedia === `timeline:${timeline.id}`} onClick={() => void renameTimeline(timeline)} title="Rinomina montaggio" type="button">✎</button>
+                <button aria-label={`Elimina ${timeline.name}`} className="video-trash-button" disabled={deletingTimeline === timeline.id} onClick={() => void deleteTimelineFromLibrary(timeline)} title="Elimina montaggio; conserva i video sorgente" type="button">🗑</button>
               </div>
               <div><strong>{timeline.name}</strong><small>{timeline.projectName} · {timeline.clipCount} clip</small></div>
               <button onClick={() => onOpenMontage(timeline.projectId, timeline.id)} type="button">Apri montaggio</button>

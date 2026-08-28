@@ -273,3 +273,8 @@
 - Interfaccia, messaggi, errori e documentazione pubblica usano ora le diciture generiche `LLM`, `LLM Vision` e `planner LLM`.
 - Admin e nodo Chat elencano qualunque modello GGUF non-projector, senza filtrare il catalogo in base al nome di uno specifico modello.
 - Identificatore e cartella legacy del nodo restano invariati soltanto per compatibilità con installazioni e workflow esistenti.
+
+### 28 agosto 2026 — Eliminazione montaggi dalla Libreria
+- Ogni montaggio in Libreria dispone ora di cestino con conferma esplicita e supporta anche la selezione multipla.
+- L'eliminazione rimuove atomicamente timeline e collegamenti delle clip; video sorgente, varianti e media del progetto restano invariati.
+- Aggiunti endpoint DELETE, test della cascata SQLite e regressione UI.

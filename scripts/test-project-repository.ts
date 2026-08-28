@@ -148,6 +148,12 @@ try {
     assert.equal(mixed?.originalAudioGain, 0.6);
     assert.equal(mixed?.externalAudioLoop, true);
     assert.equal(projects.get(first.id)?.timelines.length, 2);
+    const deletedTimeline = projects.deleteTimeline(alternate.id);
+    assert.equal(deletedTimeline.name, "Versione breve");
+    assert.equal(deletedTimeline.removedClips, 1);
+    assert.equal(projects.getTimeline(alternate.id), null);
+    assert.equal(projects.get(first.id)?.timelines.length, 1);
+    assert.throws(() => projects.deleteTimeline(alternate.id), /Montaggio non trovato/);
 
     const copied = projects.copyClip(withClip!.clips[0].id, second.id);
     assert.equal(copied?.clips.length, 1);
@@ -168,7 +174,7 @@ try {
 
     const deleted = jobs.deleteCandidate("test-job", 1);
     assert.equal(deleted.jobDeleted, true);
-    assert.equal(deleted.removedClips, 2);
+    assert.equal(deleted.removedClips, 1);
     assert.deepEqual(
       deleted.files.map((file) => file.filename).sort(),
       [

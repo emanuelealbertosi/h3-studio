@@ -197,6 +197,26 @@ export class ProjectRepository {
     this.touchProject(timeline.project_id, now);
     return this.getTimeline(timelineId);
   }
+  deleteTimeline(timelineId: string) {
+    const timeline = this.timelineRow(timelineId);
+    if (!timeline) throw new Error("Montaggio non trovato");
+    const now = new Date().toISOString();
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.prepare("DELETE FROM project_timelines WHERE id = ?").run(timelineId);
+      this.touchProject(timeline.project_id, now);
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+    return {
+      id: timeline.id,
+      projectId: timeline.project_id,
+      name: timeline.name,
+      removedClips: timeline.clip_count,
+    };
+  }
   addClip(projectId: string, jobId: string, candidateIndex: number, labelValue?: unknown, variantValue?: unknown) {
     const timeline = this.listTimelines(projectId)[0];
     if (!timeline) throw new Error("Progetto o montaggio principale non trovato");
