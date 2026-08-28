@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { AudioJobRepository } from "../bridge/audio-job-repository.js";
 import { normalizeMusicPlan } from "../bridge/audio-studio-service.js";
+import { normalizePromptPlan } from "../bridge/prompt-planner.js";
 import { JobRepository } from "../bridge/job-repository.js";
 import { ProjectRepository } from "../bridge/project-repository.js";
 
@@ -13,6 +14,19 @@ const jobs = new JobRepository(dataDir);
 const projects = new ProjectRepository(jobs.databasePath);
 const audio = new AudioJobRepository(jobs.databasePath);
 
+  const panelSource = readFileSync(path.join(process.cwd(), "app", "audio-studio-panel.tsx"), "utf8");
+  const serverSource = readFileSync(path.join(process.cwd(), "bridge", "server.ts"), "utf8");
+  const transcriptionSource = readFileSync(path.join(process.cwd(), "bridge", "transcribe-reference.py"), "utf8");
+  assert.match(panelSource, /TTS Planner AI/);
+  assert.match(panelSource, /Trascrizione automatica del campione/);
+  assert.match(serverSource, /api\/audio-jobs\/transcribe-reference/);
+  assert.match(transcriptionSource, /openai\/whisper-small/);
+  const plannedTts = normalizePromptPlan(
+    '{"prompt":"<|emotion:contentment|> Buongiorno. <|prosody:pause|> Benvenuti.","summary":"Voce calma.","language":"Italian"}',
+    "tts",
+  );
+  assert.match(plannedTts.prompt, /Buongiorno/);
+  assert.equal(plannedTts.language, "Italian");
 try {
   const project = projects.create("Audio test");
   if (!project) throw new Error("Progetto audio di test non creato");

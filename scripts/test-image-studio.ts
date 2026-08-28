@@ -31,6 +31,7 @@ import {
   isAnimaModelFilename,
   RuntimeSettingsStore,
 } from "../bridge/runtime-settings.js";
+import { normalizePromptPlan } from "../bridge/prompt-planner.js";
 
 const temporaryDir = await mkdtemp(path.join(os.tmpdir(), "h3-image-studio-"));
 
@@ -51,6 +52,14 @@ try {
     readFile(path.join(process.cwd(), "bridge", "server.ts"), "utf8"),
     readFile(path.join(process.cwd(), "app", "regenerate-dialog.tsx"), "utf8"),
   ]);
+  assert.match(imageStudioSource, /Prompt Compiler AI/);
+  assert.match(serverSource, /\/api\/prompt-planner/);
+  const plannedEdit = normalizePromptPlan(
+    '{"prompt":"Change reference image 1 hair to blue and keep everything else unchanged.","summary":"Modifica conservativa.","language":"English"}',
+    "image_edit",
+  );
+  assert.match(plannedEdit.prompt, /keep everything else unchanged/);
+  assert.equal(plannedEdit.mode, "image_edit");
   assert.match(
     imageStudioSource,
     /const tags:[\s\S]*?value: "background", label: "Paesaggio"[\s\S]*?\];/,
@@ -77,7 +86,7 @@ try {
   assert.match(imageStudioSource, /imageEditKeepAspectDimensions/);
   assert.match(
     imageStudioSource,
-    /JSON\.stringify\(\{[\s\S]*?effectivePrompt,[\s\S]*?compositionPreset,/,
+    /JSON\.stringify\(\{[\s\S]*?effectivePrompt: engineEffectivePrompt,[\s\S]*?compositionPreset,/,
   );
   assert.match(pageSource, /<span className="rail-icon">◉<\/span>\s*Assets/);
   assert.match(pageSource, /function AssetLibraryPanel\(/);

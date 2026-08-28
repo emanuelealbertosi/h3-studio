@@ -32,6 +32,7 @@ import { ChatRepository } from "./chat-repository.js";
 import { ChatService } from "./chat-service.js";
 import { AudioJobRepository } from "./audio-job-repository.js";
 import { AudioStudioService } from "./audio-studio-service.js";
+import { PromptPlannerService } from "./prompt-planner.js";
 import {
   InstallSettingsStore,
   WORKFLOW_CATALOG,
@@ -97,6 +98,7 @@ const fastWorkflowStore = new FastWorkflowStore(
   config.workflowOutputDir,
 );
 const runtimeSettings = new RuntimeSettingsStore(config.dataDir);
+const promptPlanner = new PromptPlannerService(comfy, runtimeSettings);
 const progressTracker = new ComfyProgressTracker(installSettings.comfyUrl);
 progressTracker.start();
 const jobRepository = new JobRepository(config.dataDir);
@@ -562,6 +564,25 @@ app.get<{ Querystring: { limit?: string; projectId?: string } }>("/api/jobs", as
   };
 });
 
+app.get("/api/prompt-planner/capabilities", async (_request, reply) => {
+  try {
+    return { ok: true, planner: await promptPlanner.status() };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Prompt Compiler non disponibile";
+    return reply.status(503).send({ ok: false, error: message });
+  }
+});
+
+app.post("/api/prompt-planner", async (request, reply) => {
+  try {
+    return reply.status(200).send({ ok: true, plan: await promptPlanner.plan(request.body) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Prompt Compiler non disponibile";
+    app.log.error(error, "Compilazione prompt Gemma fallita");
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
 app.get("/api/image-jobs/capabilities", async (_request, reply) => {
   try {
     return { ok: true, imageStudio: await imageStudio.status() };
@@ -608,6 +629,16 @@ app.post("/api/audio-jobs", async (request, reply) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invio audio fallito";
     app.log.error(error, "Invio job audio H3 Studio fallito");
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
+app.post("/api/audio-jobs/transcribe-reference", async (request, reply) => {
+  try {
+    return reply.status(200).send({ ok: true, transcription: await audioStudio.transcribeReference(request.body) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Trascrizione reference non disponibile";
+    app.log.error(error, "Trascrizione reference TTS fallita");
     return reply.status(400).send({ ok: false, error: message });
   }
 });

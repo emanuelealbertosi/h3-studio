@@ -73,11 +73,20 @@ del progetto, e in seconda battuta quelle riutilizzabili degli altri progetti,
 possono essere collegate come reference senza un nuovo upload. Il profilo Flux predefinito è il 4B
 Distilled FP8 a quattro step e CFG 1; workflow, modello, encoder, VAE, cache e
 attention backend sono gestiti dall’Admin.
+Il Prompt Compiler AI usa il Gemma configurato nella Chat per trasformare una
+richiesta naturale multilingua nel formato specifico di Krea, Flux Edit o Anima;
+il risultato resta modificabile e Gemma viene scaricato prima del render.
+
 
 Lo **Studio Audio** è la terza modalità dello stesso progetto. **Higgs Audio
 v3 TTS** genera parlato e supporta il cloning one-shot da un campione caricato
 o già presente in Libreria; il runtime viene avviato in un processo isolato e
 terminato sempre dopo output, errore o Stop, così il modello non resta in VRAM.
+Il TTS Planner conserva la lingua richiesta e prepara testo e prosodia Higgs.
+Le reference vocali vengono trascritte automaticamente da Whisper Small
+multilingua in un processo separato che termina prima del caricamento TTS;
+il testo riconosciuto rimane sempre correggibile.
+
 **MiniMax Music 3** usa invece i nodi nativi di ComfyUI con caption, lyrics a
 sezioni, durata fino a sei minuti, seed e decode tiled. Entrambi espongono
 progresso, interruzione, player, download, tempo di esecuzione e registrano

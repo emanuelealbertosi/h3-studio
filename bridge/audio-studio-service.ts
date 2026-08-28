@@ -198,6 +198,11 @@ export class AudioStudioService {
         voices,
         defaultVoice: settings.tts.voice,
         unloadPolicy: "always-after-job",
+        plannerReady: chatRuntime?.ready === true,
+        plannerModel: settings.chat.model,
+        transcriptionReady: existsSync(path.join(root, "python", "python.exe")),
+        transcriptionModel: "openai/whisper-small",
+        transcriptionUnloadPolicy: "process-exit",
       },
       music: {
         ready: isRecord(musicNode) && isRecord(musicNode.MiniMaxMusic3TextEncode)
@@ -251,6 +256,55 @@ export class AudioStudioService {
       await this.comfy.chatUnload().catch(() => undefined);
     }
   }
+
+  async transcribeReference(value: unknown) {
+    if (!isRecord(value)) throw new Error("Richiesta trascrizione non valida");
+    if (this.ttsProcesses.size > 0) throw new Error("Attendi la fine della sintesi TTS prima di trascrivere una reference");
+    const file = text(value.file, "Reference vocale", 1, 2_000);
+    const settings = await this.runtimeSettings.get();
+    const root = settings.tts.root;
+    const python = path.join(root, "python", "python.exe");
+    const script = path.resolve("bridge", "transcribe-reference.py");
+    if (!existsSync(python) || !existsSync(script)) throw new Error("Runtime di trascrizione non disponibile");
+    const token = `asr-${randomUUID().slice(0, 8)}`;
+    let referencePath: string | null = null;
+    try {
+      await this.comfy.chatUnload().catch(() => undefined);
+      await this.comfy.freeMemory(true).catch(() => undefined);
+      referencePath = await this.materializeReference(token, file);
+      const cacheDir = path.join(root, "models", "whisper");
+      await mkdir(cacheDir, { recursive: true });
+      const child = spawn(python, [script, "--audio", referencePath, "--cache-dir", cacheDir], {
+        cwd: path.dirname(script), windowsHide: true,
+        env: { ...process.env, HF_HOME: cacheDir, HUGGINGFACE_HUB_CACHE: cacheDir, TRANSFORMERS_CACHE: cacheDir, PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1" },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        let stdout = "";
+        let stderr = "";
+        let settled = false;
+        const finish = (callback: () => void) => { if (settled) return; settled = true; clearTimeout(timer); callback(); };
+        const timer = setTimeout(() => {
+          child.kill("SIGTERM");
+          finish(() => reject(new Error("Timeout durante la trascrizione della reference")));
+        }, 12 * 60_000);
+        child.stdout.on("data", (chunk: Buffer) => { stdout = (stdout + chunk.toString("utf8")).slice(-50_000); });
+        child.stderr.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString("utf8")).slice(-20_000); });
+        child.once("error", (error) => finish(() => reject(error)));
+        child.once("exit", (code) => finish(() => code === 0 ? resolve({ stdout, stderr }) : reject(new Error(`Whisper si e chiuso con codice ${code}: ${stderr.slice(-1_000)}`))));
+      });
+      const marker = result.stdout.match(/H3_TRANSCRIPT_JSON=(\{[^\r\n]+\})/g)?.at(-1);
+      if (!marker) throw new Error(`Whisper non ha restituito una trascrizione${result.stderr ? `: ${result.stderr.slice(-500)}` : ""}`);
+      const parsed = JSON.parse(marker.slice("H3_TRANSCRIPT_JSON=".length)) as { text?: unknown; model?: unknown };
+      const transcript = typeof parsed.text === "string" ? parsed.text.trim() : "";
+      if (!transcript) throw new Error("Il campione non contiene parlato riconoscibile");
+      return { text: transcript, model: typeof parsed.model === "string" ? parsed.model : "openai/whisper-small", unloadPolicy: "process-exit" };
+    } finally {
+      if (referencePath) await unlink(referencePath).catch(() => undefined);
+      await this.comfy.freeMemory(true).catch(() => undefined);
+    }
+  }
+
 
   async submit(value: unknown) {
     if (!isRecord(value)) throw new Error("Richiesta audio non valida");

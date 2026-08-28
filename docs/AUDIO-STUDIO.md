@@ -14,9 +14,18 @@ La terminazione viene eseguita nel blocco `finally` anche in caso di errore o
 Stop. Prima dell'avvio il bridge chiede inoltre a ComfyUI di scaricare i modelli
 residenti per evitare una contesa VRAM.
 
+Il **TTS Planner AI**, attivo per impostazione predefinita, usa il Gemma della
+Chat come Prompt Compiler: accetta una richiesta in qualunque lingua, separa le
+indicazioni di voce/prosodia dal testo pronunciato e conserva la lingua richiesta.
+Il copione Higgs prodotto resta visibile e modificabile. Gemma viene scaricato
+prima del caricamento di Higgs; disattivando il Planner si torna al testo diretto.
+
 Per il cloning one-shot si può caricare un file audio oppure sceglierne uno
 dalla Libreria. Un campione breve, pulito e con una singola voce funziona
-meglio. La trascrizione esatta del campione è facoltativa ma consigliata.
+meglio. H3 Studio lo trascrive automaticamente con `openai/whisper-small`,
+multilingua, in un processo isolato. Whisper termina e libera la VRAM prima di
+Higgs; la trascrizione resta modificabile e, in caso di errore, si può compilare
+manualmente oppure lasciare che Higgs usi il solo campione audio.
 
 ## MiniMax Music 3
 

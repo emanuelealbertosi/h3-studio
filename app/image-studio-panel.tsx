@@ -130,6 +130,9 @@ type ImageStudioStatus = {
   anima: { ready: boolean };
 };
 
+type PromptPlannerStatus = { ready: boolean; model: string; unloadPolicy: string };
+type PromptPlan = { prompt: string; summary: string; language: string };
+
 const formats = [
   { value: "1:1", label: "1:1 · Quadrato", width: 1344, height: 1344 },
   { value: "16:9", label: "16:9 · Orizzontale", width: 1792, height: 1008 },
@@ -235,6 +238,11 @@ export default function ImageStudioPanel({
     incomingReferences.length ? "edit" : "generate",
   );
   const [prompt, setPrompt] = useState("");
+  const [plannerEnabled, setPlannerEnabled] = useState(true);
+  const [plannerIdea, setPlannerIdea] = useState("");
+  const [plannerReady, setPlannerReady] = useState(false);
+  const [plannerSummary, setPlannerSummary] = useState("");
+  const [plannerStatus, setPlannerStatus] = useState<PromptPlannerStatus | null>(null);
   const [compositionPreset, setCompositionPreset] =
     useState<ImageCompositionPreset>("free");
   const [candidateCount, setCandidateCount] = useState(4);
@@ -510,6 +518,18 @@ export default function ImageStudioPanel({
   }, [bridgeUrl]);
 
   useEffect(() => {
+    let disposed = false;
+    void fetch(bridgeUrl + "/api/prompt-planner/capabilities", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as { planner?: PromptPlannerStatus; error?: string };
+        if (!response.ok || !payload.planner) throw new Error(payload.error ?? "Prompt Compiler non disponibile");
+        if (!disposed) setPlannerStatus(payload.planner);
+      })
+      .catch(() => { if (!disposed) setPlannerStatus(null); });
+    return () => { disposed = true; };
+  }, [bridgeUrl]);
+
+  useEffect(() => {
     if (!activeJobId) return;
     let disposed = false;
     const poll = async () => {
@@ -576,8 +596,40 @@ export default function ImageStudioPanel({
     }
   }
 
+  async function preparePromptPlan(manageBusy = true) {
+    if (manageBusy) setBusy("planner");
+    setMessage("Gemma sta preparando il prompt per il motore selezionato...");
+    try {
+      const plannerMode = mode === "edit" ? "image_edit" : mode === "anima" ? "image_anima" : "image_generate";
+      const response = await fetch(`${bridgeUrl}/api/prompt-planner`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: plannerMode,
+          request: plannerIdea,
+          composition: compositionPreset,
+          references: mode === "edit" ? references.map((reference) => ({ name: reference.name, role: reference.role })) : [],
+        }),
+      });
+      const payload = await response.json() as { plan?: PromptPlan; error?: string };
+      if (!response.ok || !payload.plan) throw new Error(payload.error ?? "Prompt Compiler non disponibile");
+      setPrompt(payload.plan.prompt);
+      setPlannerSummary(payload.plan.summary);
+      setPlannerReady(true);
+      setMessage(`${payload.plan.summary} Gemma e stata scaricata; il prompt resta modificabile.`);
+      return payload.plan;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Prompt Compiler fallito");
+      throw error;
+    } finally {
+      if (manageBusy) setBusy(null);
+    }
+  }
+
   async function run() {
-    if (!projectId || !prompt.trim()) { setMessage(!projectId ? "Seleziona un progetto." : "Descrivi l'immagine."); return; }
+    const sourceRequest = plannerEnabled ? plannerIdea.trim() : prompt.trim();
+    if (!projectId || !sourceRequest) { setMessage(!projectId ? "Seleziona un progetto." : "Descrivi l'immagine."); return; }
+    if (plannerEnabled && !plannerStatus?.ready) { setMessage("Prompt Compiler non disponibile: configura Gemma oppure usa Manuale."); return; }
     if (turnaroundFormatMismatch) {
       setMessage("Character turnaround richiede il formato 16:9. Ripristinalo prima di generare.");
       return;
@@ -589,9 +641,12 @@ export default function ImageStudioPanel({
     if (seedMode !== "random" && (!Number.isSafeInteger(numericSeed) || numericSeed < 0)) { setMessage("Seed non valido."); return; }
     setBusy("run"); setMessage("Invio al motore immagini…");
     try {
+      let enginePrompt = prompt.trim();
+      if (plannerEnabled && !plannerReady) enginePrompt = (await preparePromptPlan(false)).prompt;
+      const engineEffectivePrompt = composeImagePrompt(enginePrompt, compositionPreset);
       const response = await fetch(`${bridgeUrl}/api/image-jobs`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId, mode, prompt: prompt.trim(), effectivePrompt, compositionPreset, candidateCount, aspectFormat: selectedFormat.value, width: selectedFormat.width, height: selectedFormat.height, seedMode, seed: seedMode === "random" ? undefined : numericSeed, references: mode === "edit" ? references.map((reference) => ({ file: reference.file, name: reference.name, width: reference.width, height: reference.height, role: reference.role })) : [], tag }),
+        body: JSON.stringify({ projectId, mode, prompt: enginePrompt, effectivePrompt: engineEffectivePrompt, compositionPreset, candidateCount, aspectFormat: selectedFormat.value, width: selectedFormat.width, height: selectedFormat.height, seedMode, seed: seedMode === "random" ? undefined : numericSeed, references: mode === "edit" ? references.map((reference) => ({ file: reference.file, name: reference.name, width: reference.width, height: reference.height, role: reference.role })) : [], tag }),
       });
       const payload = (await response.json()) as { job?: ImageJob; error?: string };
       if (!response.ok || !payload.job) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
@@ -748,7 +803,7 @@ export default function ImageStudioPanel({
                   className={item.id === job?.id ? "active" : ""}
                   key={item.id}
                   onClick={() => {
-                    setJob(item); setActiveJobId(active(item) ? item.id : null); setMode(item.mode); setPrompt(item.prompt); setCompositionPreset(item.compositionPreset ?? "free"); setCandidateCount(item.candidateCount);
+                    setJob(item); setActiveJobId(active(item) ? item.id : null); setMode(item.mode); setPrompt(item.prompt); setPlannerIdea(item.prompt); setPlannerReady(true); setPlannerSummary("Prompt gia preparato per questo batch."); setCompositionPreset(item.compositionPreset ?? "free"); setCandidateCount(item.candidateCount);
                     setFormat((item.aspectFormat === IMAGE_EDIT_KEEP_ASPECT_FORMAT || formats.some((candidate) => candidate.value === item.aspectFormat) ? item.aspectFormat : "1:1") as ImageFormatValue);
                     setSeedMode(item.seedMode);
                     setSeedValue(item.requestedSeed === null || item.requestedSeed === undefined ? "1024" : String(item.requestedSeed));
@@ -853,11 +908,22 @@ export default function ImageStudioPanel({
           <div className="composer-heading-actions"><span className="autosave">Nel progetto {projectName ?? "corrente"}</span><button aria-expanded={expanded} className="composer-toggle" onClick={() => setExpanded((current) => !current)} type="button">{expanded ? "Riduci" : "Impostazioni"}<span aria-hidden="true">{expanded ? "⌄" : "⌃"}</span></button></div>
         </div>
         <div className="composer-body">
-          <label className="prompt-field">
-            <span>{mode === "edit" ? "Descrivi la modifica" : mode === "anima" ? "Descrivi l'illustrazione anime" : "Descrivi l'immagine"}</span>
-            <textarea ref={promptRef} onChange={(event) => setPrompt(event.target.value)} placeholder={mode === "edit" ? "Mantieni il soggetto e cambia sfondo, luce, abito…" : mode === "anima" ? "Personaggio, posa, abiti, ambiente, inquadratura, luce e stile anime…" : "Soggetto, ambiente, inquadratura, luce e stile…"} rows={2} value={prompt} />
+          <div className={`prompt-planner ${plannerEnabled ? "enabled" : ""}`}>
+            <div><label><input checked={plannerEnabled} onChange={(event) => { setPlannerEnabled(event.target.checked); setPlannerReady(false); }} type="checkbox" /> Prompt Compiler AI</label><span>{plannerStatus?.ready ? "Scrivi in qualunque lingua: Gemma prepara il formato corretto e poi viene scaricata." : "Configura Gemma in Admin oppure usa la modalita manuale."}</span></div>
+          </div>
+          {plannerEnabled && <>
+            <label className="prompt-field planner-request-field">
+              <span>{mode === "edit" ? "Cosa vuoi modificare?" : mode === "anima" ? "Quale illustrazione vuoi creare?" : "Quale immagine vuoi creare?"}</span>
+              <textarea onChange={(event) => { setPlannerIdea(event.target.value); setPlannerReady(false); }} placeholder="Scrivi liberamente in italiano o in un'altra lingua…" rows={4} value={plannerIdea} />
+            </label>
+            <button className="prompt-plan-button" disabled={busy === "planner" || !plannerIdea.trim() || !plannerStatus?.ready} onClick={() => void preparePromptPlan().catch(() => undefined)} type="button">{busy === "planner" ? "Gemma sta preparando..." : "Prepara con Gemma"}</button>
+            {plannerReady && <div className="prompt-plan-summary"><strong>Prompt pronto e modificabile</strong><span>{plannerSummary}</span></div>}
+          </>}
+          {(!plannerEnabled || plannerReady) && <label className="prompt-field">
+            <span>{plannerEnabled ? "Prompt tecnico inviato al motore" : mode === "edit" ? "Descrivi la modifica" : mode === "anima" ? "Descrivi l'illustrazione anime" : "Descrivi l'immagine"}</span>
+            <textarea ref={promptRef} onChange={(event) => setPrompt(event.target.value)} placeholder={mode === "edit" ? "Mantieni il soggetto e cambia sfondo, luce, abito…" : mode === "anima" ? "Personaggio, posa, abiti, ambiente, inquadratura, luce e stile anime…" : "Soggetto, ambiente, inquadratura, luce e stile…"} rows={plannerEnabled ? 4 : 2} value={prompt} />
             <span className="prompt-hint">{mode === "edit" ? "Le reference vengono inviate a Flux Klein nell'ordine mostrato." : mode === "anima" ? "Usa il profilo Anima configurato in Admin e genera fino a quattro variazioni." : "Genera fino a quattro variazioni nello stesso batch."}</span>
-          </label>
+          </label>}
 
           <fieldset className="image-composition-presets">
             <legend>Composizione</legend>
@@ -910,7 +976,7 @@ export default function ImageStudioPanel({
           </details>
 
           <div className="image-control-grid">
-            <fieldset className="segmented-control"><legend>Modalità</legend><div><button className={mode === "generate" ? "selected" : ""} onClick={() => { setMode("generate"); if (format === IMAGE_EDIT_KEEP_ASPECT_FORMAT) setFormat("1:1"); }} type="button">Genera</button><button className={mode === "edit" ? "selected" : ""} onClick={() => { setMode("edit"); if (!references.length) void openImageLibrary(); }} type="button">Edit</button><button className={mode === "anima" ? "selected" : ""} onClick={() => { setMode("anima"); if (format === IMAGE_EDIT_KEEP_ASPECT_FORMAT) setFormat("1:1"); }} type="button">Anima</button></div></fieldset>
+            <fieldset className="segmented-control"><legend>Modalità</legend><div><button className={mode === "generate" ? "selected" : ""} onClick={() => { setMode("generate"); setPlannerReady(false); if (format === IMAGE_EDIT_KEEP_ASPECT_FORMAT) setFormat("1:1"); }} type="button">Genera</button><button className={mode === "edit" ? "selected" : ""} onClick={() => { setMode("edit"); setPlannerReady(false); if (!references.length) void openImageLibrary(); }} type="button">Edit</button><button className={mode === "anima" ? "selected" : ""} onClick={() => { setMode("anima"); setPlannerReady(false); if (format === IMAGE_EDIT_KEEP_ASPECT_FORMAT) setFormat("1:1"); }} type="button">Anima</button></div></fieldset>
             <label className="select-control">
               <span>Formato</span>
               <select
@@ -999,7 +1065,7 @@ export default function ImageStudioPanel({
             {selectedEngineReady ? "Motore immagini pronto" : engineStatusError ?? "Dipendenze motore mancanti"}
           </div>
           <div className="preset-note"><span className="fast-badge">{mode === "edit" ? "FLUX KLEIN EDIT" : mode === "anima" ? "ANIMA" : "IMAGE"}</span>{keepAspectUnavailable ? "Reference 1 senza dimensioni" : `${selectedFormat.width} × ${selectedFormat.height} · ${(selectedFormat.width * selectedFormat.height / 1_000_000).toFixed(1)} MP`} · {selectedComposition.shortLabel}</div>
-          <div className="generation-cta"><div><span>Output</span><strong>{candidateCount} immagin{candidateCount === 1 ? "e" : "i"} · {tag === "untagged" ? "senza tag" : tags.find((item) => item.value === tag)?.label}</strong></div><button disabled={busy === "run" || active(job) || !projectId || !selectedEngineReady || turnaroundFormatMismatch || keepAspectUnavailable} onClick={() => void run()} type="button">{busy === "run" || active(job) ? "Generazione in corso" : turnaroundFormatMismatch ? "Formato 16:9 richiesto" : keepAspectUnavailable ? "Dimensioni reference mancanti" : !selectedEngineReady ? "Motore non pronto" : mode === "edit" ? "Crea " + candidateCount + " edit" : mode === "anima" ? "Genera " + candidateCount + " anime" : "Genera " + candidateCount + " immagini"}</button></div>
+          <div className="generation-cta"><div><span>Output</span><strong>{candidateCount} immagin{candidateCount === 1 ? "e" : "i"} · {tag === "untagged" ? "senza tag" : tags.find((item) => item.value === tag)?.label}</strong></div><button disabled={busy === "run" || busy === "planner" || active(job) || !projectId || !selectedEngineReady || turnaroundFormatMismatch || keepAspectUnavailable || (plannerEnabled && (!plannerStatus?.ready || !plannerIdea.trim()))} onClick={() => void run()} type="button">{busy === "planner" ? "Gemma prepara..." : busy === "run" || active(job) ? "Generazione in corso" : turnaroundFormatMismatch ? "Formato 16:9 richiesto" : keepAspectUnavailable ? "Dimensioni reference mancanti" : !selectedEngineReady ? "Motore non pronto" : mode === "edit" ? "Crea " + candidateCount + " edit" : mode === "anima" ? "Genera " + candidateCount + " anime" : "Genera " + candidateCount + " immagini"}</button></div>
         </div>
         {message && <div className="run-message">{message}</div>}
       </section>

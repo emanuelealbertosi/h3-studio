@@ -111,3 +111,16 @@ bridge recupera i prompt ancora attivi e il frontend riprende il polling.
 Prima di abilitare Genera, l’interfaccia verifica workflow, modelli, VAE,
 encoder e nodi richiesti. Un job non viene creato quando il motore selezionato
 non è pronto.
+
+## Prompt Compiler AI
+
+Il **Prompt Compiler AI** è attivo per impostazione predefinita in Genera, Edit
+e Anima. La richiesta può essere scritta in italiano o in un’altra lingua; Gemma
+la converte nel formato specifico del motore selezionato. In Edit preserva ciò
+che non è stato richiesto di cambiare e mantiene l’ordine delle reference; in
+Anima usa una descrizione illustrativa invece della sintassi fotografica.
+
+Il prompt tecnico prodotto è sempre visibile e modificabile prima del render.
+Dopo la compilazione Gemma viene scaricato dalla memoria, quindi Krea, Flux o
+Anima possono caricare senza contendersi la VRAM. Il selettore permette di
+disabilitare il Compiler e usare in qualsiasi momento il prompt manuale.

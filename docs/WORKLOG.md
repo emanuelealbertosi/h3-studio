@@ -255,3 +255,11 @@
 - Aggiunta l'azione Rigenera a ogni video e immagine completata, inclusi Generate, Edit e Anima.
 - Aggiunta Rigenera batch, che conserva il numero originale di candidati (uno-quattro) e tutte le impostazioni persistite.
 - La rigenerazione crea un nuovo job non distruttivo e garantisce seed diversi da quelli del batch sorgente; l'originale resta nel progetto.
+
+## 28 agosto 2026 — Prompt Compiler universale e TTS reference automatiche
+
+- Esteso Gemma come Prompt Compiler specializzato per Krea, Flux.2 Klein Edit, Anima e Higgs TTS; le richieste possono essere scritte in qualunque lingua e il prompt tecnico resta modificabile.
+- In Edit il compiler conserva ordine e ruolo delle reference e istruisce il motore a mantenere invariati gli elementi non richiesti; Anima riceve una descrizione illustrativa dedicata.
+- Il TTS Planner mantiene la lingua pronunciata, separa regia e copione e usa soltanto la whitelist reale di token Higgs per emotion, prosody, style e sfx.
+- Aggiunta trascrizione automatica delle reference con `openai/whisper-small`: processo Python separato, cache locale, testo correggibile, fallback manuale e rilascio VRAM prima di Higgs.
+- Verificati realmente TTS Planner italiano, Flux Edit da richiesta italiana, `loaded: false` dopo Gemma e trascrizione Whisper con processo terminato.

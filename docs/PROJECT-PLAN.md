@@ -434,6 +434,8 @@ Legenda: `[x]` completato e verificato; `[~]` parziale o presente solo a livello
 - [x] MiniMax Music 3 via ComfyUI con caption, lyrics, durata, seed, progresso e decode tiled.
 - [x] Output persistenti, player, download, tempo di esecuzione e registrazione in Libreria.
 - [x] Configurazione Admin separata per TTS e Music e manifest dei modelli Music.
+- [x] Prompt Compiler Gemma condiviso da Krea, Flux Edit, Anima e Higgs TTS, con input naturale multilingua, prompt tecnico modificabile e unload dopo ogni piano.
+- [x] Trascrizione automatica multilingua delle reference vocali con Whisper Small in processo isolato e fallback manuale.
 - [ ] Aggiungere routing esplicito TTS/Music alla Chat multimodale.
 - [ ] Collaudare voice clone italiano e una generazione Music lunga su GPU reale.
 
