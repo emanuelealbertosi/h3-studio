@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { AudioJobRepository } from "../bridge/audio-job-repository.js";
-import { normalizeMusicPlan } from "../bridge/audio-studio-service.js";
+import { normalizeMusicPlan, stereoCodecArgs } from "../bridge/audio-studio-service.js";
 import { normalizePromptPlan } from "../bridge/prompt-planner.js";
 import { JobRepository } from "../bridge/job-repository.js";
 import { ProjectRepository } from "../bridge/project-repository.js";
@@ -17,10 +17,21 @@ const audio = new AudioJobRepository(jobs.databasePath);
   const panelSource = readFileSync(path.join(process.cwd(), "app", "audio-studio-panel.tsx"), "utf8");
   const serverSource = readFileSync(path.join(process.cwd(), "bridge", "server.ts"), "utf8");
   const transcriptionSource = readFileSync(path.join(process.cwd(), "bridge", "transcribe-reference.py"), "utf8");
+  const audioServiceSource = readFileSync(path.join(process.cwd(), "bridge", "audio-studio-service.ts"), "utf8");
+  const h3AudioRouterSource = readFileSync(path.join(process.cwd(), "comfyui_nodes", "ComfyUI-H3-Multishot", "h3_aio_autoprompt.py"), "utf8");
   assert.match(panelSource, /TTS Planner AI/);
   assert.match(panelSource, /Trascrizione automatica del campione/);
   assert.match(serverSource, /api\/audio-jobs\/transcribe-reference/);
   assert.match(transcriptionSource, /openai\/whisper-small/);
+  assert.deepEqual(stereoCodecArgs("voice.wav"), ["-c:a", "pcm_s16le"]);
+  assert.deepEqual(stereoCodecArgs("music.flac"), ["-c:a", "flac"]);
+  assert.match(audioServiceSource, /stream=channels/);
+  assert.match(audioServiceSource, /"-ac", "2"/);
+  assert.match(audioServiceSource, /Voce stereo pronta/);
+  assert.match(audioServiceSource, /Musica stereo pronta/);
+  assert.match(h3AudioRouterSource, /def _ensure_stereo_audio/);
+  assert.match(h3AudioRouterSource, /repeat_interleave\(2, dim=-2\)/);
+  assert.match(h3AudioRouterSource, /_ensure_stereo_audio\(h3_generated_audio/);
   const plannedTts = normalizePromptPlan(
     '{"prompt":"<|emotion:contentment|> Buongiorno. <|prosody:pause|> Benvenuti.","summary":"Voce calma.","language":"Italian"}',
     "tts",

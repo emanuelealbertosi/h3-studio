@@ -147,6 +147,7 @@ const audioStudio = new AudioStudioService(
   externalMedia,
   installSettings.comfyOutputDir,
   config.dataDir,
+  installSettings.ffmpegPath,
 );
 const recoveredAudio = await audioStudio.recover();
 const chatRepository = new ChatRepository(jobRepository.databasePath);

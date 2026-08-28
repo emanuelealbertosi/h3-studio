@@ -65,6 +65,36 @@ def _letterbox(image, size):
     return canvas.permute(0, 2, 3, 1).contiguous()
 
 
+def _ensure_stereo_audio(audio, label="audio"):
+    """Return a Comfy AUDIO dict with exactly two channels.
+
+    MiniMax H3 uses stereo reference conditioning more reliably. Preserve real
+    stereo, duplicate mono to L/R, and fold multichannel sources to a stable
+    stereo pair without mutating the loader-owned input dictionary.
+    """
+    if audio is None:
+        return None
+    waveform = audio.get("waveform")
+    if waveform is None:
+        return audio
+    if waveform.ndim == 1:
+        waveform = waveform.unsqueeze(0).unsqueeze(0)
+    elif waveform.ndim == 2:
+        waveform = waveform.unsqueeze(0)
+    channels = int(waveform.shape[-2])
+    if channels == 1:
+        waveform = waveform.repeat_interleave(2, dim=-2)
+    elif channels > 2:
+        waveform = waveform.mean(dim=-2, keepdim=True).repeat_interleave(
+            2, dim=-2)
+    if channels != 2:
+        print("[H3AIO] %s normalized %dch -> stereo." % (
+            label, channels), flush=True)
+    result = dict(audio)
+    result["waveform"] = waveform.contiguous()
+    return result
+
+
 def _audio_info(audio, label):
     if audio is None:
         return None
@@ -711,9 +741,13 @@ class H3AIOGenerationRouter:
         videos = [value for value in videos if value is not None]
         video_audios = [
             media.get("video_audio_%d" % i) for i in range(1, 4)]
-        video_audios = [value for value in video_audios if value is not None]
+        video_audios = [
+            _ensure_stereo_audio(value, "Video Audio %d" % (index + 1))
+            for index, value in enumerate(video_audios) if value is not None]
         audios = [media.get("audio_%d" % i) for i in range(1, 4)]
-        audios = [value for value in audios if value is not None]
+        audios = [
+            _ensure_stereo_audio(value, "Audio %d" % (index + 1))
+            for index, value in enumerate(audios) if value is not None]
         exact_soundtrack = (
             audios[0]
             if str(audio_1_role) in (
@@ -881,15 +915,16 @@ class H3AIOFinalAudioRouter:
             print(
                 "[H3AIO] final mux mixes exact Audio 1 + H3 SFX "
                 "(gain %.2f)." % float(h3_sfx_gain), flush=True)
-            return (self._mix_exact_with_h3(
-                exact_soundtrack, h3_generated_audio, h3_sfx_gain),)
+            return (_ensure_stereo_audio(self._mix_exact_with_h3(
+                exact_soundtrack, h3_generated_audio, h3_sfx_gain),
+                "final mixed audio"),)
         if exact_soundtrack is not None:
             print(
                 "[H3AIO] final mux uses Audio 1 exact soundtrack; "
                 "H3-generated audio is discarded.", flush=True)
-            return (exact_soundtrack,)
+            return (_ensure_stereo_audio(exact_soundtrack, "final exact soundtrack"),)
         print("[H3AIO] final mux uses H3-generated audio.", flush=True)
-        return (h3_generated_audio,)
+        return (_ensure_stereo_audio(h3_generated_audio, "final H3 audio"),)
 
 
 NODE_CLASS_MAPPINGS = {

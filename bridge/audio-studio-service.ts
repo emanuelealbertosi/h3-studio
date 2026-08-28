@@ -1,15 +1,65 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 import type { ComfyApiPrompt, ComfyHistoryEntry } from "./comfy-client.js";
 import type { ComfyClient } from "./comfy-client.js";
 import type { ComfyProgressTracker } from "./comfy-progress.js";
 import { AudioJobRepository, type AudioOutput } from "./audio-job-repository.js";
 import type { ExternalMediaRepository } from "./external-media-repository.js";
 import type { RuntimeSettingsStore } from "./runtime-settings.js";
+
+const execFileAsync = promisify(execFile);
+
+export function stereoCodecArgs(filename: string) {
+  const extension = path.extname(filename).toLowerCase();
+  if (extension === ".wav") return ["-c:a", "pcm_s16le"];
+  if (extension === ".flac") return ["-c:a", "flac"];
+  if (extension === ".mp3") return ["-c:a", "libmp3lame", "-b:a", "192k"];
+  if (extension === ".ogg") return ["-c:a", "libvorbis", "-q:a", "6"];
+  if (extension === ".m4a" || extension === ".aac") return ["-c:a", "aac", "-b:a", "192k"];
+  return ["-c:a", "pcm_s16le"];
+}
+
+function ffprobeFor(ffmpegPath: string) {
+  const directory = path.dirname(ffmpegPath);
+  const filename = path.basename(ffmpegPath).toLowerCase();
+  if (filename === "ffmpeg.exe") return path.join(directory, "ffprobe.exe");
+  if (filename === "ffmpeg") return directory === "." ? "ffprobe" : path.join(directory, "ffprobe");
+  return "ffprobe";
+}
+
+async function ensureStereoAudioFile(filename: string, ffmpegPath: string) {
+  let channels: number | null = null;
+  try {
+    const probe = await execFileAsync(ffprobeFor(ffmpegPath), [
+      "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=channels",
+      "-of", "default=noprint_wrappers=1:nokey=1", filename,
+    ], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+    channels = Number(probe.stdout.trim());
+  } catch {
+    // FFmpeg eseguirà comunque una validazione completa durante la conversione.
+  }
+  if (channels === 2) return { converted: false, channels: 2 };
+  const extension = path.extname(filename) || ".wav";
+  const temporary = path.join(
+    path.dirname(filename),
+    `${path.basename(filename, path.extname(filename))}.stereo-${randomUUID().slice(0, 8)}${extension}`,
+  );
+  try {
+    await execFileAsync(ffmpegPath, [
+      "-y", "-v", "error", "-i", filename, "-map", "0:a:0", "-vn", "-ac", "2",
+      ...stereoCodecArgs(filename), temporary,
+    ], { encoding: "utf8", timeout: 5 * 60_000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 });
+    await copyFile(temporary, filename);
+    return { converted: true, channels: 2 };
+  } finally {
+    await unlink(temporary).catch(() => undefined);
+  }
+}
 
 const MAX_SEED = 2_147_483_647;
 const activeStates = new Set(["prepared", "queued", "loading", "running", "finalizing"]);
@@ -175,6 +225,7 @@ export class AudioStudioService {
     private readonly externalMedia: ExternalMediaRepository,
     private readonly comfyOutputDir: string,
     private readonly dataDir: string,
+    private readonly ffmpegPath: string,
   ) {}
 
   async status() {
@@ -392,6 +443,7 @@ export class AudioStudioService {
     await mkdir(folder, { recursive: true });
     const target = path.join(folder, `${jobId}-voice${extension}`);
     await writeFile(target, Buffer.from(await response.arrayBuffer()));
+    await ensureStereoAudioFile(target, this.ffmpegPath);
     return target;
   }
 
@@ -526,14 +578,17 @@ export class AudioStudioService {
       const filename = `tts_${job.projectId}_${job.id.slice(0, 8)}.wav`;
       const folder = path.join(this.comfyOutputDir, subfolder);
       await mkdir(folder, { recursive: true });
-      await writeFile(path.join(folder, filename), bytes);
+      const target = path.join(folder, filename);
+      await writeFile(target, bytes);
+      await ensureStereoAudioFile(target, this.ffmpegPath);
+      const outputSize = await stat(target).then((value) => value.size);
       const output: Omit<AudioOutput, "file" | "mediaPath"> = { filename, subfolder, type: "output", format: "audio/wav" };
       const external = this.externalMedia.upsert({
         kind: "audio", file: `${subfolder}/${filename} [output]`, name: filename,
-        original: filename, size: bytes.byteLength, has_audio: true,
+        original: filename, size: outputSize, has_audio: true,
       }, job.projectId);
       this.repository.update(jobId, {
-        status: "ready", phaseLabel: "Voce pronta · modello scaricato", progress: 100,
+        status: "ready", phaseLabel: "Voce stereo pronta · modello scaricato", progress: 100,
         output, externalMediaId: external.id, error: null,
       });
     } catch (error) {
@@ -560,12 +615,21 @@ export class AudioStudioService {
       const output = entry ? findAudioOutput(entry) : null;
       if (output) {
         const absolute = path.join(this.comfyOutputDir, output.subfolder, output.filename);
-        const size = await stat(absolute).then((value) => value.size).catch(() => null);
-        const external = this.externalMedia.upsert({
-          kind: "audio", file: `${output.subfolder ? `${output.subfolder}/` : ""}${output.filename} [${output.type}]`,
-          name: output.filename, original: output.filename, size, duration: job.durationSeconds, has_audio: true,
-        }, job.projectId);
-        this.repository.update(job.id, { status: "ready", phaseLabel: "Musica pronta", progress: 100, output, externalMediaId: external.id, error: null });
+        try {
+          this.repository.update(job.id, { status: "finalizing", phaseLabel: "Verifica stereo", progress: 98, error: null });
+          await ensureStereoAudioFile(absolute, this.ffmpegPath);
+          const size = await stat(absolute).then((value) => value.size).catch(() => null);
+          const external = this.externalMedia.upsert({
+            kind: "audio", file: `${output.subfolder ? `${output.subfolder}/` : ""}${output.filename} [${output.type}]`,
+            name: output.filename, original: output.filename, size, duration: job.durationSeconds, has_audio: true,
+          }, job.projectId);
+          this.repository.update(job.id, { status: "ready", phaseLabel: "Musica stereo pronta", progress: 100, output, externalMediaId: external.id, error: null });
+        } catch (error) {
+          this.repository.update(job.id, {
+            status: "failed", phaseLabel: "Normalizzazione stereo fallita", progress: null,
+            error: error instanceof Error ? error.message : "Audio stereo non prodotto",
+          });
+        }
         continue;
       }
       const tracked = this.progressTracker.get(job.promptId!);
