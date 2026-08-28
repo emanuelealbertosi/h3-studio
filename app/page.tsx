@@ -3471,6 +3471,10 @@ function AdminPanel() {
   const dataRef = useRef<EngineAdminResponse | null>(null);
   const [installData, setInstallData] = useState<InstallAdminResponse | null>(null);
   const [message, setMessage] = useState("Caricamento configurazione…");
+  const [saveNotice, setSaveNotice] = useState<{
+    kind: "saving" | "success" | "error";
+    text: string;
+  } | null>(null);
   const [saving, setSaving] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [llmBusyPid, setLlmBusyPid] = useState<number | null>(null);
@@ -3638,6 +3642,7 @@ function AdminPanel() {
     const settingsToSave = dataRef.current?.settings ?? data.settings;
     if (manageBusy) setSaving(true);
     setMessage("Salvataggio…");
+    setSaveNotice({ kind: "saving", text: "Salvataggio Engine in corso…" });
     try {
       const response = await fetch(`${bridgeUrl}/api/admin/engine-settings`, {
         method: "PUT",
@@ -3670,12 +3675,14 @@ function AdminPanel() {
         dataRef.current = next;
         return next;
       });
-      setMessage(
-        `Engine verificati e salvati · Anima ${verified.settings.anima.steps} step / CFG ${verified.settings.anima.cfg} · Flux ${verified.settings.imageEdit.steps} / CFG ${verified.settings.imageEdit.cfg} · Krea ${verified.settings.krea.steps} step`,
-      );
+      const successMessage = `Engine verificati e salvati · Anima ${verified.settings.anima.steps} step / CFG ${verified.settings.anima.cfg} · Flux ${verified.settings.imageEdit.steps} / CFG ${verified.settings.imageEdit.cfg} · Krea ${verified.settings.krea.steps} step`;
+      setMessage(successMessage);
+      setSaveNotice({ kind: "success", text: successMessage });
       return true;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Salvataggio fallito");
+      const failureMessage = error instanceof Error ? error.message : "Salvataggio fallito";
+      setMessage(failureMessage);
+      setSaveNotice({ kind: "error", text: `Salvataggio Engine fallito: ${failureMessage}` });
       return false;
     } finally {
       if (manageBusy) setSaving(false);
@@ -3710,15 +3717,16 @@ function AdminPanel() {
     if (!data || !installData || saving) return;
     setSaving(true);
     setMessage("Salvataggio completo in corso…");
+    setSaveNotice({ kind: "saving", text: "Salvataggio completo in corso…" });
     try {
       if (!await saveSettings(false)) return;
       if (!await saveInstallSettings(false)) return;
       const current = dataRef.current;
-      setMessage(
-        current
-          ? `Tutto salvato e verificato · Anima ${current.settings.anima.steps} step / CFG ${current.settings.anima.cfg} · Flux ${current.settings.imageEdit.steps} / CFG ${current.settings.imageEdit.cfg} · Krea ${current.settings.krea.steps} step`
-          : "Engine, collegamento e workflow salvati e verificati",
-      );
+      const successMessage = current
+        ? `Tutto salvato e verificato · Anima ${current.settings.anima.steps} step / CFG ${current.settings.anima.cfg} · Flux ${current.settings.imageEdit.steps} / CFG ${current.settings.imageEdit.cfg} · Krea ${current.settings.krea.steps} step`
+        : "Engine, collegamento e workflow salvati e verificati";
+      setMessage(successMessage);
+      setSaveNotice({ kind: "success", text: successMessage });
     } finally {
       setSaving(false);
     }
@@ -3934,6 +3942,15 @@ function AdminPanel() {
           {data?.workflow.ready ? "Workflow pronto" : "Workflow non pronto"}
         </span>
       </div>
+
+      {saveNotice && (
+        <div className={`admin-save-notice admin-save-notice-${saveNotice.kind}`} role="status">
+          <span>{saveNotice.text}</span>
+          {saveNotice.kind !== "saving" && (
+            <button aria-label="Chiudi avviso salvataggio" onClick={() => setSaveNotice(null)} type="button">×</button>
+          )}
+        </div>
+      )}
 
       {data ? (
         <>

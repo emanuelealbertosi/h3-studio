@@ -1892,13 +1892,14 @@ async function saveEngineSettings(
     ) {
       return reply.status(400).send({ ok: false, error: "Configurazione H3, FAST, Krea, Anima o Chat mancante" });
     }
-    const [models, loras, pddFiles, textEncoders, vaes, llmFiles] = await Promise.all([
+    const [models, loras, pddFiles, textEncoders, vaes, llmFiles, chatRuntime] = await Promise.all([
       comfy.models("diffusion_models"),
       comfy.models("loras"),
       comfy.modelFiles("pdd_acc").catch((): string[] => []),
       comfy.modelFiles("text_encoders"),
       comfy.modelFiles("vae"),
       comfy.modelFiles("llm").catch((): string[] => []),
+      comfy.chatStatus().catch(() => null),
     ]);
     if (!models.includes(String((h3 as { model?: unknown }).model ?? ""))) {
       return reply.status(400).send({ ok: false, error: "Modello H3 non installato" });
@@ -1945,10 +1946,22 @@ async function saveEngineSettings(
     if (!vaes.includes(String((anima as { vae?: unknown }).vae ?? ""))) {
       return reply.status(400).send({ ok: false, error: "VAE Anima non installata" });
     }
-    if (!llmFiles.includes(String((chatSettings as { model?: unknown }).model ?? ""))) {
+    const availableChatModels = [
+      ...new Set(
+        chatRuntime?.models ??
+          llmFiles.filter((file) => /\.gguf$/i.test(file) && !/mmproj/i.test(file)),
+      ),
+    ];
+    const availableChatProjectors = [
+      ...new Set(
+        chatRuntime?.projectors ??
+          llmFiles.filter((file) => /mmproj.*\.gguf$/i.test(file)),
+      ),
+    ];
+    if (!availableChatModels.includes(String((chatSettings as { model?: unknown }).model ?? ""))) {
       return reply.status(400).send({ ok: false, error: "Modello LLM Chat non installato" });
     }
-    if (!llmFiles.includes(String((chatSettings as { projector?: unknown }).projector ?? ""))) {
+    if (!availableChatProjectors.includes(String((chatSettings as { projector?: unknown }).projector ?? ""))) {
       return reply.status(400).send({ ok: false, error: "Projector mmproj Chat non installato" });
     }
     if (!models.includes(String((music as { model?: unknown }).model ?? ""))) {
