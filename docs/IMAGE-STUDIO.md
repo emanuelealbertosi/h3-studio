@@ -115,12 +115,12 @@ non è pronto.
 ## Prompt Compiler AI
 
 Il **Prompt Compiler AI** è attivo per impostazione predefinita in Genera, Edit
-e Anima. La richiesta può essere scritta in italiano o in un’altra lingua; Gemma
+e Anima. La richiesta può essere scritta in italiano o in un’altra lingua; LLM
 la converte nel formato specifico del motore selezionato. In Edit preserva ciò
 che non è stato richiesto di cambiare e mantiene l’ordine delle reference; in
 Anima usa una descrizione illustrativa invece della sintassi fotografica.
 
 Il prompt tecnico prodotto è sempre visibile e modificabile prima del render.
-Dopo la compilazione Gemma viene scaricato dalla memoria, quindi Krea, Flux o
+Dopo la compilazione il modello LLM viene scaricato dalla memoria, quindi Krea, Flux o
 Anima possono caricare senza contendersi la VRAM. Il selettore permette di
 disabilitare il Compiler e usare in qualsiasi momento il prompt manuale.

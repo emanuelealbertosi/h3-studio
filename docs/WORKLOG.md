@@ -1,12 +1,12 @@
 # Worklog
 
-## 27 agosto 2026 — Chat Gemma 4 Vision per progetto
+## 27 agosto 2026 — Chat LLM Vision per progetto
 
 - Aggiunta la voce Chat sopra lo Studio con conversazioni SQLite indipendenti per progetto, cronologia, pulizia e composer responsive.
-- Collegata la Libreria con pulsante `+`, trigger `@`, miniature e fino a otto allegati; Gemma analizza direttamente fino a quattro immagini.
+- Collegata la Libreria con pulsante `+`, trigger `@`, miniature e fino a otto allegati; LLM analizza direttamente fino a quattro immagini.
 - Implementato il routing strutturato verso Video H3, generazione Krea, edit Flux.2 Klein e Anima; i video Chat usano sempre 10s, FAST 8-step, 0,5 MP e un candidato.
-- Aggiunto un profilo Admin separato per modello Gemma, projector, contesto, layer GPU, thread e sampling, senza contaminare i modelli H3 o Flux.
-- Creato e installato il nodo `H3StudioGemma4VisionChat`: rileva il runtime llama.cpp locale, avvia un server MTMD loopback effimero e lo termina prima di ogni render.
+- Aggiunto un profilo Admin separato per modello LLM, projector, contesto, layer GPU, thread e sampling, senza contaminare i modelli H3 o Flux.
+- Creato e installato il nodo nodo Chat locale incluso: rileva il runtime llama.cpp locale, avvia un server MTMD loopback effimero e lo termina prima di ogni render.
 - Verificati end-to-end testo, JSON strutturato, lettura Vision di una schermata e rilascio del modello; aggiunto `test:chat` alla CI.
 
 ## 27 agosto 2026 — Continue allineato al Multishot
@@ -15,7 +15,7 @@
 - Il frame finale esterno segue ora lo stesso percorso di raccordo degli shot interni: keyframe al frame 0 e memoria visiva del text encoder; le Picture restano riferimenti espliciti separati.
 - Eliminato dal segmento di continuazione il frame di confine duplicato, come già avviene tra gli shot Multishot, conservando l'audio sorgente come riferimento solo-audio.
 - Aggiunto `test:continuation` per bloccare regressioni di questi tre invarianti.
-- Il Composer ora ripara in modo deterministico il difetto Gemma in cui il paragrafo `Continuity Bible` chiude prematuramente `description` e il successivo `[Shot 1]` viene emesso come stringa JSON senza chiave; aggiunto un test isolato che verifica riparazione e no-op sui JSON validi.
+- Il Composer ora ripara in modo deterministico il difetto LLM in cui il paragrafo `Continuity Bible` chiude prematuramente `description` e il successivo `[Shot 1]` viene emesso come stringa JSON senza chiave; aggiunto un test isolato che verifica riparazione e no-op sui JSON validi.
 - Il Continue separato ora usa automaticamente 22 frame consecutivi della coda MP4 tramite H3 Motion Context, inclusa la coda audio: il last-frame keyframe resta come ancora, ma la direzione del movimento non viene più indovinata da una singola immagine. Gli shot interni continuano invece a preferire il latent AV nativo senza ricodifica.
 
 ## 25 agosto 2026
@@ -258,14 +258,18 @@
 
 ## 28 agosto 2026 — Prompt Compiler universale e TTS reference automatiche
 
-- Esteso Gemma come Prompt Compiler specializzato per Krea, Flux.2 Klein Edit, Anima e Higgs TTS; le richieste possono essere scritte in qualunque lingua e il prompt tecnico resta modificabile.
+- Esteso LLM come Prompt Compiler specializzato per Krea, Flux.2 Klein Edit, Anima e Higgs TTS; le richieste possono essere scritte in qualunque lingua e il prompt tecnico resta modificabile.
 - In Edit il compiler conserva ordine e ruolo delle reference e istruisce il motore a mantenere invariati gli elementi non richiesti; Anima riceve una descrizione illustrativa dedicata.
 - Il TTS Planner mantiene la lingua pronunciata, separa regia e copione e usa soltanto la whitelist reale di token Higgs per emotion, prosody, style e sfx.
 - Aggiunta trascrizione automatica delle reference con `openai/whisper-small`: processo Python separato, cache locale, testo correggibile, fallback manuale e rilascio VRAM prima di Higgs.
-- Verificati realmente TTS Planner italiano, Flux Edit da richiesta italiana, `loaded: false` dopo Gemma e trascrizione Whisper con processo terminato.
+- Verificati realmente TTS Planner italiano, Flux Edit da richiesta italiana, `loaded: false` dopo LLM e trascrizione Whisper con processo terminato.
 
 ### 28 agosto 2026 — Libreria immagini sincronizzata e tag Luoghi
 
 - La Libreria usa ora la stessa sorgente dei job immagine mostrati in Assets: Personaggi, Oggetti e Luoghi collegati compaiono in entrambe le viste senza duplicare i file.
 - Le immagini senza tag restano visibili in una sezione dedicata; rinomina, eliminazione, selezione multipla e Manda a Studio operano sul medesimo record.
 - L'etichetta utente Paesaggio è stata rinominata Luogo; il valore persistito `background` e il ruolo reference Sfondo restano invariati per compatibilità.
+### 28 agosto 2026 — Terminologia e selezione LLM neutrali
+- Interfaccia, messaggi, errori e documentazione pubblica usano ora le diciture generiche `LLM`, `LLM Vision` e `planner LLM`.
+- Admin e nodo Chat elencano qualunque modello GGUF non-projector, senza filtrare il catalogo in base al nome di uno specifico modello.
+- Identificatore e cartella legacy del nodo restano invariati soltanto per compatibilità con installazioni e workflow esistenti.

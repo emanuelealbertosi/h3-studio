@@ -86,7 +86,7 @@ def _one_take(description):
 
 
 class H3AIOComposerPreValidator:
-    """Preflight and conservatively repair a Gemma H3 plan."""
+    """Preflight and conservatively repair a LLM H3 plan."""
 
     @classmethod
     def INPUT_TYPES(cls):

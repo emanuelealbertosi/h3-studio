@@ -362,8 +362,8 @@ function validateSettings(value: unknown): RuntimeSettings {
   if (!Number.isFinite(animaCfg) || animaCfg < 0 || animaCfg > 20) {
     throw new Error("Il CFG Anima deve essere compreso fra 0 e 20");
   }
-  if (!chatModel || !/gemma.*\.gguf$/i.test(chatModel) || /mmproj/i.test(chatModel)) {
-    throw new Error("Seleziona un modello Gemma GGUF valido per la Chat");
+  if (!chatModel || !/\.gguf$/i.test(chatModel) || /mmproj/i.test(chatModel)) {
+    throw new Error("Seleziona un modello LLM GGUF valido per la Chat");
   }
   if (!chatProjector || !/mmproj.*\.gguf$/i.test(chatProjector)) {
     throw new Error("Seleziona il projector mmproj GGUF per la Chat vision");

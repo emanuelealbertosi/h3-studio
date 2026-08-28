@@ -11,7 +11,7 @@ Vedi [LICENSE](LICENSE) e le note nelle rispettive cartelle.
 
 Il prodotto organizza prompt, personaggi, asset, candidati e continuazioni. ComfyUI rimane il motore di rendering; H3 Studio gestisce progetti, coda, confronto, crediti e riproducibilità.
 
-La voce **Chat** aggiunge un assistente Gemma 4 Vision locale con conversazioni
+La voce **Chat** aggiunge un assistente LLM Vision locale con conversazioni
 multiple raggruppate per progetto, titoli automatici modificabili e memoria
 indipendente. Può conversare, analizzare fino a quattro immagini della Libreria e,
 su richiesta esplicita, avviare Video H3, immagini Krea, edit Flux.2 Klein o
@@ -73,9 +73,9 @@ del progetto, e in seconda battuta quelle riutilizzabili degli altri progetti,
 possono essere collegate come reference senza un nuovo upload. Il profilo Flux predefinito è il 4B
 Distilled FP8 a quattro step e CFG 1; workflow, modello, encoder, VAE, cache e
 attention backend sono gestiti dall’Admin.
-Il Prompt Compiler AI usa il Gemma configurato nella Chat per trasformare una
+Il Prompt Compiler AI usa il modello LLM configurato nella Chat per trasformare una
 richiesta naturale multilingua nel formato specifico di Krea, Flux Edit o Anima;
-il risultato resta modificabile e Gemma viene scaricato prima del render.
+il risultato resta modificabile e il modello LLM viene scaricato prima del render.
 
 
 Lo **Studio Audio** è la terza modalità dello stesso progetto. **Higgs Audio
@@ -133,7 +133,7 @@ video corrispondenti dall'output ComfyUI.
 - `docs/GENERATION-MODES.md`: mapping verificato di T2V, I2V, Reference, Keyframes, Continue ed Edit.
 - `docs/CREATIVE-LIBRARY.md`: personaggi, oggetti, reference e sheet Krea 2.
 - `docs/IMAGE-STUDIO.md`: generazione Krea/Anima, edit Flux Klein, reference e condivisione immagini fra progetti.
-- `docs/CHAT.md`: assistente Gemma 4 Vision, allegati, azioni e runtime locale.
+- `docs/CHAT.md`: assistente LLM Vision, allegati, azioni e runtime locale.
 - `docs/AUDIO-STUDIO.md`: Higgs TTS, voice cloning, MiniMax Music e rilascio VRAM.
 - `docs/INSTALLATION.md`: clone, primo avvio, sicurezza e dipendenze ComfyUI.
 - `docs/GITHUB-RELEASE.md`: sanitizzazione, CI e checklist di pubblicazione.

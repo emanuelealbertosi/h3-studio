@@ -156,7 +156,7 @@ class H3AIOAutopromptRequest:
                     "default": "AUTO: infer conservative roles from the prompt and optional visual context. Never invent identity details not visible in the references."}),
                 "shot_count": ("INT", {
                     "default": 0, "min": 0, "max": 24, "step": 1,
-                    "tooltip": "0 lets Gemma choose; positive enforces exactly."}),
+                    "tooltip": "0 lets LLM choose; positive enforces exactly."}),
                 "max_auto_shots": ("INT", {
                     "default": 6, "min": 1, "max": 24, "step": 1}),
                 "shot_seconds": ("INT", {
@@ -382,7 +382,7 @@ class H3AIOAutopromptRequest:
         media_rule = (
             "Inspect attached visuals conservatively in manifest order."
             if prepared else
-            "No visual tensor is sent to Gemma. Use text and role map only; "
+            "No visual tensor is sent to LLM. Use text and role map only; "
             "do not claim visual inspection.")
         role = str(audio_1_role)
         if role == "exact_soundtrack_plus_h3_sfx":
@@ -448,7 +448,7 @@ MEDIA MANIFEST:
             str(keyframe_positions).strip() or "AUTO", policy)
 
 class H3AIOPlanParser:
-    """Validate Gemma JSON through the existing exact H3 formatters."""
+    """Validate LLM JSON through the existing exact H3 formatters."""
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -485,15 +485,15 @@ class H3AIOPlanParser:
         mode = str(generation_mode).upper()
         data = _extract_json(llm_response)
         if not isinstance(data, dict):
-            raise ValueError("Gemma must return one JSON object.")
+            raise ValueError("LLM must return one JSON object.")
         returned_mode = str(data.get("mode") or mode).upper()
         if returned_mode != mode:
             raise ValueError(
-                "Gemma returned mode %s but the router is %s."
+                "LLM returned mode %s but the router is %s."
                 % (returned_mode, mode))
         shots = data.get("shots")
         if not isinstance(shots, list) or not shots:
-            raise ValueError("Gemma JSON requires a non-empty shots array.")
+            raise ValueError("LLM JSON requires a non-empty shots array.")
         if len(shots) > int(max_shots):
             if int(max_shots) == 1:
                 shots, collapse_note = collapse_planned_clips(
@@ -504,11 +504,11 @@ class H3AIOPlanParser:
                     flush=True)
             else:
                 raise ValueError(
-                    "Gemma returned %d clips; current limit is %d."
+                    "LLM returned %d clips; current limit is %d."
                     % (len(shots), int(max_shots)))
         if exact_shots and len(shots) != int(max_shots):
             raise ValueError(
-                "shot_count requires exactly %d clips, but Gemma returned %d."
+                "shot_count requires exactly %d clips, but LLM returned %d."
                 % (int(max_shots), len(shots)))
 
         continuity_bible = ""
@@ -517,7 +517,7 @@ class H3AIOPlanParser:
                 str(data.get("continuity_bible") or "").split())
             if not continuity_bible:
                 raise ValueError(
-                    "%s Gemma JSON requires a non-empty continuity_bible."
+                    "%s LLM JSON requires a non-empty continuity_bible."
                     % mode)
             # Keep the repeated lock detailed but bounded so it cannot crowd
             # the clip-specific action out of the H3 text context.
@@ -645,7 +645,7 @@ class H3AIOPlanParser:
                     "subject_definitions", "summary", "retention_analysis"):
                 if not state[key]:
                     raise ValueError(
-                        "%s Gemma JSON requires non-empty %s." % (mode, key))
+                        "%s LLM JSON requires non-empty %s." % (mode, key))
             script, count = build_r2v_script(json.dumps(state))
             validated = dict(state)
             validated["mode"] = mode

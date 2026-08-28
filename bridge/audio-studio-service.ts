@@ -112,23 +112,23 @@ function extractJsonObject(raw: string) {
   const source = fenced ?? raw;
   const start = source.indexOf("{");
   const end = source.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new Error("Gemma non ha restituito il piano musicale JSON");
+  if (start < 0 || end <= start) throw new Error("LLM non ha restituito il piano musicale JSON");
   return JSON.parse(source.slice(start, end + 1)) as unknown;
 }
 
 export function normalizeMusicPlan(raw: string, expectedInstrumental: boolean): MusicPlan {
   const parsed = extractJsonObject(raw);
-  if (!isRecord(parsed)) throw new Error("Piano musicale Gemma non valido");
+  if (!isRecord(parsed)) throw new Error("Piano musicale LLM non valido");
   const caption = typeof parsed.caption === "string" ? parsed.caption.trim().slice(0, 10_000) : "";
   const lyrics = typeof parsed.lyrics === "string" ? parsed.lyrics.trim().slice(0, 30_000) : "";
   const summary = typeof parsed.summary === "string" ? parsed.summary.trim().slice(0, 1_000) : "";
-  if (caption.length < 20) throw new Error("Gemma ha prodotto una descrizione musicale troppo breve");
-  if (!expectedInstrumental && lyrics.length < 10) throw new Error("Gemma non ha prodotto le lyrics richieste");
+  if (caption.length < 20) throw new Error("LLM ha prodotto una descrizione musicale troppo breve");
+  if (!expectedInstrumental && lyrics.length < 10) throw new Error("LLM non ha prodotto le lyrics richieste");
   return {
     caption,
     lyrics: expectedInstrumental ? "" : lyrics,
     instrumental: expectedInstrumental,
-    summary: summary || "Piano musicale preparato da Gemma.",
+    summary: summary || "Piano musicale preparato dal modello LLM.",
   };
 }
 
@@ -300,7 +300,7 @@ export class AudioStudioService {
         images: [],
       });
       if (!response.ok || !response.text?.trim()) {
-        throw new Error(response.error ?? "Gemma non ha preparato il brano");
+        throw new Error(response.error ?? "LLM non ha preparato il brano");
       }
       return normalizeMusicPlan(response.text, instrumental);
     } finally {

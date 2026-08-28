@@ -84,11 +84,11 @@ I pesi restano fuori da Git e sono verificati tramite gli endpoint
 Ogni progetto possiede una conversazione persistita in `chat_threads` e
 `chat_messages`. Il browser invia testo e riferimenti annotati al bridge; il
 bridge aggiunge un prompt di routing strutturato e chiama gli endpoint locali
-del nodo `H3StudioGemma4VisionChat`. Il nodo risolve soltanto file confinati
+del nodo Chat locale incluso. Il nodo risolve soltanto file confinati
 nelle directory `models/llm` e negli input/output ComfyUI, comprime le immagini
 per l'analisi e avvia un `llama-server` MTMD su una porta loopback casuale.
 
-Gemma restituisce sempre una risposta naturale e, opzionalmente, una singola
+LLM restituisce sempre una risposta naturale e, opzionalmente, una singola
 azione validata dal bridge. I parametri di esecuzione non sono affidati al
 modello: i video Chat sono fissati a 10 secondi, 0,5 MP, un candidato e FAST
 8-step; generazione Krea, edit Klein e Anima passano invece ai servizi immagini

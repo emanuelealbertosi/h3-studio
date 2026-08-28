@@ -58,21 +58,21 @@ function extractJsonObject(raw: string) {
   const source = fenced ?? raw;
   const start = source.indexOf("{");
   const end = source.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new Error("Gemma non ha restituito il piano JSON");
+  if (start < 0 || end <= start) throw new Error("LLM non ha restituito il piano JSON");
   return JSON.parse(source.slice(start, end + 1)) as unknown;
 }
 
 export function normalizePromptPlan(raw: string, mode: PromptPlannerMode): PromptPlan {
   const parsed = extractJsonObject(raw);
-  if (!isRecord(parsed)) throw new Error("Piano Gemma non valido");
+  if (!isRecord(parsed)) throw new Error("Piano LLM non valido");
   const prompt = typeof parsed.prompt === "string" ? parsed.prompt.trim().slice(0, 20_000) : "";
   const summary = typeof parsed.summary === "string" ? parsed.summary.trim().slice(0, 1_000) : "";
   const language = typeof parsed.language === "string" ? parsed.language.trim().slice(0, 80) : "";
-  if (prompt.length < 1) throw new Error("Gemma ha prodotto un prompt vuoto");
-  if (mode !== "tts" && prompt.length < 10) throw new Error("Gemma ha prodotto un prompt troppo breve");
+  if (prompt.length < 1) throw new Error("LLM ha prodotto un prompt vuoto");
+  if (mode !== "tts" && prompt.length < 10) throw new Error("LLM ha prodotto un prompt troppo breve");
   return {
     prompt,
-    summary: summary || "Prompt preparato da Gemma.",
+    summary: summary || "Prompt preparato dal modello LLM.",
     language: language || (mode === "tts" ? "auto" : "English"),
     mode,
   };
@@ -141,7 +141,7 @@ export class PromptPlannerService {
         images: [],
       });
       if (!response.ok || !response.text?.trim()) {
-        throw new Error(response.error ?? "Gemma non ha preparato il prompt");
+        throw new Error(response.error ?? "LLM non ha preparato il prompt");
       }
       return normalizePromptPlan(response.text, mode);
     } finally {

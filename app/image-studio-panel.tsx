@@ -602,7 +602,7 @@ export default function ImageStudioPanel({
 
   async function preparePromptPlan(manageBusy = true) {
     if (manageBusy) setBusy("planner");
-    setMessage("Gemma sta preparando il prompt per il motore selezionato...");
+    setMessage("LLM sta preparando il prompt per il motore selezionato...");
     try {
       const plannerMode = mode === "edit" ? "image_edit" : mode === "anima" ? "image_anima" : "image_generate";
       const response = await fetch(`${bridgeUrl}/api/prompt-planner`, {
@@ -620,7 +620,7 @@ export default function ImageStudioPanel({
       setPrompt(payload.plan.prompt);
       setPlannerSummary(payload.plan.summary);
       setPlannerReady(true);
-      setMessage(`${payload.plan.summary} Gemma e stata scaricata; il prompt resta modificabile.`);
+      setMessage(`${payload.plan.summary} Il modello LLM è stato scaricato; il prompt resta modificabile.`);
       return payload.plan;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Prompt Compiler fallito");
@@ -633,7 +633,7 @@ export default function ImageStudioPanel({
   async function run() {
     const sourceRequest = plannerEnabled ? plannerIdea.trim() : prompt.trim();
     if (!projectId || !sourceRequest) { setMessage(!projectId ? "Seleziona un progetto." : "Descrivi l'immagine."); return; }
-    if (plannerEnabled && !plannerStatus?.ready) { setMessage("Prompt Compiler non disponibile: configura Gemma oppure usa Manuale."); return; }
+    if (plannerEnabled && !plannerStatus?.ready) { setMessage("Prompt Compiler non disponibile: configura il modello LLM oppure usa Manuale."); return; }
     if (turnaroundFormatMismatch) {
       setMessage("Character turnaround richiede il formato 16:9. Ripristinalo prima di generare.");
       return;
@@ -913,14 +913,14 @@ export default function ImageStudioPanel({
         </div>
         <div className="composer-body">
           <div className={`prompt-planner ${plannerEnabled ? "enabled" : ""}`}>
-            <div><label><input checked={plannerEnabled} onChange={(event) => { setPlannerEnabled(event.target.checked); setPlannerReady(false); }} type="checkbox" /> Prompt Compiler AI</label><span>{plannerStatus?.ready ? "Scrivi in qualunque lingua: Gemma prepara il formato corretto e poi viene scaricata." : "Configura Gemma in Admin oppure usa la modalita manuale."}</span></div>
+            <div><label><input checked={plannerEnabled} onChange={(event) => { setPlannerEnabled(event.target.checked); setPlannerReady(false); }} type="checkbox" /> Prompt Compiler AI</label><span>{plannerStatus?.ready ? "Scrivi in qualunque lingua: il modello LLM prepara il formato corretto e poi viene scaricato." : "Configura il modello LLM in Admin oppure usa la modalita manuale."}</span></div>
           </div>
           {plannerEnabled && <>
             <label className="prompt-field planner-request-field">
               <span>{mode === "edit" ? "Cosa vuoi modificare?" : mode === "anima" ? "Quale illustrazione vuoi creare?" : "Quale immagine vuoi creare?"}</span>
               <textarea onChange={(event) => { setPlannerIdea(event.target.value); setPlannerReady(false); }} placeholder="Scrivi liberamente in italiano o in un'altra lingua…" rows={4} value={plannerIdea} />
             </label>
-            <button className="prompt-plan-button" disabled={busy === "planner" || !plannerIdea.trim() || !plannerStatus?.ready} onClick={() => void preparePromptPlan().catch(() => undefined)} type="button">{busy === "planner" ? "Gemma sta preparando..." : "Prepara con Gemma"}</button>
+            <button className="prompt-plan-button" disabled={busy === "planner" || !plannerIdea.trim() || !plannerStatus?.ready} onClick={() => void preparePromptPlan().catch(() => undefined)} type="button">{busy === "planner" ? "LLM sta preparando..." : "Prepara con LLM"}</button>
             {plannerReady && <div className="prompt-plan-summary"><strong>Prompt pronto e modificabile</strong><span>{plannerSummary}</span></div>}
           </>}
           {(!plannerEnabled || plannerReady) && <label className="prompt-field">
@@ -1069,7 +1069,7 @@ export default function ImageStudioPanel({
             {selectedEngineReady ? "Motore immagini pronto" : engineStatusError ?? "Dipendenze motore mancanti"}
           </div>
           <div className="preset-note"><span className="fast-badge">{mode === "edit" ? "FLUX KLEIN EDIT" : mode === "anima" ? "ANIMA" : "IMAGE"}</span>{keepAspectUnavailable ? "Reference 1 senza dimensioni" : `${selectedFormat.width} × ${selectedFormat.height} · ${(selectedFormat.width * selectedFormat.height / 1_000_000).toFixed(1)} MP`} · {selectedComposition.shortLabel}</div>
-          <div className="generation-cta"><div><span>Output</span><strong>{candidateCount} immagin{candidateCount === 1 ? "e" : "i"} · {tag === "untagged" ? "senza tag" : tags.find((item) => item.value === tag)?.label}</strong></div><button disabled={busy === "run" || busy === "planner" || active(job) || !projectId || !selectedEngineReady || turnaroundFormatMismatch || keepAspectUnavailable || (plannerEnabled && (!plannerStatus?.ready || !plannerIdea.trim()))} onClick={() => void run()} type="button">{busy === "planner" ? "Gemma prepara..." : busy === "run" || active(job) ? "Generazione in corso" : turnaroundFormatMismatch ? "Formato 16:9 richiesto" : keepAspectUnavailable ? "Dimensioni reference mancanti" : !selectedEngineReady ? "Motore non pronto" : mode === "edit" ? "Crea " + candidateCount + " edit" : mode === "anima" ? "Genera " + candidateCount + " anime" : "Genera " + candidateCount + " immagini"}</button></div>
+          <div className="generation-cta"><div><span>Output</span><strong>{candidateCount} immagin{candidateCount === 1 ? "e" : "i"} · {tag === "untagged" ? "senza tag" : tags.find((item) => item.value === tag)?.label}</strong></div><button disabled={busy === "run" || busy === "planner" || active(job) || !projectId || !selectedEngineReady || turnaroundFormatMismatch || keepAspectUnavailable || (plannerEnabled && (!plannerStatus?.ready || !plannerIdea.trim()))} onClick={() => void run()} type="button">{busy === "planner" ? "LLM prepara..." : busy === "run" || active(job) ? "Generazione in corso" : turnaroundFormatMismatch ? "Formato 16:9 richiesto" : keepAspectUnavailable ? "Dimensioni reference mancanti" : !selectedEngineReady ? "Motore non pronto" : mode === "edit" ? "Crea " + candidateCount + " edit" : mode === "anima" ? "Genera " + candidateCount + " anime" : "Genera " + candidateCount + " immagini"}</button></div>
         </div>
         {message && <div className="run-message">{message}</div>}
       </section>

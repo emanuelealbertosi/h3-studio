@@ -270,7 +270,7 @@ def _load_server(model_path, mmproj_path, n_ctx, n_gpu_layers, n_threads):
         time.sleep(1)
     tail = _log_tail()
     _release_server()
-    raise RuntimeError("Timed out while loading Gemma 4 Vision: " + last_error + "\n" + tail)
+    raise RuntimeError("Timed out while loading the vision LLM: " + last_error + "\n" + tail)
 
 
 def _normalize_messages(messages, image_files):
@@ -324,7 +324,7 @@ def _run_chat(body):
     message = choices[0].get("message") if choices and isinstance(choices[0], dict) else None
     text = message.get("content") if isinstance(message, dict) else None
     if not isinstance(text, str) or not text.strip():
-        raise RuntimeError("Gemma 4 returned an empty Chat response")
+        raise RuntimeError("The LLM returned an empty Chat response")
     return {"ok": True, "text": text.strip(), "model": os.path.basename(model_path)}
 
 
@@ -360,7 +360,7 @@ if PromptServer is not None and getattr(PromptServer, "instance", None) is not N
                     rel = os.path.relpath(os.path.join(dirpath, filename), root).replace("/", os.sep)
                     if "mmproj" in low:
                         projectors.append(rel)
-                    elif "gemma" in low:
+                    else:
                         models.append(rel)
         return web.json_response({
             "ok": error is None,
@@ -390,4 +390,4 @@ if PromptServer is not None and getattr(PromptServer, "instance", None) is not N
 
 
 NODE_CLASS_MAPPINGS = {"H3StudioGemma4VisionChat": H3StudioGemma4VisionChat}
-NODE_DISPLAY_NAME_MAPPINGS = {"H3StudioGemma4VisionChat": "H3 Studio · Gemma 4 Vision Chat"}
+NODE_DISPLAY_NAME_MAPPINGS = {"H3StudioGemma4VisionChat": "H3 Studio · Local Vision LLM"}

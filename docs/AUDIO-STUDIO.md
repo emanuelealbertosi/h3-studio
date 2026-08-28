@@ -14,10 +14,10 @@ La terminazione viene eseguita nel blocco `finally` anche in caso di errore o
 Stop. Prima dell'avvio il bridge chiede inoltre a ComfyUI di scaricare i modelli
 residenti per evitare una contesa VRAM.
 
-Il **TTS Planner AI**, attivo per impostazione predefinita, usa il Gemma della
+Il **TTS Planner AI**, attivo per impostazione predefinita, usa il modello LLM della
 Chat come Prompt Compiler: accetta una richiesta in qualunque lingua, separa le
 indicazioni di voce/prosodia dal testo pronunciato e conserva la lingua richiesta.
-Il copione Higgs prodotto resta visibile e modificabile. Gemma viene scaricato
+Il copione Higgs prodotto resta visibile e modificabile. LLM viene scaricato
 prima del caricamento di Higgs; disattivando il Planner si torna al testo diretto.
 
 Per il cloning one-shot si può caricare un file audio oppure sceglierne uno
@@ -29,10 +29,10 @@ manualmente oppure lasciare che Higgs usi il solo campione audio.
 
 ## MiniMax Music 3
 
-Il **Music Planner AI**, attivo per impostazione predefinita, usa il Gemma
+Il **Music Planner AI**, attivo per impostazione predefinita, usa il modello LLM
 configurato nella Chat per convertire una richiesta naturale in una caption
 tecnica inglese e, quando richiesto, in lyrics strutturate. Il piano resta
-visibile e modificabile prima della generazione. Gemma viene sempre scaricato
+visibile e modificabile prima della generazione. LLM viene sempre scaricato
 prima che MiniMax Music inizi a caricare; disattivando il Planner rimane
 disponibile l'input manuale.
 

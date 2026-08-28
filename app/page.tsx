@@ -4374,7 +4374,7 @@ function AdminPanel() {
               <div className="engine-config-heading">
                 <div>
                   <span>LOCAL AI</span>
-                  <h3>Gemma 4 Vision Chat</h3>
+                  <h3>LLM Vision Chat</h3>
                 </div>
                 <b className={data.capabilities.chatRuntime.ready ? "admin-ready" : "admin-warning"}>
                   {data.capabilities.chatRuntime.ready ? data.capabilities.chatRuntime.loaded ? "CARICATO" : "PRONTO" : "SETUP"}
@@ -4382,12 +4382,12 @@ function AdminPanel() {
               </div>
               <div className="admin-form image-edit-engine-form">
                 <label>
-                  <span>Modello Gemma GGUF</span>
+                  <span>Modello LLM GGUF</span>
                   <select value={data.settings.chat.model} onChange={(event) => setData({
                     ...data,
                     settings: { ...data.settings, chat: { ...data.settings.chat, model: event.target.value } },
                   })}>
-                    {compatibleEngineOptions(data.capabilities.chatModels, data.settings.chat.model, /gemma.*\.gguf$/i).map((model) => <option key={model} value={model}>{model}</option>)}
+                    {compatibleEngineOptions(data.capabilities.chatModels, data.settings.chat.model, /\.gguf$/i).map((model) => <option key={model} value={model}>{model}</option>)}
                   </select>
                 </label>
                 <label>

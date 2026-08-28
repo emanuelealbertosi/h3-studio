@@ -135,7 +135,7 @@ function trackedJobActive(job: ChatTrackedJob | undefined) {
 }
 
 function trackedStatus(candidate: ChatTrackedCandidate | undefined, thinking = false) {
-  if (thinking) return "Gemma sta preparando prompt e motore";
+  if (thinking) return "LLM sta preparando prompt e motore";
   if (!candidate) return "Collegamento alla coda…";
   if (candidate.phaseLabel) return candidate.phaseLabel;
   if (["prepared", "submitted"].includes(candidate.status)) return "Invio a ComfyUI";
@@ -234,7 +234,7 @@ export default function ChatPanel({
       setActiveConversationId(selected.id);
       setRuntime(statusPayload.chat ?? null);
       setNotice(statusPayload.chat?.ready
-        ? "Gemma 4 Vision pronta · il modello resta caricato tra i messaggi e viene liberato prima dei render"
+        ? "Assistente LLM Vision pronto · il modello resta caricato tra i messaggi e viene liberato prima dei render"
         : statusPayload.chat?.error ?? "Nodo Chat non pronto: installalo e riavvia ComfyUI");
     }).catch((error) => !disposed && setNotice(error instanceof Error ? error.message : "Chat non disponibile"));
     return () => { disposed = true; };
@@ -534,7 +534,7 @@ export default function ChatPanel({
   async function send() {
     if (!projectId || !activeConversationId || !text.trim() || chatLocked) return;
     setBusy(true);
-    setNotice("Gemma 4 sta preparando la risposta…");
+    setNotice("LLM sta preparando la risposta…");
     try {
       const response = await fetch(`${bridgeUrl}/api/chat/conversations/${activeConversationId}/messages`, {
         method: "POST",
@@ -561,7 +561,7 @@ export default function ChatPanel({
       setAttachments([]);
       const last = payload.messages.at(-1);
       setNotice(last?.action?.status === "started"
-        ? `${actionLabel(last.action.type)} avviato${payload.reusedAttachments ? " · media recuperato dalla memoria" : ""} · Gemma è stata scaricata dalla memoria`
+        ? `${actionLabel(last.action.type)} avviato${payload.reusedAttachments ? " · media recuperato dalla memoria" : ""} · il modello LLM è stato scaricato dalla memoria`
         : last?.status === "failed" ? last.error ?? "Risposta fallita" : "Chat pronta");
       setRuntime((current) => current ? { ...current, loaded: !last?.action } : current);
     } catch (error) {
@@ -623,13 +623,13 @@ export default function ChatPanel({
     "Crea una musica cinematografica di 30 secondi…",
   ], []);
   const routes: Array<{ id: ChatRoute; label: string; help: string }> = [
-    { id: "auto", label: "Auto", help: "Gemma sceglie in base alla richiesta" },
+    { id: "auto", label: "Auto", help: "LLM sceglie in base alla richiesta" },
     { id: "video", label: "Video H3", help: "Forza la generazione video" },
     { id: "krea", label: "Krea", help: "Forza una immagine fotografica/generale" },
     { id: "anima", label: "Anima", help: "Forza disegno, anime, manga o illustrazione" },
     { id: "edit", label: "Edit", help: "Forza Flux Klein sulle immagini allegate" },
     { id: "tts", label: "TTS", help: "Voce Higgs; un audio allegato diventa la reference da clonare" },
-    { id: "music", label: "Musica", help: "MiniMax Music con planner Gemma automatico" },
+    { id: "music", label: "Musica", help: "MiniMax Music con planner LLM automatico" },
   ];
 
   return (
@@ -709,7 +709,7 @@ export default function ChatPanel({
 
       <section className="chat-panel">
       <header className="chat-heading">
-        <div><span className="section-index">CHAT · {projectName ?? "PROGETTO"}</span><h2>{activeConversation?.title ?? "Gemma 4 Vision"}</h2><p>{notice}</p></div>
+        <div><span className="section-index">CHAT · {projectName ?? "PROGETTO"}</span><h2>{activeConversation?.title ?? "LLM Vision"}</h2><p>{notice}</p></div>
         <div className="chat-heading-actions">
           {memory?.active && (
             <span className="chat-memory" title={memory.summary}>⌁ Memoria · {memory.summarizedMessages}</span>

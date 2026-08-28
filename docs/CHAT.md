@@ -1,13 +1,13 @@
 # Chat locale
 
-La voce **Chat** usa Gemma 4 Vision come assistente locale. Ogni progetto può
+La voce **Chat** usa un assistente LLM Vision locale. Ogni progetto può
 contenere più conversazioni indipendenti, persistenti in SQLite dopo il riavvio
 di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
 
 ## Uso
 
 - Premi `+` accanto a un progetto per creare una nuova conversazione. Il titolo
-  viene proposto da Gemma durante la prima risposta, senza una seconda inferenza,
+  viene proposto dal modello LLM durante la prima risposta, senza una seconda inferenza,
   e può essere modificato con la matita.
 - Il cestino elimina la conversazione dopo un popup di conferma. **Conserva i
   media generati** è selezionato per impostazione predefinita: messaggi e memoria
@@ -20,10 +20,10 @@ di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
 - Premi `+` oppure digita `@` alla fine del testo per aprire la Libreria. Le
   miniature mostrano immagini, video e media Esterni riutilizzabili.
 - Con immagini allegate puoi chiedere un'analisi, un edit Flux.2 Klein, un I2V
-  o un Reference H3. Gemma può osservare fino a quattro immagini per messaggio;
+  o un Reference H3. LLM può osservare fino a quattro immagini per messaggio;
   il router accetta fino a otto media complessivi per un'azione.
 - Sopra il campo di testo scegli **Auto, Video H3, Krea, Anima o Edit**. La
-  scelta esplicita prevale sempre sul router di Gemma, ma non avvia nulla finché
+  scelta esplicita prevale sempre sul router del modello LLM, ma non avvia nulla finché
   il testo non contiene una richiesta esplicita di generazione. Se vuoi essere
   certo di ottenere un disegno, seleziona **Anima**; se vuoi una fotografia o
   un'immagine generale, seleziona **Krea**.
@@ -33,7 +33,7 @@ di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
   8-step. Per cambiare questi parametri apri poi il job nello Studio.
 
 Le azioni compaiono come schede vive nella conversazione. Durante la preparazione
-di Gemma e poi durante la produzione, il riquadro mostra lo splash sfocato, la
+del modello LLM e poi durante la produzione, il riquadro mostra lo splash sfocato, la
 fase corrente e la percentuale quando ComfyUI la rende disponibile. Al termine
 lo stesso riquadro viene popolato con l'immagine o con il player video: non serve
 aprire lo Studio per vedere il risultato.
@@ -57,7 +57,7 @@ dell'assistente resta in italiano.
 
 Ogni conversazione conserva cronologia e memoria proprie in SQLite, ma non viene
 reinviata integralmente al modello. Quando la finestra recente supera 16
-messaggi o il budget derivato da `n_ctx`, Gemma consolida i messaggi meno recenti
+messaggi o il budget derivato da `n_ctx`, LLM consolida i messaggi meno recenti
 in una memoria persistente della conversazione. La richiesta successiva contiene:
 
 1. regole del router;
@@ -89,7 +89,7 @@ gli altri messaggi conservano esclusivamente nome e tipo del media nel testo
 compatto della conversazione.
 
 Il nodo incluso non avvia LM Studio. Usa soltanto un `llama-server` compatibile
-con Gemma 4 Vision e MTMD:
+con LLM Vision e MTMD:
 
 1. prima cerca `H3_CHAT_LLAMA_SERVER`;
 2. poi `runtime/llama-server(.exe)` nella cartella del nodo;
@@ -103,7 +103,7 @@ viene terminato automaticamente prima di Video, Image, Face o Upscale.
 
 ## Diagnostica
 
-In Admin, **Gemma 4 Vision Chat** mostra `PRONTO`, `CARICATO` oppure `SETUP`.
+In Admin, **LLM Vision Chat** mostra `PRONTO`, `CARICATO` oppure `SETUP`.
 `SETUP` indica che manca il nodo, il runtime, il GGUF o il projector. Dopo aver
 installato/aggiornato il nodo occorre riavviare ComfyUI; non serve avviare LM
 Studio. Il test di contratto del repository è `npm run test:chat`.

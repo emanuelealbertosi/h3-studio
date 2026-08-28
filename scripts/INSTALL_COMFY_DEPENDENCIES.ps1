@@ -61,7 +61,7 @@ if (Test-Path -LiteralPath $targetChat -PathType Container) {
   New-Item -ItemType Directory -Force -Path $targetChat | Out-Null
 }
 Copy-Item -Path (Join-Path $bundledChat "*") -Destination $targetChat -Recurse -Force
-Write-Host "Installato H3 Studio Gemma 4 Chat -> $targetChat" -ForegroundColor Green
+Write-Host "Installato H3 Studio LLM Chat -> $targetChat" -ForegroundColor Green
 
 $installedRepos = [System.Collections.Generic.List[string]]::new()
 

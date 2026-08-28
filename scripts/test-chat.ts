@@ -198,6 +198,14 @@ try {
   assert.match(node, /--reasoning", "off"/);
   assert.match(node, /H3_CHAT_LLAMA_SERVER/);
   assert.match(node, /\/h3_studio\/chat\/unload/);
+  assert.match(node, /if "mmproj" in low:[\s\S]*?else:[\s\S]*?models\.append\(rel\)/);
+  assert.match(node, /H3 Studio · Local Vision LLM/);
+  assert.ok(server.includes("llmFiles.filter((file) => /\\.gguf$/i.test(file) && !/mmproj/i.test(file))"));
+  assert.ok(page.includes("compatibleEngineOptions(data.capabilities.chatModels, data.settings.chat.model, /\\.gguf$/i)"));
+  assert.doesNotMatch(panel, /Gemma/i);
+  assert.doesNotMatch(page, /Gemma/i);
+  assert.doesNotMatch(imagePanel, /Gemma/i);
+  assert.doesNotMatch(audioPanel, /Gemma/i);
   assert.match(installer, /H3-Studio-Gemma4-Chat/);
   const parsed = JSON.parse(manifest) as { items: Array<{ id: string }> };
   assert.ok(parsed.items.some((item) => item.id === "h3-studio-chat-node"));

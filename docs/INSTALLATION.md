@@ -10,7 +10,7 @@ workflow. Stato locale, password, database, log e media non vengono versionati.
 - ComfyUI già funzionante e raggiungibile via HTTP.
 - FFmpeg nel `PATH` oppure il suo percorso configurato nell'Admin.
 - I modelli MiniMax H3, Krea e Flux.2 Klein scelti dall’Admin nelle cartelle ComfyUI corrette.
-- Per la Chat: un GGUF Gemma 4 con il relativo `mmproj` nella cartella `llm`
+- Per la Chat: un modello LLM GGUF compatibile con llama.cpp e il relativo `mmproj` nella cartella `llm`
   visibile a ComfyUI e un `llama-server` recente con supporto MTMD/Vision.
 
 La versione minima 22.16.0 è necessaria anche per il backup SQLite consistente

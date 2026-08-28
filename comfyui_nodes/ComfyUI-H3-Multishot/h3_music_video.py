@@ -154,7 +154,7 @@ def _extract_json(text):
     if first_error is not None:
         raise first_error
     raise ValueError(
-        "Gemma did not return valid project JSON. Use temperature 0 and "
+        "LLM did not return valid project JSON. Use temperature 0 and "
         "keep the supplied planner instruction unchanged.")
 
 
@@ -187,15 +187,15 @@ def _music_debug_base(filename_prefix):
     import folder_paths
 
     output_root = os.path.realpath(folder_paths.get_output_directory())
-    raw = str(filename_prefix or "H3_MUSIC_VIDEO_DEBUG/gemma_plan")
+    raw = str(filename_prefix or "H3_MUSIC_VIDEO_DEBUG/llm_plan")
     parts = [
         re.sub(r"[^\w. -]+", "_", part, flags=re.UNICODE).strip(" .")
         for part in raw.replace("\\", "/").split("/")
         if part.strip() not in ("", ".", "..")
     ]
     if not parts:
-        parts = ["H3_MUSIC_VIDEO_DEBUG", "gemma_plan"]
-    stem = parts[-1] or "gemma_plan"
+        parts = ["H3_MUSIC_VIDEO_DEBUG", "llm_plan"]
+    stem = parts[-1] or "llm_plan"
     folder = os.path.realpath(os.path.join(output_root, *parts[:-1]))
     if os.path.commonpath([output_root, folder]) != output_root:
         raise ValueError("Debug output path must remain inside ComfyUI/output.")
@@ -278,7 +278,7 @@ def _assign_lyrics_to_vocal_shots(shots, lyrics, language):
         lyric_text = "\n".join(assigned)
         lyric_block = "<d>[%s] %s</d>" % (language, lyric_text)
         detail = _section_text(shot.get("detailed_description"))
-        # Gemma may place several timed <d> blocks in a shot. Remove all of
+        # LLM may place several timed <d> blocks in a shot. Remove all of
         # those provisional assignments first, then append one canonical
         # parser-owned block. Previously the first replacement was deleted by
         # the cleanup regex immediately afterwards, leaving H3 no lyrics.
@@ -423,7 +423,7 @@ def _shot_to_prompt(shot, lip_sync_mode="h3_generate_vocals"):
 
 
 class H3MusicVideoPromptKit:
-    """Build the strict Gemma planning request and H3 grid parameters."""
+    """Build the strict LLM planning request and H3 grid parameters."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -455,7 +455,7 @@ class H3MusicVideoPromptKit:
     FUNCTION = "build"
     CATEGORY = "utils/minimax/music video"
     DESCRIPTION = (
-        "Creates the strict one-call Gemma request for Music3 plus H3 "
+        "Creates the strict one-call LLM request for Music3 plus H3 "
         "full-reference shot prompts.")
 
     def build(self, creative_brief, reference_roles, lyrics_or_dialogue,
@@ -547,7 +547,7 @@ class H3ExternalSongPromptKit(H3MusicVideoPromptKit):
     FUNCTION = "build_external"
     DESCRIPTION = (
         "Reads an external song, calculates the required 5/10/15-second H3 "
-        "clips including the one-frame memory overlap, and builds the Gemma "
+        "clips including the one-frame memory overlap, and builds the LLM "
         "planning request.")
 
     def build_external(self, creative_brief, reference_roles,
@@ -597,7 +597,7 @@ class H3ExternalSongPromptKit(H3MusicVideoPromptKit):
 
 
 class H3MusicVideoPlanParser:
-    """Validate Gemma JSON and turn shots into the existing --- script form."""
+    """Validate LLM JSON and turn shots into the existing --- script form."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -614,7 +614,7 @@ class H3MusicVideoPlanParser:
                         "default": "auto_from_shots",
                         "tooltip": "Deterministic Music3 lead-vocal lock. Auto "
                                    "infers it from the H3 shot descriptions; "
-                                   "male/female overrides Gemma completely.",
+                                   "male/female overrides LLM completely.",
                     }),
                 "lip_sync_mode": (
                     ["h3_generate_vocals", "soundtrack_activity",
@@ -630,13 +630,13 @@ class H3MusicVideoPlanParser:
                     }),
                 "save_debug_plan": ("BOOLEAN", {
                     "default": True,
-                    "label_on": "save Gemma/H3 prompts ON",
-                    "label_off": "save Gemma/H3 prompts OFF",
-                    "tooltip": "Save Gemma's raw response before validation, "
+                    "label_on": "save LLM/H3 prompts ON",
+                    "label_off": "save LLM/H3 prompts OFF",
+                    "tooltip": "Save LLM's raw response before validation, "
                                "then the validated JSON and exact final H3 "
                                "script under ComfyUI/output."}),
                 "debug_filename_prefix": ("STRING", {
-                    "default": "H3_MUSIC_VIDEO_DEBUG/gemma_plan",
+                    "default": "H3_MUSIC_VIDEO_DEBUG/llm_plan",
                     "tooltip": "Output-relative folder and filename prefix."}),
                 "lyrics_language": (
                     ["auto_from_plan", "Italian", "English", "Spanish",
@@ -646,7 +646,7 @@ class H3MusicVideoPlanParser:
                         "default": "auto_from_plan",
                         "tooltip": "Language tag forced into every exact <d> "
                                    "lyrics block sent to H3. Auto reads the "
-                                   "Gemma plan and music caption.",
+                                   "LLM plan and music caption.",
                     }),
             },
         }
@@ -706,16 +706,16 @@ class H3MusicVideoPlanParser:
               vocal_profile="auto_from_shots",
               lip_sync_mode="h3_generate_vocals",
               save_debug_plan=True,
-              debug_filename_prefix="H3_MUSIC_VIDEO_DEBUG/gemma_plan",
+              debug_filename_prefix="H3_MUSIC_VIDEO_DEBUG/llm_plan",
               lyrics_language="auto_from_plan"):
         debug_base = ""
         if save_debug_plan:
             try:
                 debug_base = _music_debug_base(debug_filename_prefix)
                 raw_path = _write_music_debug(
-                    debug_base, "_01_gemma_raw.txt", llm_response)
+                    debug_base, "_01_llm_raw.txt", llm_response)
                 print(
-                    "[H3MusicVideoDebug] raw Gemma response saved: %s"
+                    "[H3MusicVideoDebug] raw LLM response saved: %s"
                     % raw_path,
                     flush=True)
             except Exception as exc:
@@ -733,7 +733,7 @@ class H3MusicVideoPlanParser:
                 "Project JSON needs non-empty music_caption, lyrics and shots[].")
         if len(shots) < planned_shots:
             raise ValueError(
-                "Gemma returned %d shots but %d were requested. "
+                "LLM returned %d shots but %d were requested. "
                 "Increase max_new_tokens."
                 % (len(shots), planned_shots))
         shots = _normalise_music_audio_markers(
@@ -1108,7 +1108,7 @@ class H3MusicVideoReferenceMemorySampler(H3MultishotSampler):
         from comfy_extras.nodes_audio import vae_decode_audio
         import comfy.model_management as model_management
 
-        # All upstream work (Gemma and Music3) is complete once this method
+        # All upstream work (LLM and Music3) is complete once this method
         # receives its AUDIO tensor. Free their loaded weights before encoding
         # references or asking H3 to load. The H3 patcher objects passed here
         # remain valid and are loaded again on demand by ComfyUI.
@@ -1358,7 +1358,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "H3ExternalSongPromptKit":
         "H3 MUSIC VIDEO - External Song + Auto Duration",
     "H3MusicVideoPlanParser":
-        "H3 MUSIC VIDEO - Validate Gemma Plan",
+        "H3 MUSIC VIDEO - Validate LLM Plan",
     "H3MusicVideoReferenceMemorySampler":
         "H3 MUSIC VIDEO - Reference + Memory + Synced Song",
 }

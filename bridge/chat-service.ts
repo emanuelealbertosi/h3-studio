@@ -70,7 +70,7 @@ function extractJson(text: string) {
   const source = fenced ?? text;
   const start = source.indexOf("{");
   const end = source.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new Error("Gemma non ha restituito il piano JSON richiesto");
+  if (start < 0 || end <= start) throw new Error("LLM non ha restituito il piano JSON richiesto");
   return JSON.parse(source.slice(start, end + 1)) as unknown;
 }
 
@@ -118,7 +118,7 @@ export function normalizePlan(text: string): { reply: string; title: string | nu
   const normalizedType = normalizeActionType(parsed.action.type);
   const prompt = typeof parsed.action.prompt === "string" ? parsed.action.prompt.trim() : "";
   if (!normalizedType || prompt.length < 3 || prompt.length > 20_000) {
-    throw new Error("Gemma ha proposto un'azione non valida");
+    throw new Error("LLM ha proposto un'azione non valida");
   }
   const videoMode = ["T2V", "I2V", "R2V", "VIDEO EXTENSION", "VIDEO EDITING"].includes(String(parsed.action.videoMode))
     ? parsed.action.videoMode as PlannedAction["videoMode"]
@@ -378,7 +378,7 @@ export class ChatService {
         messages: modelMessages,
         images: attachments.filter((item) => item.kind === "picture").map((item) => item.file).slice(0, 4),
       });
-      if (!response.ok || !response.text) throw new Error(response.error ?? "Gemma 4 non ha risposto");
+      if (!response.ok || !response.text) throw new Error(response.error ?? "LLM non ha risposto");
       rawText = response.text;
       const parsedPlan = normalizePlan(rawText);
       const plan = { ...parsedPlan, action: routeAction(parsedPlan.action, route) };

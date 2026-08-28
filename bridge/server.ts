@@ -615,7 +615,7 @@ app.post("/api/prompt-planner", async (request, reply) => {
     return reply.status(200).send({ ok: true, plan: await promptPlanner.plan(request.body) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Prompt Compiler non disponibile";
-    app.log.error(error, "Compilazione prompt Gemma fallita");
+    app.log.error(error, "Compilazione prompt LLM fallita");
     return reply.status(400).send({ ok: false, error: message });
   }
 });
@@ -685,7 +685,7 @@ app.post("/api/audio-jobs/music-plan", async (request, reply) => {
     return reply.status(200).send({ ok: true, plan: await audioStudio.planMusic(request.body) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Music Planner non disponibile";
-    app.log.error(error, "Pianificazione musicale Gemma fallita");
+    app.log.error(error, "Pianificazione musicale LLM fallita");
     return reply.status(400).send({ ok: false, error: message });
   }
 });
@@ -1695,7 +1695,7 @@ async function engineSettingsPayload() {
       pddFiles: [...new Set(pddFiles)].sort(),
       textEncoders: [...new Set(textEncoders)].sort(),
       vaes: [...new Set(vaes)].sort(),
-      chatModels: [...new Set(chatRuntime?.models ?? llmFiles.filter((file) => /gemma.*\.gguf$/i.test(file) && !/mmproj/i.test(file)))].sort(),
+      chatModels: [...new Set(chatRuntime?.models ?? llmFiles.filter((file) => /\.gguf$/i.test(file) && !/mmproj/i.test(file)))].sort(),
       chatProjectors: [...new Set(chatRuntime?.projectors ?? llmFiles.filter((file) => /mmproj.*\.gguf$/i.test(file)))].sort(),
       chatRuntime: chatRuntime ? {
         ready: chatRuntime.ready,
@@ -1931,7 +1931,7 @@ async function saveEngineSettings(
       return reply.status(400).send({ ok: false, error: "VAE Anima non installata" });
     }
     if (!llmFiles.includes(String((chatSettings as { model?: unknown }).model ?? ""))) {
-      return reply.status(400).send({ ok: false, error: "Modello Gemma Chat non installato" });
+      return reply.status(400).send({ ok: false, error: "Modello LLM Chat non installato" });
     }
     if (!llmFiles.includes(String((chatSettings as { projector?: unknown }).projector ?? ""))) {
       return reply.status(400).send({ ok: false, error: "Projector mmproj Chat non installato" });
