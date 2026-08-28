@@ -1968,6 +1968,27 @@ a:focus-visible {
   transition: 140ms ease;
 }
 
+.bulk-select-button {
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  z-index: 6;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(215, 255, 82, .55);
+  border-radius: 9px;
+  background: rgba(10, 11, 13, .86);
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 900;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+.bulk-select-button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
 .media-rename-button {
   position: absolute;
   top: 9px;
@@ -3614,6 +3635,13 @@ a:focus-visible {
 
 .topbar-project-switcher,
 .history-heading-actions { display: flex; align-items: center; gap: 7px; }
+.bulk-selection-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+.bulk-selection-actions > span { color: var(--muted); font-size: 9px; font-weight: 800; }
+.library-heading .bulk-selection-actions button,
+.history-heading .bulk-selection-actions button { min-height: 34px; height: 34px; border: 1px solid var(--line); border-radius: 9px; padding: 0 11px; background: var(--soft); color: var(--ink); font-size: 8px; font-weight: 850; }
+.library-heading .bulk-selection-actions button.danger,
+.history-heading .bulk-selection-actions button.danger { border-color: rgba(255, 112, 112, .45); background: rgba(128, 30, 38, .18); color: #ff9b9b; }
+.bulk-selection-actions button:disabled { cursor: not-allowed; opacity: .42; }
 .topbar-project-switcher {
   min-height: 40px;
   padding: 4px;
@@ -3636,6 +3664,7 @@ a:focus-visible {
 .media-library-section > div:first-child span { color: var(--muted); font-size: 9px; }
 .media-library-grid { display: grid; grid-template-columns: repeat(5, minmax(145px, 1fr)); gap: 10px; }
 .media-library-grid article { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: #17181b; }
+.media-library-grid article.bulk-selected { border-color: rgba(215, 255, 82, .72); box-shadow: 0 0 0 1px rgba(215, 255, 82, .16); }
 .media-library-preview { position: relative; height: 118px; display: grid; place-items: center; overflow: hidden; background: #08090a; color: var(--accent); font-size: 25px; }
 .media-library-preview img,
 .media-library-preview video { width: 100%; height: 100%; display: block; object-fit: cover; }

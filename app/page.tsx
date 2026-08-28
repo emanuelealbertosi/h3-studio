@@ -1804,6 +1804,9 @@ function MediaLibraryPanel({
   const [message, setMessage] = useState("Caricamento libreria media…");
   const [deletingVideo, setDeletingVideo] = useState<string | null>(null);
   const [renamingMedia, setRenamingMedia] = useState<string | null>(null);
+  const [libraryBulkMode, setLibraryBulkMode] = useState(false);
+  const [libraryBulkSelected, setLibraryBulkSelected] = useState<string[]>([]);
+  const [libraryBulkDeleting, setLibraryBulkDeleting] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -1853,6 +1856,22 @@ function MediaLibraryPanel({
     onUseReferences(payload.asset, payload.asset.references ?? []);
   }
 
+  async function removeLibraryVideo(job: RemoteJob, candidateIndex: number) {
+    const result = await requestCandidateDeletion(job.id, candidateIndex);
+    setJobs((current) => current.flatMap((item) => {
+      if (item.id !== job.id) return [item];
+      const candidates = item.candidates.filter((candidate) => candidate.index !== candidateIndex);
+      return result.jobDeleted ? [] : [{ ...item, candidates }];
+    }));
+    setMontages((current) => current.map((timeline) => {
+      const clips = timeline.clips.filter((clip) => !(
+        clip.sourceJobId === job.id && clip.sourceCandidateIndex === candidateIndex
+      ));
+      return { ...timeline, clips, clipCount: clips.length };
+    }));
+    onVideoDeleted(job.id, candidateIndex, result);
+    return result;
+  }
   async function deleteVideo(job: RemoteJob, candidateIndex: number) {
     const key = `${job.id}-${candidateIndex}`;
     if (!window.confirm(
@@ -1861,24 +1880,9 @@ function MediaLibraryPanel({
     setDeletingVideo(key);
     setMessage("Eliminazione video e collegamenti ai montaggi…");
     try {
-      const result = await requestCandidateDeletion(job.id, candidateIndex);
-      setJobs((current) => current.flatMap((item) => {
-        if (item.id !== job.id) return [item];
-        const candidates = item.candidates.filter(
-          (candidate) => candidate.index !== candidateIndex,
-        );
-        return result.jobDeleted ? [] : [{ ...item, candidates }];
-      }));
-      setMontages((current) => current.map((timeline) => {
-        const clips = timeline.clips.filter(
-          (clip) => !(
-            clip.sourceJobId === job.id &&
-            clip.sourceCandidateIndex === candidateIndex
-          ),
-        );
-        return { ...timeline, clips, clipCount: clips.length };
-      }));
-      onVideoDeleted(job.id, candidateIndex, result);
+      const result = await removeLibraryVideo(job, candidateIndex);
+      setLibraryBulkSelected((current) => current.filter((item) => item !== `video:${job.id}:${candidateIndex}`));
+
       setMessage(
         `Video eliminato · ${result.removedClips} clip rimosse dai montaggi` +
           (result.warnings.length ? ` · ${result.warnings.join(" · ")}` : ""),
@@ -1901,6 +1905,7 @@ function MediaLibraryPanel({
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
       setExternalAssets((current) => current.filter((item) => item.id !== asset.id));
+      setLibraryBulkSelected((current) => current.filter((item) => item !== `external:${asset.id}`));
       setMessage(`“${asset.originalName}” rimossa dalla Libreria`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Rimozione media esterno fallita");
@@ -1991,6 +1996,61 @@ function MediaLibraryPanel({
       setRenamingMedia(null);
     }
   }
+  function toggleLibraryBulk(key: string) {
+    setLibraryBulkSelected((current) => current.includes(key)
+      ? current.filter((item) => item !== key)
+      : [...current, key]);
+  }
+
+  function closeLibraryBulk() {
+    setLibraryBulkMode(false);
+    setLibraryBulkSelected([]);
+  }
+
+  async function deleteLibrarySelection() {
+    if (!libraryBulkSelected.length) return;
+    if (!window.confirm(
+      `Eliminare definitivamente ${libraryBulkSelected.length} elementi selezionati? I video saranno rimossi anche dai montaggi.`,
+    )) return;
+    setLibraryBulkDeleting(true);
+    setMessage(`Eliminazione di ${libraryBulkSelected.length} elementi…`);
+    const failed: string[] = [];
+    let deleted = 0;
+    let removedClips = 0;
+    for (const key of libraryBulkSelected) {
+      try {
+        if (key.startsWith("creative:")) {
+          const id = key.slice("creative:".length);
+          const response = await fetch(`${bridgeUrl}/api/library/${id}/delete`, { method: "POST" });
+          const payload = await response.json() as { error?: string };
+          if (!response.ok) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+          setAssets((current) => current.filter((item) => item.id !== id));
+        } else if (key.startsWith("external:")) {
+          const id = key.slice("external:".length);
+          const response = await fetch(`${bridgeUrl}/api/external-media/${id}/delete`, { method: "POST" });
+          const payload = await response.json() as { error?: string };
+          if (!response.ok) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+          setExternalAssets((current) => current.filter((item) => item.id !== id));
+        } else if (key.startsWith("video:")) {
+          const [, jobId, indexValue] = key.split(":");
+          const job = jobs.find((item) => item.id === jobId);
+          const candidateIndex = Number(indexValue);
+          if (!job || !Number.isInteger(candidateIndex)) throw new Error("Video selezionato non trovato");
+          const result = await removeLibraryVideo(job, candidateIndex);
+          removedClips += result.removedClips;
+        } else {
+          throw new Error("Elemento selezionato non riconosciuto");
+        }
+        deleted += 1;
+      } catch {
+        failed.push(key);
+      }
+    }
+    setLibraryBulkSelected(failed);
+    setLibraryBulkMode(failed.length > 0);
+    setLibraryBulkDeleting(false);
+    setMessage(`${deleted} elementi eliminati${removedClips ? ` · ${removedClips} clip rimosse dai montaggi` : ""}${failed.length ? ` · ${failed.length} non eliminati` : ""}`);
+  }
   const videos = jobs.flatMap((job) =>
     job.candidates.filter((candidate) => candidate.output).map((candidate) => ({ job, candidate })),
   );
@@ -1999,6 +2059,13 @@ function MediaLibraryPanel({
     <section className="media-library-panel">
       <div className="history-heading">
         <div><span className="section-index">LIBRERIA</span><h2>Tutti i media</h2><p>{message}</p></div>
+        <div className="bulk-selection-actions">
+          {libraryBulkMode ? <>
+            <span>{libraryBulkSelected.length} selezionati</span>
+            <button className="danger" disabled={!libraryBulkSelected.length || libraryBulkDeleting} onClick={() => void deleteLibrarySelection()} type="button">{libraryBulkDeleting ? "Eliminazione…" : "Elimina selezionati"}</button>
+            <button disabled={libraryBulkDeleting} onClick={closeLibraryBulk} type="button">Annulla</button>
+          </> : <button onClick={() => setLibraryBulkMode(true)} type="button">Seleziona</button>}
+        </div>
       </div>
 
       <section className="media-library-section">
@@ -2022,9 +2089,10 @@ function MediaLibraryPanel({
         <div><h3>Personaggi e oggetti</h3><span>{assets.length} asset</span></div>
         <div className="media-library-grid">
           {assets.map((asset) => (
-            <article key={asset.id}>
+            <article className={libraryBulkSelected.includes(`creative:${asset.id}`) ? "bulk-selected" : ""} key={asset.id}>
               <div className="media-library-preview">
                 {asset.hero ? <img alt="" src={`${bridgeUrl}${asset.hero.mediaPath}`} /> : <span>{asset.kind === "character" ? "◎" : "◇"}</span>}
+                {libraryBulkMode && <button aria-label={`Seleziona ${asset.name}`} aria-pressed={libraryBulkSelected.includes(`creative:${asset.id}`)} className="bulk-select-button" onClick={() => toggleLibraryBulk(`creative:${asset.id}`)} type="button">{libraryBulkSelected.includes(`creative:${asset.id}`) ? "✓" : ""}</button>}
                 <button aria-label={`Rinomina ${asset.name}`} className="media-rename-button" disabled={renamingMedia === `creative:${asset.id}`} onClick={() => void renameCreativeAsset(asset)} title="Rinomina asset" type="button">✎</button>
               </div>
               <div><strong>{asset.name}</strong><small>{asset.referenceCount} reference</small></div>
@@ -2039,7 +2107,7 @@ function MediaLibraryPanel({
         <div><h3>Esterni</h3><span>{externalAssets.length} media</span></div>
         <div className="media-library-grid">
           {externalAssets.map((asset) => (
-            <article key={asset.id}>
+            <article className={libraryBulkSelected.includes(`external:${asset.id}`) ? "bulk-selected" : ""} key={asset.id}>
               <div className="media-library-preview">
                 {asset.kind === "picture" ? (
                   <img alt="" src={`${bridgeUrl}${asset.mediaPath}`} />
@@ -2048,6 +2116,7 @@ function MediaLibraryPanel({
                 ) : (
                   <audio controls preload="metadata" src={`${bridgeUrl}${asset.mediaPath}`} />
                 )}
+                {libraryBulkMode && <button aria-label={`Seleziona ${asset.originalName}`} aria-pressed={libraryBulkSelected.includes(`external:${asset.id}`)} className="bulk-select-button" onClick={() => toggleLibraryBulk(`external:${asset.id}`)} type="button">{libraryBulkSelected.includes(`external:${asset.id}`) ? "✓" : ""}</button>}
                 <button aria-label={`Rinomina ${asset.originalName}`} className="media-rename-button" disabled={renamingMedia === `external:${asset.id}`} onClick={() => void renameExternalMedia(asset)} title="Rinomina media" type="button">✎</button>
                 <button
                   aria-label={`Rimuovi ${asset.originalName} dalla Libreria`}
@@ -2077,9 +2146,10 @@ function MediaLibraryPanel({
         <div><h3>Video generati</h3><span>{videos.length} video</span></div>
         <div className="media-library-grid">
           {videos.slice(0, 36).map(({ job, candidate }) => (
-            <article key={`${job.id}-${candidate.index}`}>
+            <article className={libraryBulkSelected.includes(`video:${job.id}:${candidate.index}`) ? "bulk-selected" : ""} key={`${job.id}-${candidate.index}`}>
               <div className="media-library-preview">
                 <video muted playsInline preload="metadata" src={`${bridgeUrl}${candidate.output!.mediaPath}`} />
+                {libraryBulkMode && <button aria-label={`Seleziona video ${candidate.index}`} aria-pressed={libraryBulkSelected.includes(`video:${job.id}:${candidate.index}`)} className="bulk-select-button" onClick={() => toggleLibraryBulk(`video:${job.id}:${candidate.index}`)} type="button">{libraryBulkSelected.includes(`video:${job.id}:${candidate.index}`) ? "✓" : ""}</button>}
                 <button aria-label={`Rinomina video ${candidate.index}`} className="media-rename-button" disabled={renamingMedia === `video:${job.id}:${candidate.index}`} onClick={() => void renameVideo(job, candidate)} title="Rinomina video" type="button">✎</button>
                 <button
                   aria-label={`Elimina candidato ${candidate.index}`}
@@ -2125,6 +2195,9 @@ function AssetLibraryPanel({
   const [previewZoomed, setPreviewZoomed] = useState(false);
   const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
   const [renamingImageId, setRenamingImageId] = useState<string | null>(null);
+  const [assetBulkMode, setAssetBulkMode] = useState(false);
+  const [assetBulkSelected, setAssetBulkSelected] = useState<string[]>([]);
+  const [assetBulkDeleting, setAssetBulkDeleting] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -2357,6 +2430,7 @@ function AssetLibraryPanel({
             })));
       }
       setSelectedIds((current) => current.filter((id) => id !== image.id));
+      setAssetBulkSelected((current) => current.filter((id) => id !== image.id));
       if (previewImage?.id === image.id) setPreviewImage(null);
       setMessage(`${image.name} rimossa dagli Assets`);
     } catch (error) {
@@ -2366,6 +2440,64 @@ function AssetLibraryPanel({
     }
   }
 
+  function toggleAssetBulk(id: string) {
+    setAssetBulkSelected((current) => current.includes(id)
+      ? current.filter((item) => item !== id)
+      : [...current, id]);
+  }
+
+  function closeAssetBulk() {
+    setAssetBulkMode(false);
+    setAssetBulkSelected([]);
+  }
+
+  async function deleteAssetSelection() {
+    if (!assetBulkSelected.length) return;
+    if (!window.confirm(`Eliminare definitivamente ${assetBulkSelected.length} immagini selezionate dagli Assets?`)) return;
+    setAssetBulkDeleting(true);
+    setMessage(`Eliminazione di ${assetBulkSelected.length} immagini…`);
+    const failed: string[] = [];
+    let deleted = 0;
+    for (const id of assetBulkSelected) {
+      const image = images.find((item) => item.id === id);
+      if (!image) continue;
+      try {
+        const endpoint = image.source === "image-studio"
+          ? `/api/image-jobs/${image.jobId}/candidates/${image.candidateIndex}/delete`
+          : `/api/library-references/${image.referenceId}/delete`;
+        const response = await fetch(`${bridgeUrl}${endpoint}`, { method: "POST" });
+        const payload = await response.json() as {
+          error?: string; jobDeleted?: boolean; job?: ImagePickerJob | null; asset?: CreativeAsset;
+        };
+        if (!response.ok) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+        if (image.source === "image-studio" && image.jobId) {
+          setImageJobs((current) => {
+            if (payload.jobDeleted) return current.filter((job) => job.id !== image.jobId);
+            if (payload.job) return current.map((job) => job.id === image.jobId ? payload.job! : job);
+            return current.map((job) => job.id === image.jobId
+              ? { ...job, candidates: job.candidates.filter((candidate) => candidate.index !== image.candidateIndex) }
+              : job);
+          });
+        } else if (image.referenceId) {
+          setLegacyAssets((current) => payload.asset
+            ? current.map((asset) => asset.id === payload.asset!.id ? payload.asset! : asset)
+            : current.map((asset) => ({
+                ...asset,
+                references: (asset.references ?? []).filter((reference) => reference.id !== image.referenceId),
+              })));
+        }
+        setSelectedIds((current) => current.filter((selectedId) => selectedId !== image.id));
+        if (previewImage?.id === image.id) setPreviewImage(null);
+        deleted += 1;
+      } catch {
+        failed.push(id);
+      }
+    }
+    setAssetBulkSelected(failed);
+    setAssetBulkMode(failed.length > 0);
+    setAssetBulkDeleting(false);
+    setMessage(`${deleted} immagini eliminate${failed.length ? ` · ${failed.length} non eliminate` : ""}`);
+  }
   const filterOptions: Array<{ value: AssetFilter; label: string }> = [
     { value: "all", label: "Tutte" },
     { value: "character", label: "Personaggi" },
@@ -2382,7 +2514,14 @@ function AssetLibraryPanel({
           <h2>Immagini riutilizzabili</h2>
           <p>{message}</p>
         </div>
-        <span className="asset-library-count">{images.length} immagini</span>
+        <div className="bulk-selection-actions">
+          <span className="asset-library-count">{images.length} immagini</span>
+          {assetBulkMode ? <>
+            <span>{assetBulkSelected.length} selezionate</span>
+            <button className="danger" disabled={!assetBulkSelected.length || assetBulkDeleting} onClick={() => void deleteAssetSelection()} type="button">{assetBulkDeleting ? "Eliminazione…" : "Elimina selezionate"}</button>
+            <button disabled={assetBulkDeleting} onClick={closeAssetBulk} type="button">Annulla</button>
+          </> : <button onClick={() => setAssetBulkMode(true)} type="button">Seleziona</button>}
+        </div>
       </div>
 
       <div className="asset-library-toolbar">
@@ -2415,8 +2554,8 @@ function AssetLibraryPanel({
             const selected = selectedIds.includes(image.id);
             return (
               <article
-                className={`asset-library-card ${selected ? "selected" : ""}`}
-                draggable
+                className={`asset-library-card ${selected || assetBulkSelected.includes(image.id) ? "selected" : ""}`}
+                draggable={!assetBulkMode}
                 key={image.id}
                 onDragEnd={() => setDragging(false)}
                 onDragStart={(event) => {
@@ -2427,14 +2566,14 @@ function AssetLibraryPanel({
                 }}
               >
                 <button
-                  aria-pressed={selected}
+                  aria-pressed={assetBulkMode ? assetBulkSelected.includes(image.id) : selected}
                   className="asset-library-card-select"
-                  onClick={() => toggleSelection(image.id)}
+                  onClick={() => assetBulkMode ? toggleAssetBulk(image.id) : toggleSelection(image.id)}
                   type="button"
                 >
                   <div className="asset-library-thumbnail">
                     <img alt={image.name} src={`${bridgeUrl}${image.mediaPath}`} />
-                    <span>{selected ? "✓ Selezionata" : image.tag === "background" ? "Paesaggio" : image.tag === "untagged" ? "Immagine" : image.tag === "character" ? "Personaggio" : "Oggetto"}</span>
+                    <span>{assetBulkMode ? (assetBulkSelected.includes(image.id) ? "✓ Da eliminare" : "Seleziona") : selected ? "✓ Selezionata" : image.tag === "background" ? "Paesaggio" : image.tag === "untagged" ? "Immagine" : image.tag === "character" ? "Personaggio" : "Oggetto"}</span>
                   </div>
                   <strong>{image.name}</strong>
                   <small>{image.projectName ?? (image.source === "legacy" ? "Asset precedente" : "Senza progetto")}</small>
