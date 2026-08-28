@@ -4865,9 +4865,10 @@ a:focus-visible {
 .image-reference-list label { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 5px; }
 .image-reference-list label span { color: var(--muted); font-size: 7px; }
 .image-reference-list select { min-width: 0; height: 25px; border: 1px solid var(--line); border-radius: 6px; background: #191a1d; color: var(--ink); font-size: 8px; }
-.image-reference-order { grid-column: 1 / -1; display: grid; grid-template-columns: 1.7fr 1fr 1fr 1fr; gap: 4px; }
+.image-reference-order { grid-column: 1 / -1; display: grid; grid-template-columns: 1.35fr 1.35fr .8fr .8fr .8fr; gap: 4px; }
 .image-reference-order button { min-height: 25px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255, 255, 255, .03); color: var(--ink); }
-.image-reference-order button.insert { border-color: rgba(215, 255, 82, .24); color: var(--accent); font-size: 7px; font-weight: 850; }
+.image-reference-order button.insert,
+.image-reference-order button.video-reference { border-color: rgba(215, 255, 82, .24); color: var(--accent); font-size: 7px; font-weight: 850; }
 .image-reference-order button.remove { color: #ff9191; }
 .image-reference-order button:disabled { opacity: .32; }
 .image-edit-library-grid { grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); }

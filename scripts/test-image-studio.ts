@@ -115,6 +115,11 @@ try {
     pageSource,
     /function addRecentVideo\([\s\S]*?setStudioMediaMode\("video"\)[\s\S]*?setActiveView\("studio"\)/,
   );
+  assert.match(
+    pageSource,
+    /function sendImageReferenceToVideo\([\s\S]*?setMediaAssets\(\[attachment\]\)[\s\S]*?setMode\("reference"\)/,
+  );
+  assert.match(pageSource, /onUseAsVideoReference=\{sendImageReferenceToVideo\}/);
   const landscapeKeep = imageEditKeepAspectDimensions(1920, 1080);
   assert.ok(landscapeKeep);
   assert.equal(landscapeKeep.width % 16, 0);
@@ -127,6 +132,9 @@ try {
     "Luogo",
   );
   assert.match(imageStudioSource, /incomingReferences\?: ImageStudioIncomingReference\[\]/);
+  assert.match(imageStudioSource, /onUseAsVideoReference/);
+  assert.match(imageStudioSource, /Invia al tab Video come reference/);
+  assert.doesNotMatch(imageStudioSource, />Scegli<\/button>/);
   assert.match(imageStudioSource, /incomingReferences\.length \? "edit" : "generate"/);
   assert.match(imageStudioSource, /asset ricevuti dalla libreria/);
   assert.match(imageStudioSource, /async function openImageLibrary/);

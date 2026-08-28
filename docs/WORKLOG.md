@@ -285,3 +285,10 @@
 - Le parole quotate dall'utente vengono preservate letteralmente e passate al Music Planner come lyrics separate; la richiesta originale resta disponibile al secondo planner.
 - Il popup Rigenera dei job musicali mostra e trasmette separatamente caption e lyrics modificabili.
 - Aggiunti test sul caso italiano «Buongiornissimo caffè» e sulle richieste esplicitamente strumentali.
+
+
+### 28 agosto 2026 — Passaggio diretto Immagine → Video
+- Le immagini generate nello Studio espongono ora l’azione **Video** al posto del controllo visibile **Scegli**.
+- La stessa azione è disponibile sulle reference ricevute da Libreria/Assets o caricate per l’edit.
+- Il passaggio apre il tab Video, imposta l’immagine come Picture 1, seleziona Reference e azzera il prompt senza duplicare o ricaricare il file.
+- La compatibilità dati con la selezione candidato storica e il relativo endpoint resta invariata.

@@ -175,7 +175,8 @@ assert.match(css, /\.asset-image-lightbox-canvas\.zoomed img\s*\{[^}]*min-width:
 assert.match(css, /\.media-picker-backdrop\s*\{[^}]*position:\s*fixed/s);
 assert.match(css, /\.media-library-modal\s*\{[^}]*width:\s*min\(1320px,/s);
 assert.match(css, /\.media-asset-actions\s*\{[^}]*display:\s*flex/s);
-assert.match(css, /\.image-reference-order\s*\{[^}]*grid-template-columns:\s*1\.7fr 1fr 1fr 1fr/s);
+assert.match(css, /\.image-reference-order\s*\{[^}]*grid-template-columns:\s*1\.35fr 1\.35fr \.8fr \.8fr \.8fr/s);
+assert.match(imageStudio, /className="video-reference"/);
 assert.match(page, /className="media-asset-actions"/);
 assert.match(imageStudio, /className="media-library-picker media-library-modal image-library-modal"/);
 assert.match(page, /className="mention-thumbnail"/);

@@ -5679,6 +5679,32 @@ function StudioApp() {
     );
   }
 
+  function sendImageReferenceToVideo(reference: ImageStudioIncomingReference) {
+    const name = reference.name?.trim() || reference.file.split(/[\\/]/).at(-1) || "Reference immagine";
+    const attachment: MediaAsset = {
+      kind: "picture",
+      file: reference.file,
+      name,
+      caption: name.replace(/\.[^.]+$/, ""),
+      mention: uniqueMention(name, []),
+      mediaPath: reference.mediaPath,
+      referenceRole: reference.role,
+      width: reference.width,
+      height: reference.height,
+      audio_mode: "off",
+      uid: crypto.randomUUID(),
+    };
+    setStudioMediaMode("video");
+    setMediaAssets([attachment]);
+    setReferenceRoles(buildReferenceRoles([attachment], "AUTO"));
+    setMode("reference");
+    setSourceJobId(null);
+    setPrompt("");
+    setMediaPickerOpen(false);
+    setActiveView("studio");
+    setRunMessage(`“${name}” inviata al tab Video come Picture 1 · modalità Reference`);
+  }
+
   function controlCandidateVideos(action: "play" | "pause" | "restart") {
     const videos = Array.from(
       candidateGridRef.current?.querySelectorAll("video") ?? [],
@@ -6083,6 +6109,7 @@ function StudioApp() {
               initialJobId={imageStudioHandoff?.jobId}
               key={`${imageResetToken}-${imageStudioHandoff?.token ?? 0}`}
               projectId={studioProjectId}
+              onUseAsVideoReference={sendImageReferenceToVideo}
               projectName={studioProject?.name}
               projects={studioProjects}
             />

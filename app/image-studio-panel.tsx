@@ -87,6 +87,7 @@ type Props = {
   projectName?: string | null;
   incomingReferences?: ImageStudioIncomingReference[];
   initialJobId?: string | null;
+  onUseAsVideoReference: (reference: ImageStudioIncomingReference) => void;
 };
 
 export type ImageStudioIncomingReference = {
@@ -235,6 +236,7 @@ export default function ImageStudioPanel({
   projectName,
   incomingReferences = [],
   initialJobId = null,
+  onUseAsVideoReference,
 }: Props) {
   const [mode, setMode] = useState<ImageMode>(
     incomingReferences.length ? "edit" : "generate",
@@ -886,7 +888,14 @@ export default function ImageStudioPanel({
                         {tags.map((item) => <button className={(ownLink?.tag ?? job.tag ?? "untagged") === item.value ? "active" : ""} disabled={busy === `link-${candidate.index}-${projectId}`} key={item.value} onClick={() => void setProjectLink(candidate.index, projectId, item.value)} type="button">{item.label}</button>)}
                       </div>
                       <div className="image-primary-actions">
-                        <button className={chosen ? "primary-action selected" : "primary-action"} disabled={busy === `select-${candidate.index}`} onClick={() => void select(candidate.index)} type="button">{chosen ? "Selezionata" : "Scegli"}</button>
+                        <button className="primary-action" onClick={() => onUseAsVideoReference({
+                          file: referenceFile(candidate.output!),
+                          name: candidate.output?.filename ?? `candidate_${candidate.index}.png`,
+                          width: candidate.output?.width ?? job.width,
+                          height: candidate.output?.height ?? job.height,
+                          mediaPath: candidate.output!.mediaPath,
+                          role: "base",
+                        })} title="Invia al tab Video come reference" type="button">▶ Video</button>
                         <button onClick={() => editCandidate(candidate)} type="button">Edita questa</button>
                         <button disabled={references.length >= 4} onClick={() => addCandidateReference(candidate)} type="button">+ Reference</button>
                         <button className="regenerate-action" disabled={busy === `regenerate-${candidate.index}`} onClick={() => setRegenerateTarget({ candidateIndex: candidate.index })} type="button">{busy === `regenerate-${candidate.index}` ? "Rigenerazione…" : "↻ Rigenera"}</button>
@@ -1009,7 +1018,14 @@ export default function ImageStudioPanel({
                     <div className="image-reference-preview">{reference.mediaPath ? <img alt={reference.name ?? "Reference"} src={mediaUrl(bridgeUrl, reference.mediaPath)} /> : <span>{index + 1}</span>}<i>{index + 1}</i></div>
                     <div><strong>{reference.name ?? reference.file}</strong><small>{reference.width && reference.height ? `${reference.width} × ${reference.height}` : "Reference"}</small></div>
                     <label><span>Ruolo</span><select onChange={(event) => setReferences((current) => current.map((item) => item.uid === reference.uid ? { ...item, role: event.target.value as ReferenceRole } : item))} value={reference.role}>{roles.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select></label>
-                    <div className="image-reference-order"><button className="insert" onClick={() => insertReferenceInPrompt(index)} title={`Inserisci reference image ${index + 1} nel prompt`} type="button">Inserisci</button><button disabled={index === 0} onClick={() => moveReference(index, -1)} title="Sposta prima" type="button">←</button><button disabled={index === references.length - 1} onClick={() => moveReference(index, 1)} title="Sposta dopo" type="button">→</button><button className="remove" onClick={() => setReferences((current) => current.filter((item) => item.uid !== reference.uid))} title="Rimuovi" type="button">×</button></div>
+                    <div className="image-reference-order"><button className="video-reference" onClick={() => onUseAsVideoReference({
+                      file: reference.file,
+                      name: reference.name,
+                      width: reference.width,
+                      height: reference.height,
+                      mediaPath: reference.mediaPath,
+                      role: "base",
+                    })} title="Invia al tab Video come reference" type="button">▶ Video</button><button className="insert" onClick={() => insertReferenceInPrompt(index)} title={`Inserisci reference image ${index + 1} nel prompt`} type="button">Inserisci</button><button disabled={index === 0} onClick={() => moveReference(index, -1)} title="Sposta prima" type="button">←</button><button disabled={index === references.length - 1} onClick={() => moveReference(index, 1)} title="Sposta dopo" type="button">→</button><button className="remove" onClick={() => setReferences((current) => current.filter((item) => item.uid !== reference.uid))} title="Rimuovi" type="button">×</button></div>
                   </article>
                 ))}
               </div>
