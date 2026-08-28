@@ -3609,18 +3609,19 @@ function AdminPanel() {
   }
 
   function updateAnimaModel(model: string) {
-    setData((current) => {
-      if (!current) return current;
-      const next = {
-        ...current,
-        settings: {
-          ...current.settings,
-          anima: { ...current.settings.anima, model },
-        },
-      };
-      dataRef.current = next;
-      return next;
-    });
+    const current = dataRef.current ?? data;
+    if (!current) return;
+    const next = {
+      ...current,
+      settings: {
+        ...current.settings,
+        anima: { ...current.settings.anima, model },
+      },
+    };
+    // React may defer a functional state updater until after a rapid Save click.
+    // Keep the authoritative ref synchronous with the select event.
+    dataRef.current = next;
+    setData(next);
   }
 
   async function saveSettings() {

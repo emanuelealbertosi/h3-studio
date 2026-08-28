@@ -292,3 +292,7 @@
 - La stessa azione è disponibile sulle reference ricevute da Libreria/Assets o caricate per l’edit.
 - Il passaggio apre il tab Video, imposta l’immagine come Picture 1, seleziona Reference e azzera il prompt senza duplicare o ricaricare il file.
 - La compatibilità dati con la selezione candidato storica e il relativo endpoint resta invariata.
+
+### 28 agosto 2026 — Persistenza sincrona modello Anima / Nova AM
+- La selezione del modello Anima aggiorna ora il riferimento autorevole prima del render React: un click rapido su Salva non può più inviare il precedente anima_turboV10.
+- Aggiunta regressione sul percorso Admin per impedire il ritorno del setter asincrono che causava il ripristino del default.
