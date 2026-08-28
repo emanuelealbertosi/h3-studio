@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ChatRepository } from "../bridge/chat-repository.js";
-import { routeAction, shouldRecallMedia } from "../bridge/chat-service.js";
+import { normalizePlan, routeAction, shouldRecallMedia } from "../bridge/chat-service.js";
 import { JobRepository } from "../bridge/job-repository.js";
 import { ProjectRepository } from "../bridge/project-repository.js";
 import { DEFAULT_RUNTIME_SETTINGS, RuntimeSettingsStore } from "../bridge/runtime-settings.js";
@@ -102,6 +102,17 @@ try {
   assert.equal(routeAction(proposedImage, "music")?.type, "generate_music");
   assert.equal(routeAction(proposedImage, "auto")?.type, "generate_image");
   assert.equal(routeAction(null, "anima"), null);
+  const videoEditAlias = normalizePlan(JSON.stringify({
+    reply: "Modifica avviata",
+    title: "Goku blu",
+    action: {
+      type: "video_editing",
+      prompt: "In Video 1, change Goku's primary colors to blue.",
+      videoMode: "VIDEO EDITING",
+    },
+  }));
+  assert.equal(videoEditAlias.action?.type, "generate_video");
+  assert.equal(videoEditAlias.action?.videoMode, "VIDEO EDITING");
   assert.equal(shouldRecallMedia("Ora modificala rendendo il cielo rosso"), true);
   assert.equal(shouldRecallMedia("Crea una animazione partendo da questa immagine"), true);
   assert.equal(shouldRecallMedia("Parliamo di regia cinematografica"), false);
@@ -139,6 +150,8 @@ try {
   assert.match(service, /generate_music/);
   assert.match(service, /audioStudio\.planMusic/);
   assert.match(service, /referenceFile: reference\?\.file/);
+  assert.match(service, /video_editing: \{ type: "generate_video", videoMode: "VIDEO EDITING" \}/);
+  assert.match(service, /catch \(error\) \{\s+await this\.comfy\.chatUnload\(\)\.catch/);
   assert.match(audioService, /Trascrizione reference con Whisper/);
   assert.match(audioService, /transcribeReference/);
   assert.match(panel, /\(\^\|\\s\)@\$/);

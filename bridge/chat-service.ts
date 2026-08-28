@@ -74,7 +74,38 @@ function extractJson(text: string) {
   return JSON.parse(source.slice(start, end + 1)) as unknown;
 }
 
-function normalizePlan(text: string): { reply: string; title: string | null; action: PlannedAction | null } {
+function normalizeActionType(value: unknown): Pick<PlannedAction, "type" | "videoMode"> | null {
+  const token = typeof value === "string"
+    ? value.trim().toLowerCase().replace(/[\s-]+/g, "_")
+    : "";
+  const direct = new Set<PlannedAction["type"]>([
+    "generate_video", "generate_image", "edit_image", "generate_anima", "generate_tts", "generate_music",
+  ]);
+  if (direct.has(token as PlannedAction["type"])) {
+    return { type: token as PlannedAction["type"] };
+  }
+  const aliases: Record<string, Pick<PlannedAction, "type" | "videoMode">> = {
+    video: { type: "generate_video" },
+    create_video: { type: "generate_video" },
+    video_editing: { type: "generate_video", videoMode: "VIDEO EDITING" },
+    edit_video: { type: "generate_video", videoMode: "VIDEO EDITING" },
+    modify_video: { type: "generate_video", videoMode: "VIDEO EDITING" },
+    video_extension: { type: "generate_video", videoMode: "VIDEO EXTENSION" },
+    extend_video: { type: "generate_video", videoMode: "VIDEO EXTENSION" },
+    continue_video: { type: "generate_video", videoMode: "VIDEO EXTENSION" },
+    image_to_video: { type: "generate_video", videoMode: "I2V" },
+    reference_to_video: { type: "generate_video", videoMode: "R2V" },
+    create_image: { type: "generate_image" },
+    image_editing: { type: "edit_image" },
+    generate_anime: { type: "generate_anima" },
+    tts: { type: "generate_tts" },
+    speech: { type: "generate_tts" },
+    music: { type: "generate_music" },
+  };
+  return aliases[token] ?? null;
+}
+
+export function normalizePlan(text: string): { reply: string; title: string | null; action: PlannedAction | null } {
   const parsed = extractJson(text);
   if (!isRecord(parsed)) throw new Error("Piano Chat non valido");
   const reply = typeof parsed.reply === "string" ? parsed.reply.trim().slice(0, 12_000) : "";
@@ -84,15 +115,14 @@ function normalizePlan(text: string): { reply: string; title: string | null; act
   if (!reply) throw new Error("Risposta Chat vuota");
   if (parsed.action === null || parsed.action === undefined) return { reply, title, action: null };
   if (!isRecord(parsed.action)) throw new Error("Azione Chat non valida");
-  const allowed = new Set(["generate_video", "generate_image", "edit_image", "generate_anima", "generate_tts", "generate_music"]);
-  const type = typeof parsed.action.type === "string" ? parsed.action.type : "";
+  const normalizedType = normalizeActionType(parsed.action.type);
   const prompt = typeof parsed.action.prompt === "string" ? parsed.action.prompt.trim() : "";
-  if (!allowed.has(type) || prompt.length < 3 || prompt.length > 20_000) {
+  if (!normalizedType || prompt.length < 3 || prompt.length > 20_000) {
     throw new Error("Gemma ha proposto un'azione non valida");
   }
   const videoMode = ["T2V", "I2V", "R2V", "VIDEO EXTENSION", "VIDEO EDITING"].includes(String(parsed.action.videoMode))
     ? parsed.action.videoMode as PlannedAction["videoMode"]
-    : undefined;
+    : normalizedType.videoMode;
   const aspect = parsed.action.aspect === "9:16" || parsed.action.aspect === "1:1"
     ? parsed.action.aspect
     : "16:9";
@@ -101,7 +131,7 @@ function normalizePlan(text: string): { reply: string; title: string | null; act
     ? Math.min(360, Math.max(5, Math.round(requestedDuration)))
     : undefined;
   const instrumental = parsed.action.instrumental !== false;
-  return { reply, title, action: { type: type as PlannedAction["type"], prompt, videoMode, aspect, durationSeconds, instrumental } };
+  return { reply, title, action: { type: normalizedType.type, prompt, videoMode, aspect, durationSeconds, instrumental } };
 }
 
 function normalizeRoute(value: unknown): ChatRoute {
@@ -175,7 +205,7 @@ or
 Only create an action when the user explicitly asks to generate, animate, continue or edit media. Questions and ordinary conversation use action:null.
 The title describes the main topic, never starts with "Chat" and never contains quotation marks.
 For video default to 10 seconds, one candidate, 0.5 MP and the FAST 8-step engine; these execution values are enforced by the server and must not be invented in JSON.
-Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures. Use I2V when one attached picture is the start frame, R2V for broader references, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for editing one.
+Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures. Use I2V when one attached picture is the start frame, R2V for broader references, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for editing one. Video editing and extension still use action type generate_video; never invent video_editing, edit_video or continue_video action types.
 Use generate_tts when the user asks for speech, narration, dubbing, reading or voice cloning. For TTS, prompt is the exact text to speak in the requested language, not an English description. An attached Audio 1 is the voice reference and is transcribed automatically.
 Use generate_music when the user asks for a song, soundtrack, instrumental or music. Put the musical request in prompt, set durationSeconds when requested (default 30), and set instrumental:false only when vocals or lyrics are wanted.
 Write rich, production-ready prompts in English except the exact spoken TTS script. When attachments are present, refer to them as Picture 1, Picture 2, Video 1 or Audio 1 in attachment order. Never invent file paths, model names, LoRAs, workflow nodes or numeric engine settings.`;
@@ -369,6 +399,7 @@ export class ChatService {
         assistant,
       };
     } catch (error) {
+      await this.comfy.chatUnload().catch(() => undefined);
       this.repository.maybeAutoTitle(conversation.id, content);
       const message = error instanceof Error ? error.message : "Chat locale non disponibile";
       const assistant = this.repository.add({
