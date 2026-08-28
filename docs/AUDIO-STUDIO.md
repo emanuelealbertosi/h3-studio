@@ -52,6 +52,26 @@ deterministicamente la modalità strumentale e le parole fornite dall'utente
 vengono conservate nella loro lingua. Il popup **Rigenera** mostra separatamente
 caption tecnica e lyrics, entrambe modificabili.
 
+## Parlato → brano
+
+Questa modalità conserva il parlato originale e gli costruisce intorno una base
+strumentale. Il file può essere caricato dal disco oppure scelto dalla Libreria.
+Whisper ne prepara una trascrizione modificabile; il planner LLM usa testo,
+durata reale e direzione creativa per produrre una caption MiniMax Music priva
+di voci. LLM viene scaricato prima del render musicale.
+
+Al termine della generazione, FFmpeg crea un unico WAV stereo a 48 kHz:
+
+- la voce mantiene il proprio contenuto e timing;
+- la base viene adattata alla durata esatta del parlato;
+- il sidechain ducking abbassa automaticamente la musica durante la voce;
+- limiter finale e controlli separati di voce, musica e ducking evitano clipping.
+
+La base intermedia viene rimossa dopo un mix riuscito. Il file finale appare nel
+pannello Audio e nella Libreria del progetto. Questa funzione non trasforma la
+voce in canto: una futura modalità Cover / Trasforma in canto richiederà un
+motore locale dedicato.
+
 ## Stati e cancellazione
 
 Ogni job espone fase e percentuale quando il motore la rende disponibile.

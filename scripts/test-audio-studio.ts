@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { AudioJobRepository } from "../bridge/audio-job-repository.js";
-import { normalizeMusicPlan, stereoCodecArgs } from "../bridge/audio-studio-service.js";
+import {
+  normalizeMusicPlan,
+  speechTrackMixFilter,
+  stereoCodecArgs,
+} from "../bridge/audio-studio-service.js";
 import { normalizePromptPlan } from "../bridge/prompt-planner.js";
 import { JobRepository } from "../bridge/job-repository.js";
 import { ProjectRepository } from "../bridge/project-repository.js";
@@ -20,6 +24,8 @@ const audio = new AudioJobRepository(jobs.databasePath);
   const audioServiceSource = readFileSync(path.join(process.cwd(), "bridge", "audio-studio-service.ts"), "utf8");
   const h3AudioRouterSource = readFileSync(path.join(process.cwd(), "comfyui_nodes", "ComfyUI-H3-Multishot", "h3_aio_autoprompt.py"), "utf8");
   assert.match(panelSource, /TTS Planner AI/);
+  assert.match(panelSource, /Parlato → brano/);
+  assert.match(serverSource, /api\/audio-jobs\/speech-track-plan/);
   assert.match(panelSource, /Trascrizione automatica del campione/);
   assert.match(serverSource, /api\/audio-jobs\/transcribe-reference/);
   assert.match(transcriptionSource, /openai\/whisper-small/);
@@ -29,6 +35,17 @@ const audio = new AudioJobRepository(jobs.databasePath);
   assert.match(audioServiceSource, /"-ac", "2"/);
   assert.match(audioServiceSource, /Voce stereo pronta/);
   assert.match(audioServiceSource, /Musica stereo pronta/);
+  const speechFilter = speechTrackMixFilter({
+    durationSeconds: 12.345,
+    voiceGain: 1,
+    musicGain: 0.55,
+    ducking: 0.7,
+  });
+  assert.match(speechFilter, /channel_layouts=stereo/);
+  assert.match(speechFilter, /sidechaincompress/);
+  assert.match(speechFilter, /atrim=0:12\.345/);
+  assert.match(speechFilter, /\[voice\]\[ducked\]amix=inputs=2:duration=first/);
+  assert.match(speechFilter, /alimiter=limit=0\.95/);
   assert.match(h3AudioRouterSource, /def _ensure_stereo_audio/);
   assert.match(h3AudioRouterSource, /repeat_interleave\(2, dim=-2\)/);
   assert.match(h3AudioRouterSource, /_ensure_stereo_audio\(h3_generated_audio/);
@@ -90,8 +107,26 @@ try {
     settings: { engine: "minimax-music-3", tiledDecode: true },
   });
   audio.update(music.id, { status: "queued", promptId: "prompt-music", phaseLabel: "In coda" });
-  assert.equal(audio.list(10, project.id).length, 2);
-  assert.equal(audio.pending().length, 1);
+  const speechMusic = audio.create({
+    projectId: project.id,
+    kind: "music",
+    prompt: "Restrained cinematic instrumental underscore for spoken narration",
+    durationSeconds: 12.345,
+    seed: 100,
+    referenceFile: "speech.wav [input]",
+    referenceText: "Questa è una prova.",
+    settings: {
+      engine: "minimax-music-3",
+      mode: "speech_music",
+      voiceGain: 1,
+      musicGain: 0.55,
+      ducking: 0.7,
+    },
+  });
+  assert.equal(speechMusic.settings.mode, "speech_music");
+  assert.equal(speechMusic.referenceFile, "speech.wav [input]");
+  assert.equal(audio.list(10, project.id).length, 3);
+  assert.equal(audio.pending().length, 2);
 
   const database = new DatabaseSync(jobs.databasePath);
   const migration = database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number };

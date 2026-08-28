@@ -24,6 +24,35 @@ export function stereoCodecArgs(filename: string) {
   return ["-c:a", "pcm_s16le"];
 }
 
+export async function probeAudioDuration(filename: string, ffmpegPath: string) {
+  const probe = await execFileAsync(ffprobeFor(ffmpegPath), [
+    "-v", "error", "-select_streams", "a:0", "-show_entries", "format=duration",
+    "-of", "default=noprint_wrappers=1:nokey=1", filename,
+  ], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+  const duration = Number(probe.stdout.trim());
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error("Durata del parlato non rilevabile");
+  }
+  return duration;
+}
+
+export function speechTrackMixFilter(value: {
+  durationSeconds: number;
+  voiceGain: number;
+  musicGain: number;
+  ducking: number;
+}) {
+  const duration = Math.max(0.1, value.durationSeconds);
+  const ratio = 1 + Math.max(0, Math.min(1, value.ducking)) * 11;
+  return [
+    "[0:a:0]aformat=sample_rates=48000:channel_layouts=stereo,aresample=async=1:first_pts=0,asplit=2[voice_sc][voice_mix]",
+    `[1:a:0]aformat=sample_rates=48000:channel_layouts=stereo,aresample=async=1:first_pts=0,apad,atrim=0:${duration.toFixed(3)},volume=${value.musicGain}[music]`,
+    `[music][voice_sc]sidechaincompress=threshold=0.025:ratio=${ratio.toFixed(2)}:attack=15:release=350[ducked]`,
+    `[voice_mix]volume=${value.voiceGain}[voice]`,
+    "[voice][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[out]",
+  ].join(";");
+}
+
 function ffprobeFor(ffmpegPath: string) {
   const directory = path.dirname(ffmpegPath);
   const filename = path.basename(ffmpegPath).toLowerCase();
@@ -79,6 +108,12 @@ The caption must be written in English and specify genre, mood, BPM or tempo, in
 If instrumental is true, lyrics must be an empty string and the caption must explicitly say instrumental with no vocals.
 If instrumental is false, lyrics must contain complete singable lyrics in the requested language, organized with English section tags such as [Intro], [Verse 1], [Pre-Chorus], [Chorus], [Bridge] and [Outro]. Use only the sections that fit the duration. Preserve any lyrics supplied by the user, correcting and structuring them without changing their intended meaning unless explicitly asked.
 The summary must be concise Italian and explain the musical choices. Never return additional keys.`;
+
+const SPEECH_TRACK_PLANNER_PREFIX = `Create an instrumental backing track for an existing spoken-word recording.
+The original speech will remain untouched and will be mixed over the generated music.
+Leave rhythmic and spectral space for intelligible speech, avoid lead vocals and avoid dominant lead instruments.
+Use a clear intro, supportive development and a resolved ending sized to the exact recording duration.
+Match the emotional meaning and pacing of the transcript without turning its words into sung lyrics.`;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -216,6 +251,7 @@ export class AudioStudioService {
   private readonly ttsProcesses = new Map<string, { child: ChildProcessWithoutNullStreams; controller: AbortController }>();
   private readonly cancelledJobs = new Set<string>();
   private readonly ttsStopOperations = new Map<string, Promise<void>>();
+  private readonly speechMixes = new Set<string>();
 
   constructor(
     private readonly comfy: ComfyClient,
@@ -308,6 +344,50 @@ export class AudioStudioService {
     }
   }
 
+  async planSpeechTrack(value: unknown): Promise<MusicPlan> {
+    if (!isRecord(value)) throw new Error("Richiesta Parlato → brano non valida");
+    const idea = typeof value.idea === "string" ? value.idea.trim().slice(0, 10_000) : "";
+    const transcript = typeof value.referenceText === "string"
+      ? value.referenceText.trim().slice(0, 20_000)
+      : "";
+    const referenceFile = typeof value.referenceFile === "string"
+      ? value.referenceFile.trim().slice(0, 2_000)
+      : "";
+    let durationSeconds = boundedNumber(value.durationSeconds ?? 30, "Durata", 1, 360);
+    let materialized: string | null = null;
+    if (referenceFile) {
+      try {
+        materialized = await this.materializeReference(
+          `speech-plan-${randomUUID().slice(0, 8)}`,
+          referenceFile,
+        );
+        durationSeconds = await probeAudioDuration(materialized, this.ffmpegPath);
+        if (durationSeconds > 360) throw new Error("Il parlato supera la durata massima di 6 minuti");
+      } finally {
+        if (materialized) await unlink(materialized).catch(() => undefined);
+      }
+    }
+    const naturalRequest = [
+      SPEECH_TRACK_PLANNER_PREFIX,
+      idea ? `CREATIVE_DIRECTION:\n${idea}` : "CREATIVE_DIRECTION: infer a tasteful, neutral cinematic direction from the transcript.",
+      transcript ? `SPOKEN_TRANSCRIPT_FOR_CONTEXT_ONLY:\n${transcript}` : "SPOKEN_TRANSCRIPT_FOR_CONTEXT_ONLY: unavailable.",
+      `EXACT_TARGET_DURATION: ${durationSeconds.toFixed(2)} seconds.`,
+    ].join("\n\n");
+    const plan = await this.planMusic({
+      idea: naturalRequest,
+      instrumental: true,
+      durationSeconds,
+      lyrics: "",
+    });
+    return {
+      ...plan,
+      instrumental: true,
+      lyrics: "",
+      caption: `${plan.caption} Instrumental only, no vocals, with restrained midrange and space for spoken narration.`,
+      summary: `${plan.summary} Base predisposta per ducking e mix con il parlato originale.`,
+    };
+  }
+
   async transcribeReference(value: unknown) {
     if (!isRecord(value)) throw new Error("Richiesta trascrizione non valida");
     if (this.ttsProcesses.size > 0) throw new Error("Attendi la fine della sintesi TTS prima di trascrivere una reference");
@@ -359,8 +439,11 @@ export class AudioStudioService {
 
   async submit(value: unknown) {
     if (!isRecord(value)) throw new Error("Richiesta audio non valida");
-    const kind = value.kind === "tts" || value.kind === "music" ? value.kind : null;
-    if (!kind) throw new Error("Scegli TTS oppure Musica");
+    const requestedKind = value.kind === "tts" || value.kind === "music" || value.kind === "speech_music"
+      ? value.kind
+      : null;
+    if (!requestedKind) throw new Error("Scegli TTS, Musica oppure Parlato → brano");
+    const kind = requestedKind === "speech_music" ? "music" : requestedKind;
     const projectId = text(value.projectId, "Progetto", 1, 100);
     const settings = await this.runtimeSettings.get();
     if (kind === "tts") {
@@ -383,30 +466,64 @@ export class AudioStudioService {
       return this.repository.get(job.id)!;
     }
 
+    const speechMode = requestedKind === "speech_music";
     const caption = text(value.caption, "Descrizione musica", 3, 10_000);
-    const lyrics = typeof value.lyrics === "string" ? value.lyrics.trim().slice(0, 30_000) : "";
-    const durationSeconds = boundedNumber(value.durationSeconds ?? 30, "Durata", 5, 360);
+    const lyrics = speechMode
+      ? ""
+      : typeof value.lyrics === "string" ? value.lyrics.trim().slice(0, 30_000) : "";
+    const referenceFile = speechMode
+      ? text(value.referenceFile, "Parlato sorgente", 1, 2_000)
+      : null;
+    const referenceText = speechMode && typeof value.referenceText === "string"
+      ? value.referenceText.trim().slice(0, 20_000)
+      : "";
+    const voiceGain = speechMode ? boundedNumber(value.voiceGain ?? 1, "Volume voce", 0, 2) : 1;
+    const musicGain = speechMode ? boundedNumber(value.musicGain ?? 0.55, "Volume musica", 0, 2) : 1;
+    const ducking = speechMode ? boundedNumber(value.ducking ?? 0.7, "Ducking", 0, 1) : 0;
+    let durationSeconds = boundedNumber(value.durationSeconds ?? 30, "Durata", 5, 360);
+    if (speechMode) {
+      const token = `speech-probe-${randomUUID().slice(0, 8)}`;
+      let materialized: string | null = null;
+      try {
+        materialized = await this.materializeReference(token, referenceFile!);
+        durationSeconds = await probeAudioDuration(materialized, this.ffmpegPath);
+        if (durationSeconds > 360) throw new Error("Il parlato supera la durata massima di 6 minuti");
+      } finally {
+        if (materialized) await unlink(materialized).catch(() => undefined);
+      }
+    }
     const musicSeed = seed(value.seed);
     const idHint = randomUUID().slice(0, 8);
     const apiPrompt = buildMusicPrompt({
-      caption, lyrics, durationSeconds, seed: musicSeed, ...settings.music,
-      filenamePrefix: `H3_STUDIO_AUDIO/music_${projectId}_${idHint}`,
+      caption, lyrics, durationSeconds: Math.max(5, durationSeconds), seed: musicSeed, ...settings.music,
+      filenamePrefix: `H3_STUDIO_AUDIO/${speechMode ? "speech_base" : "music"}_${projectId}_${idHint}`,
     });
     const job = this.repository.create({
       projectId, kind, prompt: caption, lyrics, durationSeconds, seed: musicSeed,
-      settings: { ...settings.music, engine: "minimax-music-3", apiPrompt },
+      referenceFile, referenceText,
+      settings: {
+        ...settings.music,
+        engine: "minimax-music-3",
+        mode: speechMode ? "speech_music" : "music",
+        voiceGain,
+        musicGain,
+        ducking,
+        apiPrompt,
+      },
     });
     try {
       await this.comfy.chatUnload().catch(() => undefined);
       const queued = await this.comfy.queuePrompt(apiPrompt, `h3-studio-audio-${job.id}`);
       this.repository.update(job.id, {
-        status: "queued", phaseLabel: "In coda su ComfyUI", progress: null,
+        status: "queued",
+        phaseLabel: speechMode ? "Base strumentale in coda su ComfyUI" : "In coda su ComfyUI",
+        progress: null,
         promptId: queued.promptId, queueNumber: queued.queueNumber, error: null,
       });
       this.progressTracker.register(queued.promptId, apiPrompt, "audio");
     } catch (error) {
       this.repository.update(job.id, {
-        status: "failed", phaseLabel: "Invio musica fallito", progress: null,
+        status: "failed", phaseLabel: speechMode ? "Invio base strumentale fallito" : "Invio musica fallito", progress: null,
         error: error instanceof Error ? error.message : "Invio MiniMax Music fallito",
       });
     }
@@ -424,6 +541,19 @@ export class AudioStudioService {
       return this.submit({
         kind: "tts", projectId: source.projectId, text: prompt, voice: source.voice,
         referenceFile: source.referenceFile, referenceText: source.referenceText,
+      });
+    }
+    if (source.settings.mode === "speech_music") {
+      return this.submit({
+        kind: "speech_music",
+        projectId: source.projectId,
+        caption: prompt,
+        referenceFile: source.referenceFile,
+        referenceText: source.referenceText,
+        durationSeconds: source.durationSeconds ?? 30,
+        voiceGain: source.settings.voiceGain,
+        musicGain: source.settings.musicGain,
+        ducking: source.settings.ducking,
       });
     }
     return this.submit({
@@ -448,6 +578,83 @@ export class AudioStudioService {
     await writeFile(target, Buffer.from(await response.arrayBuffer()));
     await ensureStereoAudioFile(target, this.ffmpegPath);
     return target;
+  }
+
+  private async finalizeSpeechMusic(
+    job: NonNullable<ReturnType<AudioJobRepository["get"]>>,
+    baseOutput: Omit<AudioOutput, "file" | "mediaPath">,
+  ) {
+    if (!job.referenceFile) throw new Error("Parlato sorgente non disponibile");
+    const basePath = path.join(this.comfyOutputDir, baseOutput.subfolder, baseOutput.filename);
+    if (!existsSync(basePath)) throw new Error("Base strumentale generata ma non trovata su disco");
+    const subfolder = "H3_STUDIO_AUDIO";
+    const filename = `speech_music_${job.projectId}_${job.id.slice(0, 8)}.wav`;
+    const folder = path.join(this.comfyOutputDir, subfolder);
+    const target = path.join(folder, filename);
+    let voicePath: string | null = null;
+    try {
+      this.repository.update(job.id, {
+        status: "finalizing",
+        phaseLabel: "Mix voce, base e ducking",
+        progress: 98,
+        error: null,
+      });
+      await mkdir(folder, { recursive: true });
+      voicePath = await this.materializeReference(job.id, job.referenceFile);
+      const durationSeconds = job.durationSeconds ??
+        await probeAudioDuration(voicePath, this.ffmpegPath);
+      const voiceGain = boundedNumber(job.settings.voiceGain ?? 1, "Volume voce", 0, 2);
+      const musicGain = boundedNumber(job.settings.musicGain ?? 0.55, "Volume musica", 0, 2);
+      const ducking = boundedNumber(job.settings.ducking ?? 0.7, "Ducking", 0, 1);
+      await execFileAsync(this.ffmpegPath, [
+        "-y", "-v", "error",
+        "-i", voicePath,
+        "-i", basePath,
+        "-filter_complex", speechTrackMixFilter({ durationSeconds, voiceGain, musicGain, ducking }),
+        "-map", "[out]",
+        "-ar", "48000",
+        "-ac", "2",
+        "-c:a", "pcm_s16le",
+        target,
+      ], {
+        encoding: "utf8",
+        timeout: 12 * 60_000,
+        windowsHide: true,
+        maxBuffer: 8 * 1024 * 1024,
+      });
+      await ensureStereoAudioFile(target, this.ffmpegPath);
+      if (this.repository.get(job.id)?.status === "cancelled") {
+        await unlink(target).catch(() => undefined);
+        return;
+      }
+      const size = await stat(target).then((value) => value.size);
+      const output: Omit<AudioOutput, "file" | "mediaPath"> = {
+        filename,
+        subfolder,
+        type: "output",
+        format: "audio/wav",
+      };
+      const external = this.externalMedia.upsert({
+        kind: "audio",
+        file: `${subfolder}/${filename} [output]`,
+        name: filename,
+        original: filename,
+        size,
+        duration: durationSeconds,
+        has_audio: true,
+      }, job.projectId);
+      this.repository.update(job.id, {
+        status: "ready",
+        phaseLabel: "Parlato e musica stereo pronti",
+        progress: 100,
+        output,
+        externalMediaId: external.id,
+        error: null,
+      });
+      await unlink(basePath).catch(() => undefined);
+    } finally {
+      if (voicePath) await unlink(voicePath).catch(() => undefined);
+    }
   }
 
   private async waitForHiggs(jobId: string, port: number, child: ChildProcessWithoutNullStreams) {
@@ -617,6 +824,23 @@ export class AudioStudioService {
       const entry = history[job.promptId!];
       const output = entry ? findAudioOutput(entry) : null;
       if (output) {
+        if (job.settings.mode === "speech_music") {
+          if (this.speechMixes.has(job.id)) continue;
+          this.speechMixes.add(job.id);
+          try {
+            await this.finalizeSpeechMusic(job, output);
+          } catch (error) {
+            this.repository.update(job.id, {
+              status: "failed",
+              phaseLabel: "Mix Parlato → brano fallito",
+              progress: null,
+              error: error instanceof Error ? error.message : "Mix voce e musica non riuscito",
+            });
+          } finally {
+            this.speechMixes.delete(job.id);
+          }
+          continue;
+        }
         const absolute = path.join(this.comfyOutputDir, output.subfolder, output.filename);
         try {
           this.repository.update(job.id, { status: "finalizing", phaseLabel: "Verifica stereo", progress: 98, error: null });

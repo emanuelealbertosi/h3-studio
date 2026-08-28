@@ -12,11 +12,11 @@ Aggiornamento: 28 agosto 2026
 
 - [x] Avvio H3 Studio e collegamento a ComfyUI.
 - [x] Recupero automatico dell'Admin quando ComfyUI termina l'avvio.
-- [ ] Apertura Admin senza `Not Found` con ComfyUI già online.
-- [ ] Liste reali di modelli, LoRA, encoder e VAE.
-- [ ] Persistenza modello Anima/Nova dopo Salva, cambio pagina e riapertura.
-- [ ] Persistenza CFG e step Anima dopo Salva e riapertura.
-- [ ] Persistenza CFG/step degli altri engine configurabili.
+- [x] Apertura Admin senza `Not Found` con ComfyUI già online.
+- [x] Liste reali di modelli, LoRA, encoder e VAE.
+- [x] Persistenza modello Anima/Nova dopo Salva, cambio pagina e riapertura.
+- [x] Persistenza CFG e step Anima dopo Salva e riapertura.
+- [x] Persistenza CFG/step degli altri engine configurabili.
 - [ ] Indipendenza tra configurazioni H3, Krea, Anima e Flux/Klein.
 - [ ] Comando termina LLM con rilascio effettivo della VRAM.
 - [ ] Riavvio server dall'Admin.
@@ -128,7 +128,12 @@ Aggiornamento: 28 agosto 2026
 - [ ] Output stereo e metadati corretti.
 - [ ] Interruzione e rilascio VRAM.
 - [ ] Futuro: reference stilistica da audio.
-- [ ] Futuro: `Parlato → brano` con base, ducking e voce preservata.
+- [x] Contratto automatico `Parlato → brano`: planner, route API, stereo, ducking e persistenza job.
+- [ ] Collaudo reale `Parlato → brano` con file da disco.
+- [ ] Collaudo reale `Parlato → brano` scegliendo il sorgente dalla Libreria.
+- [ ] Durata finale uguale al parlato, voce preservata e base senza cantato.
+- [ ] Regolazione Voce/Musica/Ducking e assenza di clipping.
+- [ ] Interruzione durante MiniMax Music e durante il mix.
 - [ ] Futuro opzionale: audio-to-music/cover con engine dedicato.
 
 ## Upscale e Face
@@ -182,7 +187,7 @@ Aggiornamento: 28 agosto 2026
 
 1. Persistenza modello, CFG e step Anima/Nova.
 2. Persistenza dei job lasciando e riaprendo lo Studio.
-3. Musica cantata con lyrics letterali.
+3. Parlato → brano da Libreria, con verifica durata, stereo e ducking.
 4. Apertura nello Studio del media corretto creato dalla Chat.
 5. Allineamento Assets/Libreria per Personaggi, Oggetti e Luoghi.
 6. Continue video senza stacco, duplicazione o perdita reference.

@@ -74,6 +74,8 @@
 .audio-seed legend { grid-column: 1 / -1; margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .instrumental-toggle { grid-template-columns: 1fr 1fr !important; }
 .instrumental-toggle > span { grid-column: 1 / -1; }
+.speech-mix-controls { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: #111314; }
+.speech-mix-controls input[type="range"] { padding: 0; accent-color: var(--accent); }
 .voice-clone { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: #111314; }
 .voice-clone.enabled { border-color: rgba(190,255,55,.3); }
 .music-planner, .prompt-planner { border: 1px solid #2a2d30; border-radius: 14px; padding: 14px; background: #111315; }
@@ -105,6 +107,7 @@
 .audio-library-grid span { color: var(--muted); font-size: 10px; }
 @media (max-width: 900px) {
   .audio-grid, .audio-grid.three { grid-template-columns: 1fr; }
+  .speech-mix-controls { grid-template-columns: 1fr; }
   .voice-clone > div:first-child { align-items: flex-start; flex-direction: column; }
   .voice-reference-chip { grid-template-columns: 1fr auto; }
   .voice-reference-chip audio { grid-column: 1 / -1; }

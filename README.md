@@ -92,6 +92,11 @@ sezioni, durata fino a sei minuti, seed e decode tiled. Entrambi espongono
 progresso, interruzione, player, download, tempo di esecuzione e registrano
 l'output come audio riutilizzabile in Libreria.
 
+La modalità **Parlato → brano** prende un audio da disco o Libreria, ne usa
+trascrizione e durata reale per progettare una base strumentale con il planner
+LLM, quindi produce un unico WAV stereo con voce preservata, ducking regolabile,
+limiter e mix automatico tramite FFmpeg.
+
 Ogni candidato completato espone derivati non distruttivi **Face**, **Upscale
 1 MP** e **Upscale 2 MP**. I target compaiono soltanto quando superano la
 risoluzione della sorgente: un originale da 0,98 MP propone quindi solo 2 MP.
@@ -134,7 +139,7 @@ video corrispondenti dall'output ComfyUI.
 - `docs/CREATIVE-LIBRARY.md`: personaggi, oggetti, reference e sheet Krea 2.
 - `docs/IMAGE-STUDIO.md`: generazione Krea/Anima, edit Flux Klein, reference e condivisione immagini fra progetti.
 - `docs/CHAT.md`: assistente LLM Vision, allegati, azioni e runtime locale.
-- `docs/AUDIO-STUDIO.md`: Higgs TTS, voice cloning, MiniMax Music e rilascio VRAM.
+- `docs/AUDIO-STUDIO.md`: Higgs TTS, voice cloning, MiniMax Music, Parlato → brano e rilascio VRAM.
 - `docs/INSTALLATION.md`: clone, primo avvio, sicurezza e dipendenze ComfyUI.
 - `docs/GITHUB-RELEASE.md`: sanitizzazione, CI e checklist di pubblicazione.
 - `docs/WORKLOG.md`: cronologia sintetica del lavoro.

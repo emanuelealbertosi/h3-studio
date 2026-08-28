@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
-type AudioKind = "tts" | "music";
+type AudioKind = "tts" | "music" | "speech_music";
 type AudioJob = {
   id: string;
   projectId: string;
@@ -21,6 +21,7 @@ type AudioJob = {
   output?: { mediaPath: string; filename: string; format: string } | null;
   error?: string | null;
   processingSeconds?: number | null;
+  settings?: Record<string, unknown>;
   createdAt: string;
 };
 
@@ -78,6 +79,13 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
   const [musicPlanReady, setMusicPlanReady] = useState(false);
   const [musicPlanSummary, setMusicPlanSummary] = useState("");
   const [instrumental, setInstrumental] = useState(true);
+  const [speechIdea, setSpeechIdea] = useState("");
+  const [speechPlanner, setSpeechPlanner] = useState(true);
+  const [speechPlanReady, setSpeechPlanReady] = useState(false);
+  const [speechPlanSummary, setSpeechPlanSummary] = useState("");
+  const [voiceGain, setVoiceGain] = useState(1);
+  const [musicGain, setMusicGain] = useState(0.55);
+  const [ducking, setDucking] = useState(0.7);
   const [duration, setDuration] = useState(30);
   const [fixedSeed, setFixedSeed] = useState(false);
   const [seed, setSeed] = useState(1024);
@@ -93,6 +101,10 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
   const activeJob = useMemo(() => jobs.find((job) => runningStates.has(job.status)) ?? null, [jobs]);
   const latestJob = jobs[0] ?? null;
   const selectedReady = kind === "tts" ? capabilities?.tts.ready : capabilities?.music.ready;
+
+  function displayedKind(job: AudioJob): AudioKind {
+    return job.settings?.mode === "speech_music" ? "speech_music" : job.kind;
+  }
 
   async function load(preferId?: string | null) {
     const [capResponse, jobsResponse, libraryResponse] = await Promise.all([
@@ -111,7 +123,7 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
     const preferred = preferId ? loaded.find((job) => job.id === preferId) : null;
     setJobs(preferred ? [preferred, ...loaded.filter((job) => job.id !== preferred.id)] : loaded);
     if (preferred) {
-      setKind(preferred.kind);
+      setKind(displayedKind(preferred));
       setMessage(`Job ${preferred.id.slice(0, 8)} aperto dalla Chat`);
     }
     if (libraryResponse.ok) setLibrary((libraryPayload.assets ?? []).filter((asset) => asset.kind === "audio"));
@@ -158,7 +170,7 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
       if (payload.asset.kind !== "audio") throw new Error("Il file scelto non è audio");
       setReference(payload.asset);
       setReferenceText("");
-      setCloneEnabled(true);
+      if (kind === "tts") setCloneEnabled(true);
       await transcribeReference(payload.asset, false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Upload audio fallito");
@@ -236,6 +248,38 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
     }
   }
 
+  async function prepareSpeechPlan(manageBusy = true) {
+    if (!reference) throw new Error("Scegli o carica prima il parlato sorgente");
+    if (manageBusy) setBusy("speech-planner");
+    setMessage("LLM sta progettando una base strumentale intorno al parlato…");
+    try {
+      const response = await fetch(`${bridgeUrl}/api/audio-jobs/speech-track-plan`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          idea: speechIdea,
+          referenceFile: reference.file,
+          referenceText,
+          durationSeconds: duration,
+        }),
+      });
+      const payload = await response.json() as { plan?: MusicPlan; error?: string };
+      if (!response.ok || !payload.plan) {
+        throw new Error(payload.error ?? "Planner Parlato → brano non disponibile");
+      }
+      setCaption(payload.plan.caption);
+      setSpeechPlanSummary(payload.plan.summary);
+      setSpeechPlanReady(true);
+      setMessage(`${payload.plan.summary} La base resta modificabile prima del mix.`);
+      return payload.plan;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Planner Parlato → brano fallito");
+      throw error;
+    } finally {
+      if (manageBusy) setBusy(null);
+    }
+  }
+
   async function run() {
     setBusy("run");
     setMessage(null);
@@ -251,6 +295,9 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
         effectiveCaption = plan.caption;
         effectiveLyrics = plan.lyrics;
       }
+      if (kind === "speech_music" && speechPlanner && !speechPlanReady) {
+        effectiveCaption = (await prepareSpeechPlan(false)).caption;
+      }
       const body = kind === "tts"
         ? {
             kind, projectId, text: effectiveTtsText, voice,
@@ -258,7 +305,19 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
             referenceFile: cloneEnabled ? reference?.file : undefined,
             referenceText: cloneEnabled ? referenceText : undefined,
           }
-        : {
+        : kind === "speech_music"
+          ? {
+              kind,
+              projectId,
+              caption: effectiveCaption,
+              referenceFile: reference?.file,
+              referenceText,
+              voiceGain,
+              musicGain,
+              ducking,
+              seed: fixedSeed ? seed : undefined,
+            }
+          : {
             kind, projectId, caption: effectiveCaption, lyrics: effectiveLyrics,
             durationSeconds: duration, seed: fixedSeed ? seed : undefined,
           };
@@ -268,7 +327,13 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
       const payload = await response.json() as { job?: AudioJob; error?: string };
       if (!response.ok || !payload.job) throw new Error(payload.error ?? "Job audio non avviato");
       setJobs((current) => [payload.job!, ...current.filter((job) => job.id !== payload.job!.id)]);
-      setMessage(kind === "tts" ? "Higgs in caricamento; verrà scaricato automaticamente a fine job." : "MiniMax Music inviato a ComfyUI.");
+      setMessage(
+        kind === "tts"
+          ? "Higgs in caricamento; verrà scaricato automaticamente a fine job."
+          : kind === "speech_music"
+            ? "Base inviata a MiniMax Music; al termine verrà mixata col parlato originale."
+            : "MiniMax Music inviato a ComfyUI.",
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Job audio fallito");
     } finally {
@@ -315,7 +380,7 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
           {jobs.map((job) => (
             <article className={`audio-job-card ${job.status}`} key={job.id}>
               <div className="audio-card-top">
-                <span className="fast-badge">{job.kind === "tts" ? "HIGGS TTS" : "H3 MUSIC"}</span>
+                <span className="fast-badge">{job.kind === "tts" ? "HIGGS TTS" : displayedKind(job) === "speech_music" ? "PARLATO + MUSICA" : "H3 MUSIC"}</span>
                 <span>{job.phaseLabel}</span>
                 <button aria-label="Elimina audio" disabled={runningStates.has(job.status)} onClick={() => void remove(job)} type="button">⌫</button>
               </div>
@@ -349,6 +414,7 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
         <div className="audio-kind-tabs">
           <button className={kind === "tts" ? "selected" : ""} onClick={() => setKind("tts")} type="button">Voce / TTS</button>
           <button className={kind === "music" ? "selected" : ""} onClick={() => setKind("music")} type="button">Musica H3</button>
+          <button className={kind === "speech_music" ? "selected" : ""} onClick={() => setKind("speech_music")} type="button">Parlato → brano</button>
         </div>
 
         {(busy || activeJob || latestJob) && (() => {
@@ -357,12 +423,13 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
             transcribe: "Trascrizione del campione con Whisper",
             "tts-planner": "LLM sta preparando il TTS",
             planner: "LLM sta preparando la musica",
-            run: kind === "tts" ? "Avvio della generazione TTS" : "Avvio della generazione musicale",
+            "speech-planner": "LLM sta preparando la base per il parlato",
+            run: kind === "tts" ? "Avvio della generazione TTS" : kind === "speech_music" ? "Avvio di Parlato → brano" : "Avvio della generazione musicale",
           };
           const displayJob = activeJob ?? latestJob;
           const isWorking = Boolean(busy || activeJob);
           const isFailed = !isWorking && Boolean(displayJob && ["failed", "cancelled"].includes(displayJob.status));
-          const title = busy ? (localLabels[busy] ?? "Operazione audio in corso") : activeJob ? `${activeJob.kind === "tts" ? "Voce TTS" : "Musica H3"} in generazione` : isFailed ? "Ultima generazione non riuscita" : "Audio pronto";
+          const title = busy ? (localLabels[busy] ?? "Operazione audio in corso") : activeJob ? `${activeJob.kind === "tts" ? "Voce TTS" : displayedKind(activeJob) === "speech_music" ? "Parlato → brano" : "Musica H3"} in generazione` : isFailed ? "Ultima generazione non riuscita" : "Audio pronto";
           const detail = busy ? (message ?? "Preparazione in corso...") : activeJob ? activeJob.phaseLabel : isFailed ? (displayJob?.error ?? "Il job e stato interrotto o non e riuscito.") : "L'asset e disponibile qui e nella Libreria del progetto.";
           return (
             <div aria-live="polite" className={`audio-live-status ${isWorking ? "running" : isFailed ? "failed" : "ready"}`} role="status">
@@ -397,6 +464,29 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
               {cloneEnabled && <><div className="voice-reference-actions"><button onClick={() => void openLibrary()} type="button">Scegli dalla Libreria</button><label className="asset-upload">{busy === "upload" ? "Caricamento…" : busy === "transcribe" ? "Trascrizione…" : "Carica audio"}<input accept="audio/*" disabled={busy === "upload" || busy === "transcribe"} onChange={(event) => { void uploadReference(event.currentTarget.files); event.currentTarget.value = ""; }} type="file" /></label></div>{reference && <div className="voice-reference-chip"><audio controls src={fullUrl(bridgeUrl, reference.mediaPath)} /><strong>{reference.originalName ?? reference.name}</strong><button onClick={() => { setReference(null); setReferenceText(""); }} type="button">×</button></div>}<label><span>Trascrizione automatica del campione (modificabile)</span><textarea onChange={(event) => setReferenceText(event.target.value)} placeholder={busy === "transcribe" ? "Riconoscimento multilingua in corso…" : "Il testo riconosciuto appare qui; puoi correggerlo manualmente…"} rows={2} value={referenceText} /></label></>}
             </div>
           </div>
+        ) : kind === "speech_music" ? (
+          <div className="audio-form">
+            <div className={`music-planner ${speechPlanner ? "enabled" : ""}`}>
+              <div><label><input checked={speechPlanner} onChange={(event) => { setSpeechPlanner(event.target.checked); setSpeechPlanReady(false); }} type="checkbox" /> Planner Parlato → brano</label><span>Il modello LLM usa trascrizione, durata e direzione creativa per progettare una base senza voce; poi viene scaricato.</span></div>
+            </div>
+            <div className="voice-clone enabled">
+              <div><label>Parlato sorgente</label><span>La voce originale viene preservata, convertita in stereo e mixata con ducking automatico.</span></div>
+              <div className="voice-reference-actions"><button onClick={() => void openLibrary()} type="button">Scegli dalla Libreria</button><label className="asset-upload">{busy === "upload" ? "Caricamento…" : busy === "transcribe" ? "Trascrizione…" : "Carica parlato"}<input accept="audio/*" disabled={busy === "upload" || busy === "transcribe"} onChange={(event) => { void uploadReference(event.currentTarget.files); event.currentTarget.value = ""; }} type="file" /></label></div>
+              {reference && <div className="voice-reference-chip"><audio controls src={fullUrl(bridgeUrl, reference.mediaPath)} /><strong>{reference.originalName ?? reference.name}</strong><button onClick={() => { setReference(null); setReferenceText(""); setSpeechPlanReady(false); }} type="button">×</button></div>}
+              <label><span>Trascrizione per guidare la base (modificabile)</span><textarea onChange={(event) => { setReferenceText(event.target.value); setSpeechPlanReady(false); }} placeholder={busy === "transcribe" ? "Trascrizione in corso…" : "Il testo riconosciuto aiuta il planner a seguire tono e ritmo del parlato."} rows={3} value={referenceText} /></label>
+            </div>
+            {speechPlanner ? <>
+              <label className="audio-main-field"><span>Direzione musicale</span><textarea onChange={(event) => { setSpeechIdea(event.target.value); setSpeechPlanReady(false); }} placeholder="Facoltativo: base jazz elegante, cinematica, elettronica discreta, podcast energico…" rows={4} value={speechIdea} /></label>
+              <button className="music-plan-button" disabled={busy === "speech-planner" || !reference || !capabilities?.music.plannerReady} onClick={() => void prepareSpeechPlan().catch(() => undefined)} type="button">{busy === "speech-planner" ? "LLM sta preparando…" : "Prepara base con LLM"}</button>
+              {speechPlanReady && <div className="music-plan-preview"><strong>Piano strumentale modificabile</strong><span>{speechPlanSummary}</span><label><span>Descrizione tecnica MiniMax</span><textarea onChange={(event) => setCaption(event.target.value)} rows={5} value={caption} /></label></div>}
+            </> : <label className="audio-main-field"><span>Descrivi la base strumentale</span><textarea onChange={(event) => setCaption(event.target.value)} placeholder="Instrumental only, no vocals, lascia spazio alla voce…" rows={5} value={caption} /></label>}
+            <div className="speech-mix-controls">
+              <label><span>Voce · {voiceGain.toFixed(2)}</span><input min="0" max="2" step="0.05" type="range" value={voiceGain} onChange={(event) => setVoiceGain(Number(event.target.value))} /></label>
+              <label><span>Musica · {musicGain.toFixed(2)}</span><input min="0" max="2" step="0.05" type="range" value={musicGain} onChange={(event) => setMusicGain(Number(event.target.value))} /></label>
+              <label><span>Ducking · {ducking.toFixed(2)}</span><input min="0" max="1" step="0.05" type="range" value={ducking} onChange={(event) => setDucking(Number(event.target.value))} /></label>
+            </div>
+            <fieldset className="audio-seed"><legend>Seed base musicale</legend><button className={!fixedSeed ? "selected" : ""} onClick={() => setFixedSeed(false)} type="button">Random</button><button className={fixedSeed ? "selected" : ""} onClick={() => setFixedSeed(true)} type="button">Fisso</button><input disabled={!fixedSeed} min="0" onChange={(event) => setSeed(Number(event.target.value))} type="number" value={seed} /></fieldset>
+          </div>
         ) : (
           <div className="audio-form">
             <div className={`music-planner ${musicPlanner ? "enabled" : ""}`}>
@@ -424,15 +514,16 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
         {message && <div className="audio-message">{message}</div>}
         <div className="generation-footer audio-footer">
           <div className="preset-note"><span className="fast-badge">{kind === "tts" ? "HIGGS 8-BIT" : "MINIMAX MUSIC 3"}</span>{kind === "tts" ? "Processo isolato · unload automatico" : `${duration}s · tiled decode · ${capabilities?.music.steps ?? 30} step`}</div>
-          <div hidden={(kind === "music" && musicPlanner) || (kind === "tts" && ttsPlanner)}>
+          <div hidden={(kind === "music" && musicPlanner) || (kind === "tts" && ttsPlanner) || kind === "speech_music"}>
           <div className="generation-cta"><div><span>Stato motore</span><strong>{selectedReady ? "Pronto" : "Configura in Admin"}</strong></div><button disabled={busy === "run" || !selectedReady || (kind === "tts" ? !ttsText.trim() || (cloneEnabled && !reference) : !caption.trim())} onClick={() => void run()} type="button">{busy === "run" ? "Avvio…" : kind === "tts" ? "Genera voce" : "Genera musica"}</button></div>
           </div>
           {kind === "tts" && ttsPlanner && <div className="generation-cta"><div><span>Stato motore</span><strong>{capabilities?.tts.plannerReady ? "Planner e Higgs pronti" : "Configura il modello LLM in Admin"}</strong></div><button disabled={busy === "run" || busy === "tts-planner" || !selectedReady || !capabilities?.tts.plannerReady || !ttsIdea.trim() || (cloneEnabled && !reference)} onClick={() => void run()} type="button">{busy === "run" ? "LLM prepara e avvia..." : busy === "tts-planner" ? "LLM prepara..." : "Genera voce"}</button></div>}
           {kind === "music" && musicPlanner && <div className="generation-cta"><div><span>Stato motore</span><strong>{capabilities?.music.plannerReady ? "Planner e motore pronti" : "Configura il modello LLM in Admin"}</strong></div><button disabled={busy === "run" || busy === "planner" || !selectedReady || !capabilities?.music.plannerReady || !musicIdea.trim()} onClick={() => void run()} type="button">{busy === "run" ? "LLM prepara e avvia..." : busy === "planner" ? "LLM prepara..." : "Genera musica"}</button></div>}
+          {kind === "speech_music" && <div className="generation-cta"><div><span>Stato motore</span><strong>{selectedReady && (!speechPlanner || capabilities?.music.plannerReady) ? "Mix e motore pronti" : "Configura Music/LLM in Admin"}</strong></div><button disabled={busy === "run" || busy === "speech-planner" || !selectedReady || !reference || (speechPlanner ? !capabilities?.music.plannerReady : !caption.trim())} onClick={() => void run()} type="button">{busy === "run" ? "Prepara base e mix…" : busy === "speech-planner" ? "LLM prepara…" : "Crea brano dal parlato"}</button></div>}
         </div>
       </section>
 
-      {libraryOpen && typeof document !== "undefined" && createPortal(<div className="media-picker-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setLibraryOpen(false); }} role="presentation"><section aria-modal="true" className="media-library-picker media-library-modal audio-picker" role="dialog"><div className="media-picker-heading"><div><strong>Reference vocali</strong><span>Scegli un audio gia salvato senza ricaricarlo dal disco</span></div><button onClick={() => setLibraryOpen(false)} type="button">×</button></div>{(busy === "upload" || busy === "transcribe") && <div className="audio-picker-notice">La trascrizione corrente e ancora in corso. Puoi consultare la Libreria; attendi il termine prima di scegliere un altro campione.</div>}<div className="audio-library-grid">{libraryBusy ? <p>Caricamento Libreria...</p> : <>{library.map((asset) => <button disabled={busy === "upload" || busy === "transcribe"} key={asset.id} onClick={() => { setReference(asset); setReferenceText(""); setCloneEnabled(true); setLibraryOpen(false); void transcribeReference(asset); }} type="button"><audio controls onClick={(event) => event.stopPropagation()} src={fullUrl(bridgeUrl, asset.mediaPath)} /><strong>{asset.originalName ?? asset.name}</strong><span>{asset.originProjectName ?? "Media esterno"}</span></button>)}{library.length === 0 && <p>Nessun audio in Libreria. Caricane uno dal pannello TTS.</p>}</>}</div></section></div>, document.body)}
+      {libraryOpen && typeof document !== "undefined" && createPortal(<div className="media-picker-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setLibraryOpen(false); }} role="presentation"><section aria-modal="true" className="media-library-picker media-library-modal audio-picker" role="dialog"><div className="media-picker-heading"><div><strong>{kind === "speech_music" ? "Parlato sorgente" : "Reference vocali"}</strong><span>Scegli un audio già salvato senza ricaricarlo dal disco</span></div><button onClick={() => setLibraryOpen(false)} type="button">×</button></div>{(busy === "upload" || busy === "transcribe") && <div className="audio-picker-notice">La trascrizione corrente è ancora in corso. Puoi consultare la Libreria; attendi il termine prima di scegliere un altro campione.</div>}<div className="audio-library-grid">{libraryBusy ? <p>Caricamento Libreria...</p> : <>{library.map((asset) => <button disabled={busy === "upload" || busy === "transcribe"} key={asset.id} onClick={() => { setReference(asset); setReferenceText(""); if (kind === "tts") setCloneEnabled(true); if (kind === "speech_music") setSpeechPlanReady(false); setLibraryOpen(false); void transcribeReference(asset); }} type="button"><audio controls onClick={(event) => event.stopPropagation()} src={fullUrl(bridgeUrl, asset.mediaPath)} /><strong>{asset.originalName ?? asset.name}</strong><span>{asset.originProjectName ?? "Media esterno"}</span></button>)}{library.length === 0 && <p>Nessun audio in Libreria. Caricane uno dal pannello Audio.</p>}</>}</div></section></div>, document.body)}
     </div>
   );
 }

@@ -690,6 +690,21 @@ app.post("/api/audio-jobs/music-plan", async (request, reply) => {
   }
 });
 
+app.post("/api/audio-jobs/speech-track-plan", async (request, reply) => {
+  try {
+    return reply.status(200).send({
+      ok: true,
+      plan: await audioStudio.planSpeechTrack(request.body),
+    });
+  } catch (error) {
+    const message = error instanceof Error
+      ? error.message
+      : "Planner Parlato → brano non disponibile";
+    app.log.error(error, "Pianificazione Parlato → brano fallita");
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
 app.get<{ Querystring: { limit?: string; projectId?: string } }>(
   "/api/audio-jobs",
   async (request) => ({
