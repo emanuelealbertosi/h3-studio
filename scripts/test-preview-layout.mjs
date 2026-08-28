@@ -131,7 +131,7 @@ assert.match(imageStudio, />\s*Ripristina 16:9\s*<\/button>/);
 assert.match(imageStudio, /aria-invalid=\{turnaroundFormatMismatch \|\| undefined\}/);
 assert.match(
   imageStudio,
-  /disabled=\{[^}]*!selectedEngineReady \|\| turnaroundFormatMismatch \|\| keepAspectUnavailable\}/,
+  /disabled=\{[^}]*!selectedEngineReady \|\| turnaroundFormatMismatch \|\| keepAspectUnavailable \|\| \(plannerEnabled/,
 );
 const imageRunPattern = /async function run\(\)[\s\S]*?\n  }\n\n  async function refresh/;
 const imageRunBlock = imageStudio.match(imageRunPattern);
