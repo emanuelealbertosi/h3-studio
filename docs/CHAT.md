@@ -14,7 +14,13 @@ riavvio di H3 Studio.
 - Con immagini allegate puoi chiedere un'analisi, un edit Flux.2 Klein, un I2V
   o un Reference H3. Gemma può osservare fino a quattro immagini per messaggio;
   il router accetta fino a otto media complessivi per un'azione.
-- Chiedendo un'immagine anime viene usato Anima; una normale immagine usa Krea.
+- Sopra il campo di testo scegli **Auto, Video H3, Krea, Anima o Edit**. La
+  scelta esplicita prevale sempre sul router di Gemma, ma non avvia nulla finché
+  il testo non contiene una richiesta esplicita di generazione. Se vuoi essere
+  certo di ottenere un disegno, seleziona **Anima**; se vuoi una fotografia o
+  un'immagine generale, seleziona **Krea**.
+- In **Auto**, anime, manga, disegno, illustrazione e cartoon vengono instradati
+  ad Anima; le immagini fotografiche o generiche usano Krea.
 - Una richiesta esplicita di video usa 10 secondi, un candidato, 0,5 MP e FAST
   8-step. Per cambiare questi parametri apri poi il job nello Studio.
 
@@ -23,6 +29,22 @@ Studio**. I prompt di produzione sono generati in inglese, mentre la risposta
 dell'assistente resta in italiano.
 
 ## Runtime e memoria
+
+La conversazione completa rimane in SQLite, ma non viene reinviata integralmente
+al modello. Quando la finestra recente supera 16 messaggi o il budget derivato
+da `n_ctx`, Gemma consolida i messaggi meno recenti in una memoria persistente
+del progetto. La richiesta successiva contiene:
+
+1. regole del router;
+2. motore scelto nell'interfaccia;
+3. memoria compatta del progetto;
+4. messaggi recenti entro il budget;
+5. allegati Vision del messaggio corrente.
+
+La memoria conserva decisioni, identità, asset, preferenze, impostazioni riuscite
+e attività aperte; elimina saluti e ripetizioni. Il badge **Memoria · N** mostra
+quanti messaggi sono già stati assimilati e, passando il mouse, permette di
+leggere il riassunto. **Pulisci** elimina sia cronologia sia memoria.
 
 Il nodo incluso non avvia LM Studio. Usa soltanto un `llama-server` compatibile
 con Gemma 4 Vision e MTMD:

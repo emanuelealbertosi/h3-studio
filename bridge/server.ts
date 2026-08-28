@@ -527,7 +527,11 @@ app.get<{ Params: { projectId: string } }>(
   "/api/chat/:projectId",
   async (request, reply) => {
     try {
-      return { ok: true, messages: chat.list(request.params.projectId) };
+      return {
+        ok: true,
+        messages: chat.list(request.params.projectId),
+        memory: chat.memory(request.params.projectId),
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Chat non disponibile";
       return reply.status(400).send({ ok: false, error: message });
@@ -537,7 +541,7 @@ app.get<{ Params: { projectId: string } }>(
 
 app.post<{
   Params: { projectId: string };
-  Body: { content?: unknown; attachments?: unknown };
+  Body: { content?: unknown; attachments?: unknown; route?: unknown };
 }>("/api/chat/:projectId/messages", async (request, reply) => {
   try {
     return { ok: true, ...(await chat.send(request.params.projectId, request.body ?? {})) };

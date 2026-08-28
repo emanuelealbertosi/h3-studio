@@ -15,6 +15,13 @@ type PlannedAction = {
   aspect?: "16:9" | "9:16" | "1:1";
 };
 
+type ChatRoute = "auto" | "video" | "krea" | "anima" | "edit";
+
+const RECENT_MESSAGE_COUNT = 10;
+const COMPACTION_TRIGGER_COUNT = 16;
+const COMPACTION_BATCH_COUNT = 18;
+const MAX_MEMORY_CHARACTERS = 5_000;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -79,6 +86,55 @@ function normalizePlan(text: string): { reply: string; action: PlannedAction | n
   return { reply, action: { type: type as PlannedAction["type"], prompt, videoMode, aspect } };
 }
 
+function normalizeRoute(value: unknown): ChatRoute {
+  return value === "video" || value === "krea" || value === "anima" || value === "edit"
+    ? value
+    : "auto";
+}
+
+export function routeAction(action: PlannedAction | null, route: ChatRoute) {
+  if (!action || route === "auto") return action;
+  const forcedType = route === "video"
+    ? "generate_video"
+    : route === "krea"
+      ? "generate_image"
+      : route === "anima"
+        ? "generate_anima"
+        : "edit_image";
+  return { ...action, type: forcedType } as PlannedAction;
+}
+
+function routeInstruction(route: ChatRoute) {
+  if (route === "auto") {
+    return "ROUTE_OVERRIDE=auto. Infer the engine using the routing rules.";
+  }
+  const action = route === "video"
+    ? "generate_video"
+    : route === "krea"
+      ? "generate_image"
+      : route === "anima"
+        ? "generate_anima"
+        : "edit_image";
+  return `ROUTE_OVERRIDE=${route}. If and only if the user explicitly requests media creation, use action type ${action}. The selector alone never authorizes a render.`;
+}
+
+function contextCharacterBudget(nCtx: number) {
+  return Math.min(60_000, Math.max(14_000, Math.trunc(nCtx * 2.2)));
+}
+
+function recentMessagesWithinBudget<T extends { content: string }>(messages: T[], budget: number) {
+  const selected: T[] = [];
+  let used = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    const cost = message.content.length + 80;
+    if (selected.length >= 1 && used + cost > budget) break;
+    selected.unshift(message);
+    used += cost;
+  }
+  return selected;
+}
+
 const CHAT_SYSTEM_PROMPT = `You are H3 Studio, a concise Italian-speaking creative assistant and a safe workflow router.
 Always return exactly one JSON object and no markdown:
 {"reply":"natural Italian reply","action":null}
@@ -87,8 +143,14 @@ or
 
 Only create an action when the user explicitly asks to generate, animate, continue or edit media. Questions and ordinary conversation use action:null.
 For video default to 10 seconds, one candidate, 0.5 MP and the FAST 8-step engine; these execution values are enforced by the server and must not be invented in JSON.
-Use generate_anima for anime-style still images. Use edit_image only with attached pictures. Use I2V when one attached picture is the start frame, R2V for broader references, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for editing one.
+Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures. Use I2V when one attached picture is the start frame, R2V for broader references, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for editing one.
 Write rich, production-ready prompts in English. When attachments are present, refer to them as Picture 1, Picture 2, Video 1 or Audio 1 in attachment order. Never invent file paths, model names, LoRAs, workflow nodes or numeric engine settings.`;
+
+const MEMORY_SYSTEM_PROMPT = `You maintain compact long-term memory for one H3 Studio creative project.
+Return plain Italian text only, no JSON and no markdown. Merge the existing memory with the transcript.
+Preserve stable user preferences, accepted decisions, character/object identities, continuity details, named assets, chosen engines, successful settings and unresolved tasks.
+Discard greetings, repetition, failed guesses and obsolete values when a newer decision supersedes them.
+Be factual and concise. Never invent information. Maximum 3500 characters.`;
 
 export class ChatService {
   constructor(
@@ -100,6 +162,7 @@ export class ChatService {
   ) {}
 
   list(projectId: string) { return this.repository.list(projectId); }
+  memory(projectId: string) { return this.repository.memoryStatus(projectId); }
   clear(projectId: string) { return this.repository.clear(projectId); }
 
   async status() {
@@ -128,11 +191,21 @@ export class ChatService {
       throw new Error("Puoi allegare al massimo 8 media alla Chat");
     }
     const attachments = rawAttachments.map(normalizeAttachment);
+    const route = normalizeRoute(value.route);
     this.repository.add({ projectId, role: "user", content, attachments });
-    const history = this.repository.list(projectId, 24);
     const settings = (await this.runtimeSettings.get()).chat;
+    await this.compactContext(projectId, settings).catch(() => undefined);
+    const context = this.repository.context(projectId);
+    const history = recentMessagesWithinBudget(
+      context.messages,
+      contextCharacterBudget(settings.nCtx) - context.summary.length,
+    );
     const modelMessages = [
       { role: "system", content: CHAT_SYSTEM_PROMPT },
+      { role: "system", content: routeInstruction(route) },
+      ...(context.summary
+        ? [{ role: "system", content: `PROJECT_MEMORY:\n${context.summary}` }]
+        : []),
       ...history.map((message) => ({ role: message.role, content: message.content })),
     ];
     let rawText = "";
@@ -151,7 +224,8 @@ export class ChatService {
       });
       if (!response.ok || !response.text) throw new Error(response.error ?? "Gemma 4 non ha risposto");
       rawText = response.text;
-      const plan = normalizePlan(rawText);
+      const parsedPlan = normalizePlan(rawText);
+      const plan = { ...parsedPlan, action: routeAction(parsedPlan.action, route) };
       const action = plan.action ? await this.executeAction(projectId, plan.action, attachments) : null;
       const assistant = this.repository.add({
         projectId,
@@ -159,7 +233,11 @@ export class ChatService {
         content: plan.reply,
         action,
       });
-      return { messages: this.repository.list(projectId), assistant };
+      return {
+        messages: this.repository.list(projectId),
+        memory: this.repository.memoryStatus(projectId),
+        assistant,
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Chat locale non disponibile";
       const assistant = this.repository.add({
@@ -169,8 +247,61 @@ export class ChatService {
         status: "failed",
         error: rawText ? `${message} · Risposta grezza: ${rawText.slice(0, 500)}` : message,
       });
-      return { messages: this.repository.list(projectId), assistant };
+      return {
+        messages: this.repository.list(projectId),
+        memory: this.repository.memoryStatus(projectId),
+        assistant,
+      };
     }
+  }
+
+  private async compactContext(
+    projectId: string,
+    settings: Awaited<ReturnType<RuntimeSettingsStore["get"]>>["chat"],
+  ) {
+    const context = this.repository.context(projectId);
+    const totalCharacters = context.messages.reduce((sum, message) => sum + message.content.length, 0);
+    if (
+      context.messages.length <= COMPACTION_TRIGGER_COUNT &&
+      totalCharacters <= contextCharacterBudget(settings.nCtx)
+    ) return this.repository.memoryStatus(projectId);
+
+    const compactableCount = Math.min(
+      COMPACTION_BATCH_COUNT,
+      Math.max(0, context.messages.length - RECENT_MESSAGE_COUNT),
+    );
+    if (!compactableCount) return this.repository.memoryStatus(projectId);
+    const compactable = context.messages.slice(0, compactableCount);
+    const transcript = compactable.map((message) => {
+      const action = message.action
+        ? `\n[Azione ${message.action.type}: ${message.action.prompt.slice(0, 1_200)}]`
+        : "";
+      return `${message.role === "user" ? "UTENTE" : "ASSISTENTE"}: ${message.content.slice(0, 2_500)}${action}`;
+    }).join("\n\n");
+    const response = await this.comfy.chatGenerate({
+      model: settings.model,
+      projector: settings.projector,
+      n_ctx: settings.nCtx,
+      n_gpu_layers: settings.nGpuLayers,
+      n_threads: settings.nThreads,
+      max_tokens: Math.min(1_024, settings.maxNewTokens),
+      temperature: 0.1,
+      top_p: 0.9,
+      messages: [
+        { role: "system", content: MEMORY_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: `MEMORIA ESISTENTE:\n${context.summary || "(vuota)"}\n\nNUOVA TRASCRIZIONE:\n${transcript}`,
+        },
+      ],
+      images: [],
+    });
+    if (!response.ok || !response.text?.trim()) {
+      throw new Error(response.error ?? "Compattazione memoria non disponibile");
+    }
+    const summary = response.text.trim().slice(0, MAX_MEMORY_CHARACTERS);
+    const throughSequence = compactable.at(-1)?.sequence ?? context.sequence;
+    return this.repository.updateMemory(projectId, summary, throughSequence);
   }
 
   private async executeAction(

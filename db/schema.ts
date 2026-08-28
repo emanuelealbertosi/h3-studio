@@ -494,4 +494,14 @@ export const JOB_DATABASE_MIGRATIONS = [
        ON chat_messages(project_id, created_at)`,
     ],
   },
+  {
+    version: 19,
+    statements: [
+      `ALTER TABLE chat_threads
+       ADD COLUMN memory_summary TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE chat_threads
+       ADD COLUMN memory_sequence INTEGER NOT NULL DEFAULT 0
+       CHECK (memory_sequence >= 0)`,
+    ],
+  },
 ] as const;
