@@ -47,6 +47,22 @@
 .audio-kind-tabs { display: flex; gap: 7px; padding: 16px 18px 0; }
 .audio-kind-tabs button { min-width: 130px; }
 .audio-kind-tabs .selected, .audio-seed .selected, .instrumental-toggle .selected { border-color: rgba(190,255,55,.55); background: rgba(190,255,55,.09); color: var(--accent); }
+.audio-live-status { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 16px; margin: 14px 18px 0; padding: 13px 14px; border: 1px solid var(--line); border-radius: 13px; background: #101214; overflow: hidden; }
+.audio-live-status.running { border-color: rgba(215,255,82,.38); background: linear-gradient(110deg, rgba(215,255,82,.08), #101214 52%); }
+.audio-live-status.ready { border-color: rgba(69,219,124,.34); }
+.audio-live-status.failed { border-color: rgba(255,87,87,.4); }
+.audio-live-copy { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.audio-live-copy > div { display: grid; gap: 3px; min-width: 0; }
+.audio-live-copy strong { color: var(--text); font-size: 12px; }
+.audio-live-copy span:not(.audio-live-spinner):not(.audio-live-icon) { color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audio-live-spinner, .audio-live-icon { flex: 0 0 auto; width: 27px; height: 27px; display: grid; place-items: center; border-radius: 50%; color: #10130a; background: var(--accent); font-size: 11px; font-weight: 900; }
+.audio-live-spinner { border: 3px solid rgba(215,255,82,.22); border-top-color: var(--accent); background: transparent; animation: audio-spin .8s linear infinite; }
+@keyframes audio-spin { to { transform: rotate(360deg); } }
+.audio-live-progress { grid-column: 1 / -1; position: relative; height: 8px; border-radius: 99px; background: #24272a; overflow: hidden; }
+.audio-live-progress i { position: absolute; inset: 0 auto 0 0; min-width: 7%; border-radius: inherit; background: linear-gradient(90deg, #84b600, var(--accent)); transition: width .35s ease; }
+.audio-live-progress span { position: absolute; right: 5px; top: -19px; color: var(--muted); font-size: 9px; }
+.audio-live-status audio { grid-column: 1 / -1; width: 100%; height: 38px; }
+.audio-live-status > .danger { color: #ff8c8c; border-color: rgba(255,87,87,.38); }
 .audio-form { display: grid; gap: 15px; padding: 16px 18px 20px; }
 .audio-form label { display: grid; gap: 7px; min-width: 0; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .audio-form textarea, .audio-form input, .audio-form select { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #0b0d0e; color: var(--text); padding: 11px 12px; }
@@ -81,8 +97,10 @@
 .audio-message { margin: 0 18px 16px; padding: 10px 12px; border: 1px solid rgba(190,255,55,.2); border-radius: 10px; color: #dcebb7; background: rgba(190,255,55,.04); font-size: 11px; }
 .audio-footer { border-top: 1px solid var(--line); }
 .audio-picker { max-width: 850px; }
-.audio-library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; padding: 18px; max-height: 60vh; overflow: auto; }
+.audio-picker-notice { margin-top: 14px; padding: 10px 12px; border: 1px solid rgba(215,255,82,.25); border-radius: 10px; background: rgba(215,255,82,.06); color: #dcebb7; font-size: 11px; }
+.audio-library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; padding: 18px 0 0; max-height: 60vh; overflow: auto; }
 .audio-library-grid > button { display: grid; gap: 8px; text-align: left; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #0c0e0f; color: var(--text); }
+.audio-library-grid > button:disabled { cursor: wait; opacity: .52; }
 .audio-library-grid audio { width: 100%; height: 34px; }
 .audio-library-grid span { color: var(--muted); font-size: 10px; }
 @media (max-width: 900px) {
@@ -90,6 +108,7 @@
   .voice-clone > div:first-child { align-items: flex-start; flex-direction: column; }
   .voice-reference-chip { grid-template-columns: 1fr auto; }
   .voice-reference-chip audio { grid-column: 1 / -1; }
+  .audio-live-status { grid-template-columns: 1fr; }
 }
 
 .setup-shell {
