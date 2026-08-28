@@ -3491,10 +3491,6 @@ function AdminPanel() {
     setDataState(next);
   }
 
-  useEffect(() => {
-    dataRef.current = data;
-  }, [data]);
-
   async function loadSettings() {
     setMessage("Aggiornamento liste da ComfyUI…");
     try {
@@ -3657,13 +3653,26 @@ function AdminPanel() {
       if (!response.ok || !payload.settings) {
         throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
       }
+      const verifyResponse = await fetch(`${bridgeUrl}/api/admin/engine-settings`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const verified = (await verifyResponse.json()) as EngineAdminResponse & { error?: string };
+      if (!verifyResponse.ok || !verified.settings) {
+        throw new Error(verified.error ?? "Impossibile verificare le impostazioni appena salvate");
+      }
+      if (JSON.stringify(verified.settings) !== JSON.stringify(payload.settings)) {
+        throw new Error("Il bridge non ha persistito tutte le impostazioni Engine");
+      }
       setData((current) => {
         if (!current) return current;
-        const next = { ...current, settings: payload.settings! };
+        const next = { ...current, settings: verified.settings };
         dataRef.current = next;
         return next;
       });
-      setMessage(`Configurazione Engine salvata · Anima: ${payload.settings.anima.model}`);
+      setMessage(
+        `Engine verificati e salvati · Anima ${verified.settings.anima.steps} step / CFG ${verified.settings.anima.cfg} · Flux ${verified.settings.imageEdit.steps} / CFG ${verified.settings.imageEdit.cfg} · Krea ${verified.settings.krea.steps} step`,
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Salvataggio fallito");
     } finally {
@@ -3911,7 +3920,7 @@ function AdminPanel() {
               <div className="admin-subheading">
                 <div><span>INSTALLAZIONE</span><h3>ComfyUI e workflow associati</h3></div>
                 <div className="admin-server-actions">
-                  <button disabled={saving || restarting} onClick={() => void saveInstallSettings()} type="button">Salva impostazioni</button>
+                  <button disabled={saving || restarting} onClick={() => void saveInstallSettings()} type="button">Salva collegamento</button>
                   <button className="secondary" disabled={saving || restarting} onClick={() => void restartServer()} type="button">
                     {restarting ? "Riavvio…" : "↻ Riavvia server"}
                   </button>
