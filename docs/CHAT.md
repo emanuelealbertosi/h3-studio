@@ -46,6 +46,18 @@ e attività aperte; elimina saluti e ripetizioni. Il badge **Memoria · N** most
 quanti messaggi sono già stati assimilati e, passando il mouse, permette di
 leggere il riassunto. **Pulisci** elimina sia cronologia sia memoria.
 
+La Chat ricorda inoltre l'ultimo gruppo di media allegato nel progetto. Non lo
+reinvia a ogni turno: lo recupera soltanto quando un messaggio senza nuovi
+allegati contiene un riferimento esplicito, per esempio “modificala”, “animala”,
+“questa immagine”, “quel video”, “usala” o “continualo”. Il messaggio registrato
+mostra **Memoria** sulla miniatura recuperata, così è sempre evidente quale file
+verrà usato. Un nuovo allegato sostituisce naturalmente il gruppo ricordato.
+
+Questo meccanismo non consuma continuamente il contesto Vision: al massimo
+quattro immagini vengono inviate al modello e soltanto nel turno che le usa;
+gli altri messaggi conservano esclusivamente nome e tipo del media nel testo
+compatto della conversazione.
+
 Il nodo incluso non avvia LM Studio. Usa soltanto un `llama-server` compatibile
 con Gemma 4 Vision e MTMD:
 

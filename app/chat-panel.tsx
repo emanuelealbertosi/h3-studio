@@ -15,6 +15,7 @@ type Attachment = {
   height?: number | null;
   duration?: number | null;
   hasAudio?: boolean;
+  remembered?: boolean;
 };
 type ChatMessage = {
   id: string;
@@ -172,7 +173,7 @@ export default function ChatPanel({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ content: text.trim(), attachments, route }),
       });
-      const payload = await response.json() as { messages?: ChatMessage[]; memory?: ChatMemory; error?: string };
+      const payload = await response.json() as { messages?: ChatMessage[]; memory?: ChatMemory; reusedAttachments?: boolean; error?: string };
       if (!response.ok || !payload.messages) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
       setMessages(payload.messages);
       setMemory(payload.memory ?? null);
@@ -180,7 +181,7 @@ export default function ChatPanel({
       setAttachments([]);
       const last = payload.messages.at(-1);
       setNotice(last?.action?.status === "started"
-        ? `${actionLabel(last.action.type)} avviato · Gemma è stata scaricata dalla memoria`
+        ? `${actionLabel(last.action.type)} avviato${payload.reusedAttachments ? " · media recuperato dalla memoria" : ""} · Gemma è stata scaricata dalla memoria`
         : last?.status === "failed" ? last.error ?? "Risposta fallita" : "Chat pronta");
       setRuntime((current) => current ? { ...current, loaded: !last?.action } : current);
     } catch (error) {
@@ -235,7 +236,7 @@ export default function ChatPanel({
             <span>{message.role === "assistant" ? "H3" : "TU"}</span>
             <div>
               {message.attachments?.length > 0 && <div className="chat-message-media">{message.attachments.map((item) => (
-                <div key={item.file}>{item.kind === "picture" ? <img alt="" src={`${bridgeUrl}${item.mediaPath}`} /> : item.kind === "video" ? <video muted src={`${bridgeUrl}${item.mediaPath}`} /> : <b>♪</b>}<small>{item.name}</small></div>
+                <div key={item.file}>{item.kind === "picture" ? <img alt="" src={`${bridgeUrl}${item.mediaPath}`} /> : item.kind === "video" ? <video muted src={`${bridgeUrl}${item.mediaPath}`} /> : <b>♪</b>}<small>{item.remembered ? "⌁ Memoria · " : ""}{item.name}</small></div>
               ))}</div>}
               <p>{message.content}</p>
               {message.action && <div className={`chat-action-card ${message.action.status}`}>

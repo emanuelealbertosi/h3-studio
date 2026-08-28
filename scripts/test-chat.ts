@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ChatRepository } from "../bridge/chat-repository.js";
-import { routeAction } from "../bridge/chat-service.js";
+import { routeAction, shouldRecallMedia } from "../bridge/chat-service.js";
 import { JobRepository } from "../bridge/job-repository.js";
 import { ProjectRepository } from "../bridge/project-repository.js";
 import { DEFAULT_RUNTIME_SETTINGS, RuntimeSettingsStore } from "../bridge/runtime-settings.js";
@@ -26,13 +26,22 @@ try {
   const messages = chat.list(project!.id);
   assert.equal(messages.length, 2);
   assert.equal(messages[1].action?.jobId, "job-1");
+  chat.add({
+    projectId: project!.id,
+    role: "user",
+    content: "Analizza questa immagine",
+    attachments: [{ kind: "picture", file: "chat/test.png [input]", name: "Test" }],
+  });
+  const recalled = chat.latestAttachments(project!.id);
+  assert.equal(recalled.length, 1);
+  assert.equal(recalled[0].remembered, true);
   const initialContext = chat.context(project!.id);
   assert.equal(initialContext.summary, "");
-  assert.equal(initialContext.messages.length, 2);
+  assert.equal(initialContext.messages.length, 3);
   chat.updateMemory(project!.id, "Il progetto usa uno stile anime luminoso.", initialContext.messages[0].sequence);
   const compactedContext = chat.context(project!.id);
   assert.match(compactedContext.summary, /stile anime/);
-  assert.equal(compactedContext.messages.length, 1);
+  assert.equal(compactedContext.messages.length, 2);
   assert.equal(chat.memoryStatus(project!.id).summarizedMessages, 1);
   chat.clear(project!.id);
   assert.equal(chat.list(project!.id).length, 0);
@@ -54,6 +63,9 @@ try {
   assert.equal(routeAction(proposedImage, "edit")?.type, "edit_image");
   assert.equal(routeAction(proposedImage, "auto")?.type, "generate_image");
   assert.equal(routeAction(null, "anima"), null);
+  assert.equal(shouldRecallMedia("Ora modificala rendendo il cielo rosso"), true);
+  assert.equal(shouldRecallMedia("Crea una animazione partendo da questa immagine"), true);
+  assert.equal(shouldRecallMedia("Parliamo di regia cinematografica"), false);
 
   const [server, service, panel, node, installer, manifest] = await Promise.all([
     readFile("bridge/server.ts", "utf8"),

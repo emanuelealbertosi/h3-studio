@@ -52,7 +52,14 @@ function normalizeAttachment(value: unknown): ChatAttachment {
     height: numberOrNull(value.height),
     duration: numberOrNull(value.duration),
     hasAudio: value.hasAudio === true || value.has_audio === true,
+    remembered: value.remembered === true,
   };
+}
+
+const MEDIA_RECALL_PATTERN = /(?:\b(?:questa|quella|questo|quello)\s+(?:immagine|foto|video|audio)\b|\b(?:l['’]?immagine|la\s+foto|il\s+video|l['’]?audio)\b|\b(?:modifical[ao]|edit(?:ala|alo)|animala|animalo|usala|usalo|continualo|estendilo|trasformala|trasformalo)\b|\bpartendo\s+da\s+(?:questa|quella|questo|quello)\b|\b(?:this|that)\s+(?:image|picture|video|audio)\b|\b(?:edit|animate|use|continue|extend|transform)\s+it\b)/i;
+
+export function shouldRecallMedia(content: string) {
+  return MEDIA_RECALL_PATTERN.test(content);
 }
 
 function extractJson(text: string) {
@@ -190,7 +197,12 @@ export class ChatService {
     if (!Array.isArray(rawAttachments) || rawAttachments.length > 8) {
       throw new Error("Puoi allegare al massimo 8 media alla Chat");
     }
-    const attachments = rawAttachments.map(normalizeAttachment);
+    const providedAttachments = rawAttachments.map(normalizeAttachment);
+    const rememberedAttachments = providedAttachments.length === 0 && shouldRecallMedia(content)
+      ? this.repository.latestAttachments(projectId)
+      : [];
+    const attachments = providedAttachments.length ? providedAttachments : rememberedAttachments;
+    const reusedAttachments = rememberedAttachments.length > 0;
     const route = normalizeRoute(value.route);
     this.repository.add({ projectId, role: "user", content, attachments });
     const settings = (await this.runtimeSettings.get()).chat;
@@ -206,7 +218,12 @@ export class ChatService {
       ...(context.summary
         ? [{ role: "system", content: `PROJECT_MEMORY:\n${context.summary}` }]
         : []),
-      ...history.map((message) => ({ role: message.role, content: message.content })),
+      ...history.map((message) => ({
+        role: message.role,
+        content: message.attachments.length
+          ? `${message.content}\n\n[Media associati: ${message.attachments.map((item, index) => `${item.kind === "picture" ? "Picture" : item.kind === "video" ? "Video" : "Audio"} ${index + 1}: ${item.name}`).join("; ")}]`
+          : message.content,
+      })),
     ];
     let rawText = "";
     try {
@@ -236,6 +253,7 @@ export class ChatService {
       return {
         messages: this.repository.list(projectId),
         memory: this.repository.memoryStatus(projectId),
+        reusedAttachments,
         assistant,
       };
     } catch (error) {
@@ -250,6 +268,7 @@ export class ChatService {
       return {
         messages: this.repository.list(projectId),
         memory: this.repository.memoryStatus(projectId),
+        reusedAttachments,
         assistant,
       };
     }

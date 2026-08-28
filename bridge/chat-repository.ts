@@ -10,6 +10,7 @@ export type ChatAttachment = {
   height?: number | null;
   duration?: number | null;
   hasAudio?: boolean;
+  remembered?: boolean;
 };
 
 export type ChatActionRecord = {
@@ -124,6 +125,17 @@ export class ChatRepository {
        ) ORDER BY created_at, sequence`,
     ).all(projectId, safeLimit) as unknown as ChatMessageRow[];
     return rows.map(present);
+  }
+
+  latestAttachments(projectId: string) {
+    const row = this.database.prepare(
+      `SELECT attachments_json FROM chat_messages
+       WHERE project_id = ? AND role = 'user' AND attachments_json <> '[]'
+       ORDER BY rowid DESC LIMIT 1`,
+    ).get(projectId) as { attachments_json: string } | undefined;
+    return parseJson<ChatAttachment[]>(row?.attachments_json ?? null, [])
+      .slice(0, 8)
+      .map((attachment) => ({ ...attachment, remembered: true }));
   }
 
   context(projectId: string) {
