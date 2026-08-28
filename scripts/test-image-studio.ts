@@ -98,6 +98,10 @@ try {
   assert.match(pageSource, /setMediaAssets\(videoAttachments\)/);
   assert.match(pageSource, /<AssetLibraryPanel[\s\S]*?onSendToStudio=\{sendAssetImagesToStudio\}/);
   assert.match(pageSource, /Mantieni proporzioni · Picture 1/);
+  assert.match(pageSource, /Mantieni proporzioni · Video 1/);
+  assert.match(pageSource, /Mantieni proporzioni · Picture\/Video 1/);
+  assert.match(pageSource, /dataRef\.current = next/);
+  assert.match(pageSource, /Configurazione Engine salvata · Anima/);
   assert.doesNotMatch(pageSource, /<CreativeLibraryPanel/);
   assert.match(pageSource, />\s*Manda a Studio\s*<span>Allegato video<\/span>/);
   assert.match(
@@ -658,6 +662,12 @@ try {
     },
   });
   assert.equal(novaAnimaUpdated.anima.model, "novaAnimeAM_v20.safetensors");
+  const persistedNovaRuntime = new RuntimeSettingsStore(temporaryDir);
+  assert.equal(
+    (await persistedNovaRuntime.get()).anima.model,
+    "novaAnimeAM_v20.safetensors",
+    "the selected Nova AM model must survive a fresh settings-store instance",
+  );
   await assert.rejects(
     runtime.update({
       ...novaAnimaUpdated,

@@ -126,7 +126,9 @@ assert.match(imageStudio, /Formato impostato su 16:9 per il turnaround\./);
 assert.match(imageStudio, /className="image-turnaround-warning"[\s\S]*?role="alert"/);
 assert.match(imageStudio, /Mantieni proporzioni · Reference 1/);
 assert.match(page, /Mantieni proporzioni · Picture 1/);
-assert.match(page, /nextMode !== "i2v" && aspectFormat === KEEP_SOURCE_ASPECT_FORMAT/);
+assert.match(page, /Mantieni proporzioni · Video 1/);
+assert.match(page, /Mantieni proporzioni · Picture\/Video 1/);
+assert.match(page, /nextMode === "t2v" && aspectFormat === KEEP_SOURCE_ASPECT_FORMAT/);
 assert.match(imageStudio, />\s*Ripristina 16:9\s*<\/button>/);
 assert.match(imageStudio, /aria-invalid=\{turnaroundFormatMismatch \|\| undefined\}/);
 assert.match(

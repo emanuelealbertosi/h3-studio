@@ -373,6 +373,13 @@ const aspectFormats = [
 
 const KEEP_SOURCE_ASPECT_FORMAT = "keep source aspect" as const;
 
+function sourceAspectLabel(mode: StudioMode) {
+  if (mode === "i2v" || mode === "keyframes") return "Mantieni proporzioni · Picture 1";
+  if (mode === "continue" || mode === "edit") return "Mantieni proporzioni · Video 1";
+  if (mode === "reference") return "Mantieni proporzioni · Picture/Video 1";
+  return null;
+}
+
 const initialCandidates: Candidate[] = [
   { id: 1, progress: 0, seed: 0, status: "idle" },
   { id: 2, progress: 0, seed: 0, status: "idle" },
@@ -3309,6 +3316,7 @@ function SetupWizard({ status }: { status: SetupStatus }) {
 
 function AdminPanel() {
   const [data, setData] = useState<EngineAdminResponse | null>(null);
+  const dataRef = useRef<EngineAdminResponse | null>(null);
   const [installData, setInstallData] = useState<InstallAdminResponse | null>(null);
   const [message, setMessage] = useState("Caricamento configurazione…");
   const [saving, setSaving] = useState(false);
@@ -3317,6 +3325,10 @@ function AdminPanel() {
   const [llmRuntime, setLlmRuntime] = useState<AdminLlmRuntimeStatus | null>(null);
   const [loginRequired, setLoginRequired] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
+
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
 
   async function loadSettings() {
     setMessage("Aggiornamento liste da ComfyUI…");
@@ -3371,6 +3383,7 @@ function AdminPanel() {
           pddFile: pairedPddFile,
         };
       }
+      dataRef.current = enginePayload;
       setData(enginePayload);
       setInstallData(installPayload);
       setLlmRuntime(llmStatus);
@@ -3443,8 +3456,24 @@ function AdminPanel() {
     });
   }
 
+  function updateAnimaModel(model: string) {
+    setData((current) => {
+      if (!current) return current;
+      const next = {
+        ...current,
+        settings: {
+          ...current.settings,
+          anima: { ...current.settings.anima, model },
+        },
+      };
+      dataRef.current = next;
+      return next;
+    });
+  }
+
   async function saveSettings() {
     if (!data) return;
+    const settingsToSave = dataRef.current?.settings ?? data.settings;
     setSaving(true);
     setMessage("Salvataggio…");
     try {
@@ -3452,7 +3481,7 @@ function AdminPanel() {
         method: "PUT",
         credentials: "include",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(data.settings),
+        body: JSON.stringify(settingsToSave),
       });
       const payload = (await response.json()) as {
         ok?: boolean;
@@ -3462,10 +3491,13 @@ function AdminPanel() {
       if (!response.ok || !payload.settings) {
         throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
       }
-      setData((current) =>
-        current ? { ...current, settings: payload.settings! } : current,
-      );
-      setMessage("Configurazione Engine salvata");
+      setData((current) => {
+        if (!current) return current;
+        const next = { ...current, settings: payload.settings! };
+        dataRef.current = next;
+        return next;
+      });
+      setMessage(`Configurazione Engine salvata · Anima: ${payload.settings.anima.model}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Salvataggio fallito");
     } finally {
@@ -4047,10 +4079,7 @@ function AdminPanel() {
               <div className="admin-form anima-engine-form">
                 <label>
                   <span>Modello Anima / Nova AM</span>
-                  <select value={data.settings.anima.model} onChange={(event) => setData({
-                    ...data,
-                    settings: { ...data.settings, anima: { ...data.settings.anima, model: event.target.value } },
-                  })}>
+                  <select value={data.settings.anima.model} onChange={(event) => updateAnimaModel(event.target.value)}>
                     {animaModels.map((model) => <option key={model} value={model}>{model}</option>)}
                   </select>
                 </label>
@@ -6082,7 +6111,7 @@ function StudioApp() {
                   onChange={(event) => {
                     const nextMode = event.target.value as StudioMode;
                     setMode(nextMode);
-                    if (nextMode !== "i2v" && aspectFormat === KEEP_SOURCE_ASPECT_FORMAT) {
+                    if (nextMode === "t2v" && aspectFormat === KEEP_SOURCE_ASPECT_FORMAT) {
                       setAspectFormat("16:9 landscape");
                     }
                     if (nextMode !== "continue" && nextMode !== "edit") setSourceJobId(null);
@@ -6102,8 +6131,8 @@ function StudioApp() {
                   value={aspectFormat}
                   onChange={(event) => setAspectFormat(event.target.value)}
                 >
-                  {mode === "i2v" && (
-                    <option value={KEEP_SOURCE_ASPECT_FORMAT}>Mantieni proporzioni · Picture 1</option>
+                  {sourceAspectLabel(mode) && (
+                    <option value={KEEP_SOURCE_ASPECT_FORMAT}>{sourceAspectLabel(mode)}</option>
                   )}
                   {aspectFormats.map((item) => (
                     <option key={item.value} value={item.value}>

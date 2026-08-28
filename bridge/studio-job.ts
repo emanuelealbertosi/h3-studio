@@ -221,8 +221,8 @@ function normalizeRequest(value: unknown): StudioJobRequest {
   if (!ASPECT_FORMATS.includes(aspectFormat as AspectFormat)) {
     throw new Error("aspectFormat non è supportato dal nodo H3");
   }
-  if (aspectFormat === "keep source aspect" && generationMode !== "I2V") {
-    throw new Error("Mantieni proporzioni sorgente è disponibile soltanto in I2V");
+  if (aspectFormat === "keep source aspect" && generationMode === "T2V") {
+    throw new Error("Mantieni proporzioni sorgente richiede una modalità con Picture o Video");
   }
 
   const requestedSeed = value.seed === undefined ? undefined : Number(value.seed);
@@ -247,6 +247,12 @@ function normalizeRequest(value: unknown): StudioJobRequest {
   }
 
   const media = normalizeMediaState(value.mediaState);
+  if (
+    aspectFormat === "keep source aspect" &&
+    media.pictures + media.videos < 1
+  ) {
+    throw new Error("Mantieni proporzioni sorgente richiede almeno una Picture o un Video");
+  }
   if (generationMode === "I2V" && media.pictures < 1) {
     throw new Error("I2V richiede almeno una Picture");
   }
@@ -552,6 +558,13 @@ export function prepareStudioJob(
     size.inputs.aspect_format = keepSourceAspect
       ? "16:9 landscape"
       : request.aspectFormat;
+    if (
+      keepSourceAspect &&
+      (request.generationMode === "VIDEO EXTENSION" ||
+        request.generationMode === "VIDEO EDITING")
+    ) {
+      delete size.inputs.picture_1;
+    }
     saver.inputs.filename_prefix = filenamePrefix;
     saver.inputs.prepend_source_video = false;
     media.inputs.media_state =

@@ -179,6 +179,52 @@ const keepAspectSize = uniqueNode(
 );
 assert.equal(keepAspectSize.inputs.size_mode, "source aspect + megapixels");
 assert.equal(keepAspectSize.inputs.aspect_format, "16:9 landscape");
+const keepAspectKeyframes = prepareStudioJob(
+  source,
+  {
+    ...baseRequest,
+    generationMode: "KEYFRAMES",
+    aspectFormat: "keep source aspect",
+    mediaState: JSON.stringify([{ kind: "picture", file: "keyframe.png [input]" }]),
+    qualityMode: "fast",
+    turboEnabled: false,
+  },
+  structuredClone(DEFAULT_RUNTIME_SETTINGS),
+  "00000000-0000-4000-8000-000000000017",
+);
+const keepAspectKeyframeSize = uniqueNode(
+  keepAspectKeyframes.candidates[0].prompt,
+  "H3AspectMegapixelSize",
+);
+assert.equal(keepAspectKeyframeSize.inputs.size_mode, "source aspect + megapixels");
+assert.deepEqual(keepAspectKeyframeSize.inputs.picture_1, ["61", 0]);
+
+for (const [generationMode, jobId] of [
+  ["VIDEO EXTENSION", "00000000-0000-4000-8000-000000000018"],
+  ["VIDEO EDITING", "00000000-0000-4000-8000-000000000019"],
+] as const) {
+  const keepAspectVideo = prepareStudioJob(
+    source,
+    {
+      ...baseRequest,
+      generationMode,
+      aspectFormat: "keep source aspect",
+      mediaState: JSON.stringify([{ kind: "video", file: "source.mp4 [input]" }]),
+      qualityMode: "fast",
+      turboEnabled: false,
+    },
+    structuredClone(DEFAULT_RUNTIME_SETTINGS),
+    jobId,
+  );
+  const keepAspectVideoSize = uniqueNode(
+    keepAspectVideo.candidates[0].prompt,
+    "H3AspectMegapixelSize",
+  );
+  assert.equal(keepAspectVideoSize.inputs.size_mode, "source aspect + megapixels");
+  assert.equal(keepAspectVideoSize.inputs.picture_1, undefined);
+  assert.deepEqual(keepAspectVideoSize.inputs.fallback_image, ["66", 7]);
+}
+
 assert.throws(
   () => prepareStudioJob(
     source,
@@ -190,7 +236,22 @@ assert.throws(
     },
     structuredClone(DEFAULT_RUNTIME_SETTINGS),
   ),
-  /soltanto in I2V/i,
+  /richiede una modalità con Picture o Video/i,
+);
+assert.throws(
+  () => prepareStudioJob(
+    source,
+    {
+      ...baseRequest,
+      generationMode: "R2V",
+      aspectFormat: "keep source aspect",
+      mediaState: JSON.stringify([{ kind: "audio", file: "voice.wav [input]" }]),
+      qualityMode: "fast",
+      turboEnabled: false,
+    },
+    structuredClone(DEFAULT_RUNTIME_SETTINGS),
+  ),
+  /richiede almeno una Picture o un Video/i,
 );
 
 const fifteenSeconds = prepareStudioJob(
