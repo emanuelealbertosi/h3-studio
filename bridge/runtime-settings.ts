@@ -83,6 +83,16 @@ export type MusicEngineSettings = {
   tiledDecode: boolean;
 };
 
+export type VoiceConversionEngineSettings = {
+  root: string;
+  separatorModel: string;
+  seedVcModel: string;
+  backend: "cuda" | "cpu";
+  steps: number;
+  f0Condition: boolean;
+  autoF0Adjust: boolean;
+};
+
 export type RuntimeSettings = {
   h3: H3EngineSettings;
   fast: FastEngineSettings;
@@ -92,6 +102,7 @@ export type RuntimeSettings = {
   chat: ChatEngineSettings;
   tts: TtsEngineSettings;
   music: MusicEngineSettings;
+  voiceConversion: VoiceConversionEngineSettings;
 };
 
 export type ResolvedEngineSettings = H3EngineSettings & {
@@ -177,6 +188,15 @@ export const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
     cfg: 1.7,
     tiledDecode: true,
   },
+  voiceConversion: {
+    root: path.join(process.cwd(), "data", "runtimes", "audio-cpp"),
+    separatorModel: "models\\BS-RoFormer-ep368-GGUF\\bs-roformer-ep368-q8_0.gguf",
+    seedVcModel: "models\\SeedVC-MLX-GGUF\\seed-vc-mlx-q8_0.gguf",
+    backend: "cuda",
+    steps: 30,
+    f0Condition: true,
+    autoF0Adjust: true,
+  },
 });
 
 function cloneDefaults(): RuntimeSettings {
@@ -203,6 +223,7 @@ function cloneDefaults(): RuntimeSettings {
     chat: { ...DEFAULT_RUNTIME_SETTINGS.chat },
     tts: { ...DEFAULT_RUNTIME_SETTINGS.tts },
     music: { ...DEFAULT_RUNTIME_SETTINGS.music },
+    voiceConversion: { ...DEFAULT_RUNTIME_SETTINGS.voiceConversion },
   };
 }
 
@@ -261,6 +282,7 @@ function migrateLegacySettings(value: Record<string, unknown>): RuntimeSettings 
     chat: defaults.chat,
     tts: defaults.tts,
     music: defaults.music,
+    voiceConversion: defaults.voiceConversion,
   };
 }
 
@@ -279,6 +301,9 @@ function validateSettings(value: unknown): RuntimeSettings {
   const chat = isRecord(value.chat) ? value.chat : defaults.chat;
   const tts = isRecord(value.tts) ? value.tts : defaults.tts;
   const music = isRecord(value.music) ? value.music : defaults.music;
+  const voiceConversion = isRecord(value.voiceConversion)
+    ? value.voiceConversion
+    : defaults.voiceConversion;
 
   const h3Model = typeof value.h3.model === "string" ? value.h3.model.trim() : "";
   const fastModel = typeof fast.model === "string" ? fast.model.trim() : "";
@@ -316,6 +341,16 @@ function validateSettings(value: unknown): RuntimeSettings {
   const musicEncoder = typeof music.encoder === "string" ? music.encoder.trim() : "";
   const musicVae = typeof music.vae === "string" ? music.vae.trim() : "";
   const musicCfg = Number(music.cfg);
+  const voiceConversionRoot = typeof voiceConversion.root === "string"
+    ? voiceConversion.root.trim()
+    : "";
+  const separatorModel = typeof voiceConversion.separatorModel === "string"
+    ? voiceConversion.separatorModel.trim()
+    : "";
+  const seedVcModel = typeof voiceConversion.seedVcModel === "string"
+    ? voiceConversion.seedVcModel.trim()
+    : "";
+  const voiceConversionSteps = Number(voiceConversion.steps);
   const imageEditKvCache =
     imageEdit.kvCacheEnabled === undefined
       ? defaults.imageEdit.kvCacheEnabled
@@ -409,6 +444,15 @@ function validateSettings(value: unknown): RuntimeSettings {
   if (!Number.isFinite(musicCfg) || musicCfg < 0.1 || musicCfg > 10) {
     throw new Error("Il CFG MiniMax Music deve essere compreso fra 0,1 e 10");
   }
+  if (!voiceConversionRoot) throw new Error("Indica la cartella runtime audio.cpp");
+  if (!separatorModel) throw new Error("Indica il modello di separazione vocale");
+  if (!seedVcModel) throw new Error("Indica il modello Seed-VC");
+  if (voiceConversion.backend !== "cuda" && voiceConversion.backend !== "cpu") {
+    throw new Error("Il backend Voice Conversion deve essere CUDA oppure CPU");
+  }
+  if (!Number.isInteger(voiceConversionSteps) || voiceConversionSteps < 10 || voiceConversionSteps > 100) {
+    throw new Error("Gli step Seed-VC devono essere un intero fra 10 e 100");
+  }
   assertPddModelCompatibility(fastModel, pddFile);
 
   return {
@@ -474,6 +518,15 @@ function validateSettings(value: unknown): RuntimeSettings {
       cfg: musicCfg,
       tiledDecode: music.tiledDecode !== false,
     },
+    voiceConversion: {
+      root: voiceConversionRoot,
+      separatorModel,
+      seedVcModel,
+      backend: voiceConversion.backend,
+      steps: voiceConversionSteps,
+      f0Condition: voiceConversion.f0Condition !== false,
+      autoF0Adjust: voiceConversion.autoF0Adjust !== false,
+    },
   };
 }
 
@@ -509,6 +562,9 @@ export class RuntimeSettingsStore {
           chat: isRecord(value.chat) ? value.chat : current.chat,
           tts: isRecord(value.tts) ? value.tts : current.tts,
           music: isRecord(value.music) ? value.music : current.music,
+          voiceConversion: isRecord(value.voiceConversion)
+            ? value.voiceConversion
+            : current.voiceConversion,
         })
       : validateSettings(value);
     await mkdir(path.dirname(this.filePath), { recursive: true });

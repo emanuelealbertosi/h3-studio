@@ -1895,6 +1895,8 @@ async function saveEngineSettings(
       (body as { chat?: unknown }).chat ?? currentSettings.chat;
     const tts = (body as { tts?: unknown }).tts ?? currentSettings.tts;
     const music = (body as { music?: unknown }).music ?? currentSettings.music;
+    const voiceConversion = (body as { voiceConversion?: unknown }).voiceConversion
+      ?? currentSettings.voiceConversion;
     if (
       typeof h3 !== "object" || h3 === null || Array.isArray(h3) ||
       typeof fast !== "object" || fast === null || Array.isArray(fast) ||
@@ -1904,6 +1906,7 @@ async function saveEngineSettings(
       || typeof chatSettings !== "object" || chatSettings === null || Array.isArray(chatSettings)
       || typeof tts !== "object" || tts === null || Array.isArray(tts)
       || typeof music !== "object" || music === null || Array.isArray(music)
+      || typeof voiceConversion !== "object" || voiceConversion === null || Array.isArray(voiceConversion)
     ) {
       return reply.status(400).send({ ok: false, error: "Configurazione H3, FAST, Krea, Anima o Chat mancante" });
     }
@@ -2024,7 +2027,7 @@ async function saveEngineSettings(
     if (missingLora) {
       return reply.status(400).send({ ok: false, error: `LoRA non installato: ${missingLora}` });
     }
-    const settings = await runtimeSettings.update({ ...body, imageEdit, anima, chat: chatSettings, tts, music });
+    const settings = await runtimeSettings.update({ ...body, imageEdit, anima, chat: chatSettings, tts, music, voiceConversion });
     return { ok: true, settings };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Impostazioni non valide";

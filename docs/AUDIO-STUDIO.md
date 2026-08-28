@@ -69,19 +69,51 @@ Al termine della generazione, FFmpeg crea un unico WAV stereo a 48 kHz:
 
 La base intermedia viene rimossa dopo un mix riuscito. Il file finale appare nel
 pannello Audio e nella Libreria del progetto. Questa funzione non trasforma la
-voce in canto: una futura modalità Cover / Trasforma in canto richiederà un
-motore locale dedicato.
+voce in canto.
+
+## Canzone col mio timbro
+
+Questa modalità usa una reference vocale soltanto come identità timbrica. Il
+testo e la performance vengono generati da MiniMax Music 3, quindi la pipeline:
+
+1. normalizza brano e reference;
+2. separa voce e accompagnamento con BS-RoFormer Q8;
+3. converte lo stem vocale con Seed-VC Q8 in modalità SVC, conservando melodia
+   e intonazione tramite F0;
+4. ricrea un WAV stereo 48 kHz con limiter tramite FFmpeg.
+
+ComfyUI viene scaricata dalla VRAM prima della separazione. BS-RoFormer e
+Seed-VC girano come processi audio.cpp distinti: alla loro uscita il modello non
+resta residente. Stop termina l'albero attivo e annulla anche l'eventuale job
+MiniMax ancora in coda. L'originale intermedio viene eliminato soltanto dopo un
+mix finale riuscito.
+
+Eseguire `INSTALL_AUDIO_VOICE.bat` dalla radice del progetto per installare il
+runtime ufficiale audio.cpp v0.7 CUDA e i due modelli in `data/runtimes`. I
+download sono riprendibili e non vengono inseriti nel repository. In Admin si
+possono cambiare root, percorsi dei modelli, backend, step e opzioni F0.
+
+## Voce H3 e lip-sync
+
+Per un video con un soggetto parlante, allegare una reference vocale nella Chat
+e chiedere esplicitamente chi deve parlare e cosa deve dire. Il router seleziona
+Reference H3 anche in assenza di immagini, associa `<Audio 1>` alla voce del
+soggetto, conserva il dialogo nel tag `<d>[Lingua] ...</d>` e richiede che il
+soggetto parli fisicamente con sincronizzazione labiale naturale. La reference
+non viene trattata come musica di sottofondo.
 
 ## Stati e cancellazione
 
 Ogni job espone fase e percentuale quando il motore la rende disponibile.
-`Interrompi` termina il processo Higgs del solo job TTS oppure cancella il
-prompt MiniMax Music nella coda ComfyUI. I job falliti o interrotti restano
-visibili senza barra animata e possono essere eliminati.
+`Interrompi` termina il processo Higgs del solo job TTS, cancella il prompt
+MiniMax Music nella coda ComfyUI oppure chiude il processo audio.cpp attivo per
+una conversione timbrica. I job falliti o interrotti restano visibili senza
+barra animata e possono essere eliminati.
 
 ## Configurazione Admin
 
 La scheda Higgs controlla cartella runtime, voce predefinita e parametri di
 sampling. La scheda MiniMax Music seleziona DiT, encoder, VAE/DAV, step, CFG e
 decode tiled dalle liste reali esposte da ComfyUI. I pesi non sono inclusi nel
-repository.
+repository. La scheda audio.cpp / Seed-VC mostra separatamente lo stato del
+runtime e dei due modelli di separazione e conversione.

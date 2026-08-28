@@ -169,6 +169,10 @@ try {
   assert.match(service, /generate_anima for anime, manga, illustration, drawing or cartoon-style/);
   assert.match(service, /generate_tts/);
   assert.match(service, /generate_music/);
+  assert.match(service, /VOICE_COVER_PATTERN/);
+  assert.match(service, /kind: voiceCover \? "voice_cover" : "music"/);
+  assert.match(service, /natural lip synchronization/);
+  assert.match(service, /if \(audios.length && \(generationMode === "T2V" \|\| generationMode === "I2V"\)\) generationMode = "R2V"/);
   assert.match(service, /audioStudio\.planMusic/);
   assert.match(service, /preserveMusicIntent/);
   assert.match(service, /lyrics: plan\.lyrics/);

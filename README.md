@@ -97,6 +97,15 @@ trascrizione e durata reale per progettare una base strumentale con il planner
 LLM, quindi produce un unico WAV stereo con voce preservata, ducking regolabile,
 limiter e mix automatico tramite FFmpeg.
 
+La modalità **Canzone col mio timbro** genera prima un brano cantato con
+MiniMax Music, separa voce e accompagnamento con BS-RoFormer Q8, trasferisce
+solo il timbro di una reference tramite Seed-VC Q8 e ricrea il mix stereo con
+FFmpeg. `INSTALL_AUDIO_VOICE.bat` installa il runtime audio.cpp v0.7 e i pesi
+esterni; ciascun processo è effimero e viene terminato anche su Stop o errore.
+Nella Chat, un audio vocale allegato a una richiesta Video forza Reference H3:
+il planner associa il timbro al soggetto, inserisce il dialogo letterale e
+richiede il lip-sync naturale.
+
 Ogni candidato completato espone derivati non distruttivi **Face**, **Upscale
 1 MP** e **Upscale 2 MP**. I target compaiono soltanto quando superano la
 risoluzione della sorgente: un originale da 0,98 MP propone quindi solo 2 MP.

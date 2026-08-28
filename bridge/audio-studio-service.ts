@@ -2,7 +2,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { ComfyApiPrompt, ComfyHistoryEntry } from "./comfy-client.js";
@@ -252,6 +252,8 @@ export class AudioStudioService {
   private readonly cancelledJobs = new Set<string>();
   private readonly ttsStopOperations = new Map<string, Promise<void>>();
   private readonly speechMixes = new Set<string>();
+  private readonly voiceConversions = new Set<string>();
+  private readonly audioCppProcesses = new Map<string, ChildProcessWithoutNullStreams>();
 
   constructor(
     private readonly comfy: ComfyClient,
@@ -300,6 +302,24 @@ export class AudioStudioService {
         plannerReady: chatRuntime?.ready === true,
         plannerModel: settings.chat.model,
       },
+      voiceConversion: (() => {
+        const conversionRoot = settings.voiceConversion.root;
+        const cli = path.join(conversionRoot, "audiocpp_cli.exe");
+        const separatorModel = path.resolve(conversionRoot, settings.voiceConversion.separatorModel);
+        const seedVcModel = path.resolve(conversionRoot, settings.voiceConversion.seedVcModel);
+        return {
+          ready: existsSync(cli) && existsSync(separatorModel) && existsSync(seedVcModel),
+          cli,
+          root: conversionRoot,
+          separatorModel,
+          seedVcModel,
+          backend: settings.voiceConversion.backend,
+          steps: settings.voiceConversion.steps,
+          f0Condition: settings.voiceConversion.f0Condition,
+          autoF0Adjust: settings.voiceConversion.autoF0Adjust,
+          unloadPolicy: "process-exit",
+        };
+      })(),
       jobs: this.repository.count(),
     };
   }
@@ -439,11 +459,11 @@ export class AudioStudioService {
 
   async submit(value: unknown) {
     if (!isRecord(value)) throw new Error("Richiesta audio non valida");
-    const requestedKind = value.kind === "tts" || value.kind === "music" || value.kind === "speech_music"
+    const requestedKind = value.kind === "tts" || value.kind === "music" || value.kind === "speech_music" || value.kind === "voice_cover"
       ? value.kind
       : null;
-    if (!requestedKind) throw new Error("Scegli TTS, Musica oppure Parlato → brano");
-    const kind = requestedKind === "speech_music" ? "music" : requestedKind;
+    if (!requestedKind) throw new Error("Scegli TTS, Musica, Parlato → brano oppure Canzone col mio timbro");
+    const kind = requestedKind === "speech_music" || requestedKind === "voice_cover" ? "music" : requestedKind;
     const projectId = text(value.projectId, "Progetto", 1, 100);
     const settings = await this.runtimeSettings.get();
     if (kind === "tts") {
@@ -467,14 +487,15 @@ export class AudioStudioService {
     }
 
     const speechMode = requestedKind === "speech_music";
+    const voiceCoverMode = requestedKind === "voice_cover";
     const caption = text(value.caption, "Descrizione musica", 3, 10_000);
     const lyrics = speechMode
       ? ""
       : typeof value.lyrics === "string" ? value.lyrics.trim().slice(0, 30_000) : "";
-    const referenceFile = speechMode
+    const referenceFile = speechMode || voiceCoverMode
       ? text(value.referenceFile, "Parlato sorgente", 1, 2_000)
       : null;
-    const referenceText = speechMode && typeof value.referenceText === "string"
+    const referenceText = (speechMode || voiceCoverMode) && typeof value.referenceText === "string"
       ? value.referenceText.trim().slice(0, 20_000)
       : "";
     const voiceGain = speechMode ? boundedNumber(value.voiceGain ?? 1, "Volume voce", 0, 2) : 1;
@@ -496,7 +517,7 @@ export class AudioStudioService {
     const idHint = randomUUID().slice(0, 8);
     const apiPrompt = buildMusicPrompt({
       caption, lyrics, durationSeconds: Math.max(5, durationSeconds), seed: musicSeed, ...settings.music,
-      filenamePrefix: `H3_STUDIO_AUDIO/${speechMode ? "speech_base" : "music"}_${projectId}_${idHint}`,
+      filenamePrefix: `H3_STUDIO_AUDIO/${speechMode ? "speech_base" : voiceCoverMode ? "voice_cover_base" : "music"}_${projectId}_${idHint}`,
     });
     const job = this.repository.create({
       projectId, kind, prompt: caption, lyrics, durationSeconds, seed: musicSeed,
@@ -504,7 +525,7 @@ export class AudioStudioService {
       settings: {
         ...settings.music,
         engine: "minimax-music-3",
-        mode: speechMode ? "speech_music" : "music",
+        mode: speechMode ? "speech_music" : voiceCoverMode ? "voice_cover" : "music",
         voiceGain,
         musicGain,
         ducking,
@@ -516,14 +537,14 @@ export class AudioStudioService {
       const queued = await this.comfy.queuePrompt(apiPrompt, `h3-studio-audio-${job.id}`);
       this.repository.update(job.id, {
         status: "queued",
-        phaseLabel: speechMode ? "Base strumentale in coda su ComfyUI" : "In coda su ComfyUI",
+        phaseLabel: speechMode ? "Base strumentale in coda su ComfyUI" : voiceCoverMode ? "Canzone sorgente in coda su ComfyUI" : "In coda su ComfyUI",
         progress: null,
         promptId: queued.promptId, queueNumber: queued.queueNumber, error: null,
       });
       this.progressTracker.register(queued.promptId, apiPrompt, "audio");
     } catch (error) {
       this.repository.update(job.id, {
-        status: "failed", phaseLabel: speechMode ? "Invio base strumentale fallito" : "Invio musica fallito", progress: null,
+        status: "failed", phaseLabel: speechMode ? "Invio base strumentale fallito" : voiceCoverMode ? "Invio canzone sorgente fallito" : "Invio musica fallito", progress: null,
         error: error instanceof Error ? error.message : "Invio MiniMax Music fallito",
       });
     }
@@ -554,6 +575,17 @@ export class AudioStudioService {
         voiceGain: source.settings.voiceGain,
         musicGain: source.settings.musicGain,
         ducking: source.settings.ducking,
+      });
+    }
+    if (source.settings.mode === "voice_cover") {
+      return this.submit({
+        kind: "voice_cover",
+        projectId: source.projectId,
+        caption: prompt,
+        lyrics: regeneratedLyrics,
+        referenceFile: source.referenceFile,
+        referenceText: source.referenceText,
+        durationSeconds: source.durationSeconds ?? 30,
       });
     }
     return this.submit({
@@ -654,6 +686,165 @@ export class AudioStudioService {
       await unlink(basePath).catch(() => undefined);
     } finally {
       if (voicePath) await unlink(voicePath).catch(() => undefined);
+    }
+  }
+
+  private async runAudioCpp(
+    jobId: string,
+    args: string[],
+    phaseLabel: string,
+    progressStart: number,
+    progressEnd: number,
+  ) {
+    const settings = await this.runtimeSettings.get();
+    const cli = path.join(settings.voiceConversion.root, "audiocpp_cli.exe");
+    if (!existsSync(cli)) throw new Error(`Runtime audio.cpp non trovato in ${settings.voiceConversion.root}`);
+    if (this.cancelledJobs.has(jobId)) throw new Error("Conversione timbrica interrotta");
+    this.repository.update(jobId, {
+      status: "finalizing",
+      phaseLabel,
+      progress: progressStart,
+      error: null,
+    });
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(cli, args, {
+        cwd: settings.voiceConversion.root,
+        windowsHide: true,
+        env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      this.audioCppProcesses.set(jobId, child);
+      let stderr = "";
+      const parseProgress = (chunk: Buffer) => {
+        const value = chunk.toString("utf8");
+        const matches = [...value.matchAll(/(?:progress|step)\D{0,12}(\d+)\s*(?:\/\s*(\d+)|%)/gi)];
+        const last = matches.at(-1);
+        if (!last) return;
+        const raw = last[2] ? Number(last[1]) / Math.max(1, Number(last[2])) : Number(last[1]) / 100;
+        const progress = Math.round(progressStart + Math.max(0, Math.min(1, raw)) * (progressEnd - progressStart));
+        this.repository.update(jobId, { phaseLabel, progress });
+      };
+      child.stdout.on("data", parseProgress);
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString("utf8")).slice(-12_000);
+        parseProgress(chunk);
+      });
+      child.once("error", reject);
+      child.once("exit", (code) => {
+        this.audioCppProcesses.delete(jobId);
+        if (this.cancelledJobs.has(jobId)) reject(new Error("Conversione timbrica interrotta"));
+        else if (code === 0) {
+          this.repository.update(jobId, { phaseLabel, progress: progressEnd });
+          resolve();
+        } else reject(new Error(`audio.cpp si è chiuso con codice ${code}${stderr ? `: ${stderr.slice(-1_000)}` : ""}`));
+      });
+    });
+  }
+
+  private async stopAudioCppProcess(jobId: string) {
+    const child = this.audioCppProcesses.get(jobId);
+    if (!child) return;
+    const pid = child.pid;
+    if (child.exitCode === null) child.kill("SIGTERM");
+    await Promise.race([
+      new Promise<void>((resolve) => child.once("exit", () => resolve())),
+      new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
+    ]);
+    if (pid && child.exitCode === null && process.platform === "win32") {
+      await new Promise<void>((resolve) => {
+        const killer = spawn("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+        killer.once("exit", () => resolve());
+        killer.once("error", () => resolve());
+      });
+    } else if (child.exitCode === null) child.kill("SIGKILL");
+    this.audioCppProcesses.delete(jobId);
+  }
+
+  private async finalizeVoiceCover(
+    job: NonNullable<ReturnType<AudioJobRepository["get"]>>,
+    baseOutput: Omit<AudioOutput, "file" | "mediaPath">,
+  ) {
+    if (!job.referenceFile) throw new Error("Reference timbrica non disponibile");
+    const settings = await this.runtimeSettings.get();
+    const conversion = settings.voiceConversion;
+    const separatorModel = path.resolve(conversion.root, conversion.separatorModel);
+    const seedVcModel = path.resolve(conversion.root, conversion.seedVcModel);
+    if (!existsSync(separatorModel) || !existsSync(seedVcModel)) {
+      throw new Error("Installa BS-RoFormer e Seed-VC dal setup audio.cpp indicato in Admin");
+    }
+    const basePath = path.join(this.comfyOutputDir, baseOutput.subfolder, baseOutput.filename);
+    if (!existsSync(basePath)) throw new Error("Canzone MiniMax generata ma non trovata su disco");
+    const temporary = path.join(this.dataDir, "audio-temp", `voice-cover-${job.id}`);
+    const stems = path.join(temporary, "stems");
+    const normalizedSong = path.join(temporary, "song-44100.wav");
+    const referenceWav = path.join(temporary, "voice-reference.wav");
+    const convertedVocal = path.join(temporary, "converted-vocal.wav");
+    let materializedReference: string | null = null;
+    try {
+      await rm(temporary, { recursive: true, force: true });
+      await mkdir(stems, { recursive: true });
+      await this.comfy.freeMemory(true).catch(() => undefined);
+      this.repository.update(job.id, { status: "finalizing", phaseLabel: "Preparazione stem e reference", progress: 72, error: null });
+      materializedReference = await this.materializeReference(job.id, job.referenceFile);
+      await Promise.all([
+        execFileAsync(this.ffmpegPath, ["-y", "-v", "error", "-i", basePath, "-vn", "-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le", normalizedSong], { windowsHide: true, timeout: 10 * 60_000 }),
+        execFileAsync(this.ffmpegPath, ["-y", "-v", "error", "-i", materializedReference, "-vn", "-ar", "44100", "-ac", "1", "-c:a", "pcm_s16le", referenceWav], { windowsHide: true, timeout: 5 * 60_000 }),
+      ]);
+      await this.runAudioCpp(job.id, [
+        "--task", "sep", "--family", "bs_roformer", "--model", separatorModel,
+        "--backend", conversion.backend, "--audio", normalizedSong, "--out-dir", stems,
+        "--session-option", "bs_roformer.num_overlap=2", "--log",
+      ], "Separazione voce e base", 75, 84);
+      const stemFiles = await readdir(stems);
+      const vocals = stemFiles.find((file) => /vocals?\.wav$/i.test(file));
+      const instrumental = stemFiles.find((file) => /instrumental\.wav$/i.test(file));
+      if (!vocals || !instrumental) throw new Error(`Separazione incompleta: ${stemFiles.join(", ") || "nessuno stem"}`);
+      const svcArgs = [
+        "--task", "svc", "--family", "seed_vc", "--model", seedVcModel,
+        "--backend", conversion.backend, "--task-route", "v1_svc",
+        "--audio", path.join(stems, vocals), "--voice-ref", referenceWav,
+        "--out", convertedVocal, "--num-inference-steps", String(conversion.steps),
+        "--request-option", `f0_condition=${conversion.f0Condition}`,
+        "--request-option", `auto_f0_adjust=${conversion.autoF0Adjust}`,
+        "--seed", String(job.seed), "--log",
+      ];
+      await this.runAudioCpp(job.id, svcArgs, "Trasferimento del timbro con Seed-VC", 85, 95);
+      const subfolder = "H3_STUDIO_AUDIO";
+      const filename = `voice_cover_${job.projectId}_${job.id.slice(0, 8)}.wav`;
+      const folder = path.join(this.comfyOutputDir, subfolder);
+      const target = path.join(folder, filename);
+      await mkdir(folder, { recursive: true });
+      this.repository.update(job.id, { status: "finalizing", phaseLabel: "Remix stereo finale", progress: 97, error: null });
+      await execFileAsync(this.ffmpegPath, [
+        "-y", "-v", "error", "-i", path.join(stems, instrumental), "-i", convertedVocal,
+        "-filter_complex",
+        "[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.98[inst];[1:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0[voc];[inst][voc]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95[out]",
+        "-map", "[out]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", target,
+      ], { encoding: "utf8", timeout: 15 * 60_000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 });
+      await ensureStereoAudioFile(target, this.ffmpegPath);
+      if (this.repository.get(job.id)?.status === "cancelled") {
+        await unlink(target).catch(() => undefined);
+        return;
+      }
+      const [size, durationSeconds] = await Promise.all([
+        stat(target).then((value) => value.size),
+        probeAudioDuration(target, this.ffmpegPath),
+      ]);
+      const output: Omit<AudioOutput, "file" | "mediaPath"> = { filename, subfolder, type: "output", format: "audio/wav" };
+      const external = this.externalMedia.upsert({
+        kind: "audio", file: `${subfolder}/${filename} [output]`, name: filename,
+        original: filename, size, duration: durationSeconds, has_audio: true,
+      }, job.projectId);
+      this.repository.update(job.id, {
+        status: "ready", phaseLabel: "Canzone col timbro scelto pronta · modelli scaricati",
+        progress: 100, output, externalMediaId: external.id, error: null,
+      });
+      await unlink(basePath).catch(() => undefined);
+    } finally {
+      await this.stopAudioCppProcess(job.id);
+      if (materializedReference) await unlink(materializedReference).catch(() => undefined);
+      await rm(temporary, { recursive: true, force: true }).catch(() => undefined);
+      await this.comfy.freeMemory(true).catch(() => undefined);
     }
   }
 
@@ -841,6 +1032,25 @@ export class AudioStudioService {
           }
           continue;
         }
+        if (job.settings.mode === "voice_cover") {
+          if (this.voiceConversions.has(job.id)) continue;
+          this.voiceConversions.add(job.id);
+          try {
+            await this.finalizeVoiceCover(job, output);
+          } catch (error) {
+            const cancelled = this.repository.get(job.id)?.status === "cancelled" || this.cancelledJobs.has(job.id);
+            this.repository.update(job.id, {
+              status: cancelled ? "cancelled" : "failed",
+              phaseLabel: cancelled ? "Conversione timbrica interrotta" : "Conversione timbrica fallita",
+              progress: null,
+              error: cancelled ? null : error instanceof Error ? error.message : "Trasferimento del timbro non riuscito",
+            });
+          } finally {
+            this.voiceConversions.delete(job.id);
+            this.cancelledJobs.delete(job.id);
+          }
+          continue;
+        }
         const absolute = path.join(this.comfyOutputDir, output.subfolder, output.filename);
         try {
           this.repository.update(job.id, { status: "finalizing", phaseLabel: "Verifica stereo", progress: 98, error: null });
@@ -897,6 +1107,11 @@ export class AudioStudioService {
     if (job.kind === "tts") {
       this.cancelledJobs.add(id);
       await this.stopTtsProcess(id);
+    }
+    else if (job.settings.mode === "voice_cover") {
+      this.cancelledJobs.add(id);
+      await this.stopAudioCppProcess(id);
+      if (job.promptId) await this.comfy.cancelPrompts([job.promptId]);
     }
     else if (job.promptId) await this.comfy.cancelPrompts([job.promptId]);
     return this.repository.update(id, { status: "cancelled", phaseLabel: "Interrotto", progress: null, error: null });

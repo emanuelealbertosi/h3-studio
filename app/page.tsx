@@ -500,6 +500,7 @@ type EngineAdminResponse = {
   audioStudio?: {
     tts: { ready: boolean; root: string; voices: string[]; defaultVoice: string; unloadPolicy: string };
     music: { ready: boolean; model: string; encoder: string; vae: string; steps: number; cfg: number };
+    voiceConversion: { ready: boolean; root: string; backend: "cuda" | "cpu"; steps: number; separatorModel: string; seedVcModel: string; unloadPolicy: string };
   } | null;
   settings: {
     h3: {
@@ -563,6 +564,15 @@ type EngineAdminResponse = {
       steps: number;
       cfg: number;
       tiledDecode: boolean;
+    };
+    voiceConversion: {
+      root: string;
+      separatorModel: string;
+      seedVcModel: string;
+      backend: "cuda" | "cpu";
+      steps: number;
+      f0Condition: boolean;
+      autoF0Adjust: boolean;
     };
   };
   capabilities: {
@@ -4477,6 +4487,23 @@ function AdminPanel() {
                 <label><span>CFG</span><input min="0.1" max="10" step="0.1" type="number" value={data.settings.music.cfg} onChange={(event) => setData({ ...data, settings: { ...data.settings, music: { ...data.settings.music, cfg: Number(event.target.value) } } })} /></label>
                 <label className="admin-inline-check"><input checked={data.settings.music.tiledDecode} onChange={(event) => setData({ ...data, settings: { ...data.settings, music: { ...data.settings.music, tiledDecode: event.target.checked } } })} type="checkbox" /><span>Decode audio tiled (consigliato)</span></label>
                 <p className="image-edit-profile-note">Workflow nativo ComfyUI: caption + lyrics strutturate, fino a 6 minuti. Decode tiled attivo per contenere la VRAM.</p>
+              </div>
+            </article>
+
+            <article className="engine-config-card audio-engine-card">
+              <div className="engine-config-heading">
+                <div><span>VOICE CONVERSION</span><h3>audio.cpp · Seed-VC</h3></div>
+                <b className={data.audioStudio?.voiceConversion.ready ? "admin-ready" : "admin-warning"}>{data.audioStudio?.voiceConversion.ready ? "PRONTO" : "SETUP"}</b>
+              </div>
+              <div className="admin-form image-edit-engine-form">
+                <label><span>Cartella audio.cpp</span><input value={data.settings.voiceConversion.root} onChange={(event) => setData({ ...data, settings: { ...data.settings, voiceConversion: { ...data.settings.voiceConversion, root: event.target.value } } })} /></label>
+                <label><span>Modello separazione vocale</span><input value={data.settings.voiceConversion.separatorModel} onChange={(event) => setData({ ...data, settings: { ...data.settings, voiceConversion: { ...data.settings.voiceConversion, separatorModel: event.target.value } } })} /></label>
+                <label><span>Modello Seed-VC</span><input value={data.settings.voiceConversion.seedVcModel} onChange={(event) => setData({ ...data, settings: { ...data.settings, voiceConversion: { ...data.settings.voiceConversion, seedVcModel: event.target.value } } })} /></label>
+                <label><span>Backend</span><select value={data.settings.voiceConversion.backend} onChange={(event) => setData({ ...data, settings: { ...data.settings, voiceConversion: { ...data.settings.voiceConversion, backend: event.target.value as "cuda" | "cpu" } } })}><option value="cuda">CUDA</option><option value="cpu">CPU</option></select></label>
+                <label><span>Step Seed-VC</span><input min="10" max="100" step="1" type="number" value={data.settings.voiceConversion.steps} onChange={(event) => setData({ ...data, settings: { ...data.settings, voiceConversion: { ...data.settings.voiceConversion, steps: Number(event.target.value) } } })} /></label>
+                <label className="admin-inline-check"><input checked={data.settings.voiceConversion.f0Condition} onChange={(event) => setData({ ...data, settings: { ...data.settings, voiceConversion: { ...data.settings.voiceConversion, f0Condition: event.target.checked } } })} type="checkbox" /><span>Preserva melodia e intonazione (F0)</span></label>
+                <label className="admin-inline-check"><input checked={data.settings.voiceConversion.autoF0Adjust} onChange={(event) => setData({ ...data, settings: { ...data.settings, voiceConversion: { ...data.settings.voiceConversion, autoF0Adjust: event.target.checked } } })} type="checkbox" /><span>Adatta automaticamente il registro vocale</span></label>
+                <p className="image-edit-profile-note">Pipeline locale: BS-RoFormer separa voce e base, Seed-VC trasferisce soltanto il timbro, poi FFmpeg ricrea un WAV stereo. Ogni modello viene scaricato dalla VRAM all’uscita del relativo processo.</p>
               </div>
             </article>
 

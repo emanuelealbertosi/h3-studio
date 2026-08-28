@@ -134,7 +134,12 @@ Aggiornamento: 28 agosto 2026
 - [ ] Durata finale uguale al parlato, voce preservata e base senza cantato.
 - [ ] Regolazione Voce/Musica/Ducking e assenza di clipping.
 - [ ] Interruzione durante MiniMax Music e durante il mix.
-- [ ] Futuro opzionale: audio-to-music/cover con engine dedicato.
+- [x] Contratto automatico `Canzone col mio timbro`: separazione BS-RoFormer, Seed-VC SVC, F0, remix stereo e cleanup processi.
+- [ ] Collaudo reale `Canzone col mio timbro` con reference pulita di 5–20 secondi.
+- [ ] Verifica somiglianza timbrica senza perdita evidente di parole, melodia o timing.
+- [ ] Interruzione durante separazione e Seed-VC con rilascio VRAM.
+- [ ] Chat: audio vocale + richiesta di canzone con «mia voce/mio timbro» instrada la conversione timbrica.
+- [ ] Chat: audio vocale + richiesta Video produce R2V, dialogo letterale e lip-sync del soggetto corretto.
 
 ## Upscale e Face
 

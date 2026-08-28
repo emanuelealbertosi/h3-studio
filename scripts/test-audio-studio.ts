@@ -25,6 +25,7 @@ const audio = new AudioJobRepository(jobs.databasePath);
   const h3AudioRouterSource = readFileSync(path.join(process.cwd(), "comfyui_nodes", "ComfyUI-H3-Multishot", "h3_aio_autoprompt.py"), "utf8");
   assert.match(panelSource, /TTS Planner AI/);
   assert.match(panelSource, /Parlato → brano/);
+  assert.match(panelSource, /Canzone col mio timbro/);
   assert.match(serverSource, /api\/audio-jobs\/speech-track-plan/);
   assert.match(panelSource, /Trascrizione automatica del campione/);
   assert.match(serverSource, /api\/audio-jobs\/transcribe-reference/);
@@ -35,6 +36,12 @@ const audio = new AudioJobRepository(jobs.databasePath);
   assert.match(audioServiceSource, /"-ac", "2"/);
   assert.match(audioServiceSource, /Voce stereo pronta/);
   assert.match(audioServiceSource, /Musica stereo pronta/);
+  assert.match(audioServiceSource, /--family", "bs_roformer"/);
+  assert.match(audioServiceSource, /--family", "seed_vc"/);
+  assert.match(audioServiceSource, /f0_condition=/);
+  assert.match(audioServiceSource, /auto_f0_adjust=/);
+  assert.match(audioServiceSource, /stopAudioCppProcess/);
+  assert.match(audioServiceSource, /Canzone col timbro scelto pronta · modelli scaricati/);
   const speechFilter = speechTrackMixFilter({
     durationSeconds: 12.345,
     voiceGain: 1,
@@ -125,8 +132,20 @@ try {
   });
   assert.equal(speechMusic.settings.mode, "speech_music");
   assert.equal(speechMusic.referenceFile, "speech.wav [input]");
-  assert.equal(audio.list(10, project.id).length, 3);
-  assert.equal(audio.pending().length, 2);
+  const voiceCover = audio.create({
+    projectId: project.id,
+    kind: "music",
+    prompt: "Italian pop song with a clear lead vocal",
+    lyrics: "[Chorus]\nQuesta voce e la mia",
+    durationSeconds: 20,
+    seed: 101,
+    referenceFile: "my-voice.wav [input]",
+    settings: { engine: "minimax-music-3", mode: "voice_cover", f0Condition: true },
+  });
+  assert.equal(voiceCover.settings.mode, "voice_cover");
+  assert.equal(voiceCover.referenceFile, "my-voice.wav [input]");
+  assert.equal(audio.list(10, project.id).length, 4);
+  assert.equal(audio.pending().length, 3);
 
   const database = new DatabaseSync(jobs.databasePath);
   const migration = database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number };

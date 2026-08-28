@@ -110,7 +110,7 @@ try {
   assert.match(pageSource, /dataRef\.current = next/);
   assert.match(pageSource, /const current = dataRef\.current \?\? data/);
   assert.doesNotMatch(pageSource, /setData\(\(current\) => \{[\s\S]*?anima: \{ \.\.\.current\.settings\.anima, model \}/);
-  assert.match(pageSource, /Configurazione Engine salvata · Anima/);
+  assert.match(pageSource, /Engine verificati e salvati · Anima/);
   assert.doesNotMatch(pageSource, /<CreativeLibraryPanel/);
   assert.match(pageSource, />\s*Manda a Studio\s*<span>Allegato video<\/span>/);
   assert.match(

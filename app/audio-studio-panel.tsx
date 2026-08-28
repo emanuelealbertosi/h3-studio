@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
-type AudioKind = "tts" | "music" | "speech_music";
+type AudioKind = "tts" | "music" | "speech_music" | "voice_cover";
 type AudioJob = {
   id: string;
   projectId: string;
@@ -28,6 +28,7 @@ type AudioJob = {
 type Capabilities = {
   tts: { ready: boolean; root: string; voices: string[]; defaultVoice: string; unloadPolicy: string; plannerReady?: boolean; plannerModel?: string; transcriptionReady?: boolean; transcriptionModel?: string; transcriptionUnloadPolicy?: string };
   music: { ready: boolean; model: string; encoder: string; vae: string; steps: number; cfg: number; plannerReady?: boolean; plannerModel?: string };
+  voiceConversion: { ready: boolean; root: string; backend: "cuda" | "cpu"; steps: number; unloadPolicy: string; separatorModel: string; seedVcModel: string };
 };
 
 type MusicPlan = { caption: string; lyrics: string; instrumental: boolean; summary: string };
@@ -100,10 +101,18 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
   const hasActiveJob = useMemo(() => jobs.some((job) => runningStates.has(job.status)), [jobs]);
   const activeJob = useMemo(() => jobs.find((job) => runningStates.has(job.status)) ?? null, [jobs]);
   const latestJob = jobs[0] ?? null;
-  const selectedReady = kind === "tts" ? capabilities?.tts.ready : capabilities?.music.ready;
+  const selectedReady = kind === "tts"
+    ? capabilities?.tts.ready
+    : kind === "voice_cover"
+      ? capabilities?.music.ready && capabilities?.voiceConversion.ready
+      : capabilities?.music.ready;
 
   function displayedKind(job: AudioJob): AudioKind {
-    return job.settings?.mode === "speech_music" ? "speech_music" : job.kind;
+    return job.settings?.mode === "speech_music"
+      ? "speech_music"
+      : job.settings?.mode === "voice_cover"
+        ? "voice_cover"
+        : job.kind;
   }
 
   async function load(preferId?: string | null) {
@@ -124,6 +133,7 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
     setJobs(preferred ? [preferred, ...loaded.filter((job) => job.id !== preferred.id)] : loaded);
     if (preferred) {
       setKind(displayedKind(preferred));
+      if (displayedKind(preferred) === "voice_cover") setInstrumental(false);
       setMessage(`Job ${preferred.id.slice(0, 8)} aperto dalla Chat`);
     }
     if (libraryResponse.ok) setLibrary((libraryPayload.assets ?? []).filter((asset) => asset.kind === "audio"));
@@ -171,7 +181,9 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
       setReference(payload.asset);
       setReferenceText("");
       if (kind === "tts") setCloneEnabled(true);
-      await transcribeReference(payload.asset, false);
+      if (kind === "voice_cover") {
+        setMessage("Reference timbrica pronta. Per il canto Seed-VC non richiede la trascrizione.");
+      } else await transcribeReference(payload.asset, false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Upload audio fallito");
     } finally {
@@ -230,7 +242,7 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
       const response = await fetch(`${bridgeUrl}/api/audio-jobs/music-plan`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ idea: musicIdea, instrumental, durationSeconds: duration, lyrics }),
+        body: JSON.stringify({ idea: musicIdea, instrumental: kind === "voice_cover" ? false : instrumental, durationSeconds: duration, lyrics }),
       });
       const payload = await response.json() as { plan?: MusicPlan; error?: string };
       if (!response.ok || !payload.plan) throw new Error(payload.error ?? "Music Planner non disponibile");
@@ -286,11 +298,11 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
     try {
       let effectiveTtsText = ttsText;
       let effectiveCaption = caption;
-      let effectiveLyrics = instrumental ? "" : lyrics;
+      let effectiveLyrics = kind === "voice_cover" ? lyrics : instrumental ? "" : lyrics;
       if (kind === "tts" && ttsPlanner && !ttsPlanReady) {
         effectiveTtsText = (await prepareTtsPlan(false)).prompt;
       }
-      if (kind === "music" && musicPlanner && !musicPlanReady) {
+      if ((kind === "music" || kind === "voice_cover") && musicPlanner && !musicPlanReady) {
         const plan = await prepareMusicPlan(false);
         effectiveCaption = plan.caption;
         effectiveLyrics = plan.lyrics;
@@ -317,6 +329,17 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
               ducking,
               seed: fixedSeed ? seed : undefined,
             }
+          : kind === "voice_cover"
+            ? {
+                kind,
+                projectId,
+                caption: effectiveCaption,
+                lyrics: effectiveLyrics,
+                durationSeconds: duration,
+                referenceFile: reference?.file,
+                referenceText,
+                seed: fixedSeed ? seed : undefined,
+              }
           : {
             kind, projectId, caption: effectiveCaption, lyrics: effectiveLyrics,
             durationSeconds: duration, seed: fixedSeed ? seed : undefined,
@@ -332,6 +355,8 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
           ? "Higgs in caricamento; verrà scaricato automaticamente a fine job."
           : kind === "speech_music"
             ? "Base inviata a MiniMax Music; al termine verrà mixata col parlato originale."
+            : kind === "voice_cover"
+              ? "MiniMax sta creando il canto sorgente; seguiranno separazione, Seed-VC e remix automatici."
             : "MiniMax Music inviato a ComfyUI.",
       );
     } catch (error) {
@@ -380,7 +405,7 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
           {jobs.map((job) => (
             <article className={`audio-job-card ${job.status}`} key={job.id}>
               <div className="audio-card-top">
-                <span className="fast-badge">{job.kind === "tts" ? "HIGGS TTS" : displayedKind(job) === "speech_music" ? "PARLATO + MUSICA" : "H3 MUSIC"}</span>
+                <span className="fast-badge">{job.kind === "tts" ? "HIGGS TTS" : displayedKind(job) === "speech_music" ? "PARLATO + MUSICA" : displayedKind(job) === "voice_cover" ? "H3 + SEED-VC" : "H3 MUSIC"}</span>
                 <span>{job.phaseLabel}</span>
                 <button aria-label="Elimina audio" disabled={runningStates.has(job.status)} onClick={() => void remove(job)} type="button">⌫</button>
               </div>
@@ -415,6 +440,7 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
           <button className={kind === "tts" ? "selected" : ""} onClick={() => setKind("tts")} type="button">Voce / TTS</button>
           <button className={kind === "music" ? "selected" : ""} onClick={() => setKind("music")} type="button">Musica H3</button>
           <button className={kind === "speech_music" ? "selected" : ""} onClick={() => setKind("speech_music")} type="button">Parlato → brano</button>
+          <button className={kind === "voice_cover" ? "selected" : ""} onClick={() => { setKind("voice_cover"); setInstrumental(false); setMusicPlanReady(false); }} type="button">Canzone col mio timbro</button>
         </div>
 
         {(busy || activeJob || latestJob) && (() => {
@@ -424,12 +450,12 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
             "tts-planner": "LLM sta preparando il TTS",
             planner: "LLM sta preparando la musica",
             "speech-planner": "LLM sta preparando la base per il parlato",
-            run: kind === "tts" ? "Avvio della generazione TTS" : kind === "speech_music" ? "Avvio di Parlato → brano" : "Avvio della generazione musicale",
+            run: kind === "tts" ? "Avvio della generazione TTS" : kind === "speech_music" ? "Avvio di Parlato → brano" : kind === "voice_cover" ? "Avvio canto e conversione timbrica" : "Avvio della generazione musicale",
           };
           const displayJob = activeJob ?? latestJob;
           const isWorking = Boolean(busy || activeJob);
           const isFailed = !isWorking && Boolean(displayJob && ["failed", "cancelled"].includes(displayJob.status));
-          const title = busy ? (localLabels[busy] ?? "Operazione audio in corso") : activeJob ? `${activeJob.kind === "tts" ? "Voce TTS" : displayedKind(activeJob) === "speech_music" ? "Parlato → brano" : "Musica H3"} in generazione` : isFailed ? "Ultima generazione non riuscita" : "Audio pronto";
+          const title = busy ? (localLabels[busy] ?? "Operazione audio in corso") : activeJob ? `${activeJob.kind === "tts" ? "Voce TTS" : displayedKind(activeJob) === "speech_music" ? "Parlato → brano" : displayedKind(activeJob) === "voice_cover" ? "Canzone col mio timbro" : "Musica H3"} in generazione` : isFailed ? "Ultima generazione non riuscita" : "Audio pronto";
           const detail = busy ? (message ?? "Preparazione in corso...") : activeJob ? activeJob.phaseLabel : isFailed ? (displayJob?.error ?? "Il job e stato interrotto o non e riuscito.") : "L'asset e disponibile qui e nella Libreria del progetto.";
           return (
             <div aria-live="polite" className={`audio-live-status ${isWorking ? "running" : isFailed ? "failed" : "ready"}`} role="status">
@@ -492,8 +518,14 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
             <div className={`music-planner ${musicPlanner ? "enabled" : ""}`}>
               <div><label><input checked={musicPlanner} onChange={(event) => { setMusicPlanner(event.target.checked); setMusicPlanReady(false); }} type="checkbox" /> Music Planner AI</label><span>{capabilities?.music.plannerReady ? "Scrivi in linguaggio naturale: il modello LLM prepara la sintassi e poi viene scaricato." : "Planner non disponibile: configura il modello LLM in Admin oppure disattivalo per l'input manuale."}</span></div>
             </div>
+            {kind === "voice_cover" && <div className="voice-clone enabled">
+              <div><label>Reference del timbro</label><span>Usa 5–20 secondi di voce pulita. MiniMax crea il canto; BS-RoFormer isola la voce e Seed-VC trasferisce soltanto il timbro.</span></div>
+              <div className="voice-reference-actions"><button onClick={() => void openLibrary()} type="button">Scegli dalla Libreria</button><label className="asset-upload">{busy === "upload" ? "Caricamento…" : "Carica voce"}<input accept="audio/*" disabled={busy === "upload"} onChange={(event) => { void uploadReference(event.currentTarget.files); event.currentTarget.value = ""; }} type="file" /></label></div>
+              {reference && <div className="voice-reference-chip"><audio controls src={fullUrl(bridgeUrl, reference.mediaPath)} /><strong>{reference.originalName ?? reference.name}</strong><button onClick={() => setReference(null)} type="button">×</button></div>}
+              <small>{capabilities?.voiceConversion.ready ? `Seed-VC pronto · ${capabilities.voiceConversion.backend.toUpperCase()} · unload a fine processo` : "Runtime audio.cpp o modelli mancanti: completa il setup in Admin."}</small>
+            </div>}
             {musicPlanner && <>
-              <label className="audio-main-field"><span>Cosa vuoi ascoltare?</span><textarea onChange={(event) => { setMusicIdea(event.target.value); setMusicPlanReady(false); }} placeholder="Esempio: canzone synth-pop energica in italiano, voce femminile, ritornello orecchiabile, atmosfera estiva." rows={5} value={musicIdea} /></label>
+              <label className="audio-main-field"><span>{kind === "voice_cover" ? "Che canzone deve cantare con questo timbro?" : "Cosa vuoi ascoltare?"}</span><textarea onChange={(event) => { setMusicIdea(event.target.value); setMusicPlanReady(false); }} placeholder="Esempio: canzone synth-pop energica in italiano, voce femminile, ritornello orecchiabile, atmosfera estiva." rows={5} value={musicIdea} /></label>
               <button className="music-plan-button" disabled={busy === "planner" || !musicIdea.trim() || !capabilities?.music.plannerReady} onClick={() => void prepareMusicPlan().catch(() => undefined)} type="button">{busy === "planner" ? "LLM sta preparando..." : "Prepara con LLM"}</button>
               {musicPlanReady && <div className="music-plan-preview"><strong>Piano modificabile</strong><span>{musicPlanSummary}</span><label><span>Descrizione tecnica MiniMax</span><textarea onChange={(event) => setCaption(event.target.value)} rows={5} value={caption} /></label>{!instrumental && <label><span>Lyrics strutturate</span><textarea onChange={(event) => setLyrics(event.target.value)} rows={8} value={lyrics} /></label>}</div>}
             </>}
@@ -502,28 +534,29 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName, in
             </div>
             <div className="audio-grid three">
               <label><span>Durata</span><select onChange={(event) => setDuration(Number(event.target.value))} value={duration}><option value="15">15 secondi</option><option value="30">30 secondi</option><option value="60">60 secondi</option><option value="120">2 minuti</option><option value="180">3 minuti</option></select></label>
-              <label className="instrumental-toggle"><span>Voce</span><button className={instrumental ? "selected" : ""} onClick={() => setInstrumental(true)} type="button">Strumentale</button><button className={!instrumental ? "selected" : ""} onClick={() => setInstrumental(false)} type="button">Con testo</button></label>
+              {kind === "music" ? <label className="instrumental-toggle"><span>Voce</span><button className={instrumental ? "selected" : ""} onClick={() => setInstrumental(true)} type="button">Strumentale</button><button className={!instrumental ? "selected" : ""} onClick={() => setInstrumental(false)} type="button">Con testo</button></label> : <label><span>Voce</span><strong>Con testo · timbro dalla reference</strong></label>}
               <fieldset className="audio-seed"><legend>Seed</legend><button className={!fixedSeed ? "selected" : ""} onClick={() => setFixedSeed(false)} type="button">Random</button><button className={fixedSeed ? "selected" : ""} onClick={() => setFixedSeed(true)} type="button">Fisso</button><input disabled={!fixedSeed} min="0" onChange={(event) => setSeed(Number(event.target.value))} type="number" value={seed} /></fieldset>
             </div>
             <div hidden={musicPlanner}>
-            {!instrumental && <label><span>Lyrics strutturate</span><textarea onChange={(event) => setLyrics(event.target.value)} placeholder={'[Verse]\nTesto della strofa…\n\n[Chorus]\nTesto del ritornello…'} rows={8} value={lyrics} /></label>}
+            {(!instrumental || kind === "voice_cover") && <label><span>Lyrics strutturate</span><textarea onChange={(event) => setLyrics(event.target.value)} placeholder={'[Verse]\nTesto della strofa…\n\n[Chorus]\nTesto del ritornello…'} rows={8} value={lyrics} /></label>}
             </div>
           </div>
         )}
 
         {message && <div className="audio-message">{message}</div>}
         <div className="generation-footer audio-footer">
-          <div className="preset-note"><span className="fast-badge">{kind === "tts" ? "HIGGS 8-BIT" : "MINIMAX MUSIC 3"}</span>{kind === "tts" ? "Processo isolato · unload automatico" : `${duration}s · tiled decode · ${capabilities?.music.steps ?? 30} step`}</div>
-          <div hidden={(kind === "music" && musicPlanner) || (kind === "tts" && ttsPlanner) || kind === "speech_music"}>
-          <div className="generation-cta"><div><span>Stato motore</span><strong>{selectedReady ? "Pronto" : "Configura in Admin"}</strong></div><button disabled={busy === "run" || !selectedReady || (kind === "tts" ? !ttsText.trim() || (cloneEnabled && !reference) : !caption.trim())} onClick={() => void run()} type="button">{busy === "run" ? "Avvio…" : kind === "tts" ? "Genera voce" : "Genera musica"}</button></div>
+          <div className="preset-note"><span className="fast-badge">{kind === "tts" ? "HIGGS 8-BIT" : kind === "voice_cover" ? "H3 + SEED-VC" : "MINIMAX MUSIC 3"}</span>{kind === "tts" ? "Processo isolato · unload automatico" : kind === "voice_cover" ? `${duration}s · separazione + SVC · unload automatico` : `${duration}s · tiled decode · ${capabilities?.music.steps ?? 30} step`}</div>
+          <div hidden={((kind === "music" || kind === "voice_cover") && musicPlanner) || (kind === "tts" && ttsPlanner) || kind === "speech_music"}>
+          <div className="generation-cta"><div><span>Stato motore</span><strong>{selectedReady ? "Pronto" : "Configura in Admin"}</strong></div><button disabled={busy === "run" || !selectedReady || (kind === "tts" ? !ttsText.trim() || (cloneEnabled && !reference) : !caption.trim() || (kind === "voice_cover" && !reference))} onClick={() => void run()} type="button">{busy === "run" ? "Avvio…" : kind === "tts" ? "Genera voce" : kind === "voice_cover" ? "Crea col mio timbro" : "Genera musica"}</button></div>
           </div>
           {kind === "tts" && ttsPlanner && <div className="generation-cta"><div><span>Stato motore</span><strong>{capabilities?.tts.plannerReady ? "Planner e Higgs pronti" : "Configura il modello LLM in Admin"}</strong></div><button disabled={busy === "run" || busy === "tts-planner" || !selectedReady || !capabilities?.tts.plannerReady || !ttsIdea.trim() || (cloneEnabled && !reference)} onClick={() => void run()} type="button">{busy === "run" ? "LLM prepara e avvia..." : busy === "tts-planner" ? "LLM prepara..." : "Genera voce"}</button></div>}
           {kind === "music" && musicPlanner && <div className="generation-cta"><div><span>Stato motore</span><strong>{capabilities?.music.plannerReady ? "Planner e motore pronti" : "Configura il modello LLM in Admin"}</strong></div><button disabled={busy === "run" || busy === "planner" || !selectedReady || !capabilities?.music.plannerReady || !musicIdea.trim()} onClick={() => void run()} type="button">{busy === "run" ? "LLM prepara e avvia..." : busy === "planner" ? "LLM prepara..." : "Genera musica"}</button></div>}
+          {kind === "voice_cover" && musicPlanner && <div className="generation-cta"><div><span>Stato motore</span><strong>{selectedReady && capabilities?.music.plannerReady ? "MiniMax, separazione e Seed-VC pronti" : "Completa Music/Seed-VC in Admin"}</strong></div><button disabled={busy === "run" || busy === "planner" || !selectedReady || !capabilities?.music.plannerReady || !musicIdea.trim() || !reference} onClick={() => void run()} type="button">{busy === "run" ? "Prepara canto e timbro…" : busy === "planner" ? "LLM prepara..." : "Crea col mio timbro"}</button></div>}
           {kind === "speech_music" && <div className="generation-cta"><div><span>Stato motore</span><strong>{selectedReady && (!speechPlanner || capabilities?.music.plannerReady) ? "Mix e motore pronti" : "Configura Music/LLM in Admin"}</strong></div><button disabled={busy === "run" || busy === "speech-planner" || !selectedReady || !reference || (speechPlanner ? !capabilities?.music.plannerReady : !caption.trim())} onClick={() => void run()} type="button">{busy === "run" ? "Prepara base e mix…" : busy === "speech-planner" ? "LLM prepara…" : "Crea brano dal parlato"}</button></div>}
         </div>
       </section>
 
-      {libraryOpen && typeof document !== "undefined" && createPortal(<div className="media-picker-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setLibraryOpen(false); }} role="presentation"><section aria-modal="true" className="media-library-picker media-library-modal audio-picker" role="dialog"><div className="media-picker-heading"><div><strong>{kind === "speech_music" ? "Parlato sorgente" : "Reference vocali"}</strong><span>Scegli un audio già salvato senza ricaricarlo dal disco</span></div><button onClick={() => setLibraryOpen(false)} type="button">×</button></div>{(busy === "upload" || busy === "transcribe") && <div className="audio-picker-notice">La trascrizione corrente è ancora in corso. Puoi consultare la Libreria; attendi il termine prima di scegliere un altro campione.</div>}<div className="audio-library-grid">{libraryBusy ? <p>Caricamento Libreria...</p> : <>{library.map((asset) => <button disabled={busy === "upload" || busy === "transcribe"} key={asset.id} onClick={() => { setReference(asset); setReferenceText(""); if (kind === "tts") setCloneEnabled(true); if (kind === "speech_music") setSpeechPlanReady(false); setLibraryOpen(false); void transcribeReference(asset); }} type="button"><audio controls onClick={(event) => event.stopPropagation()} src={fullUrl(bridgeUrl, asset.mediaPath)} /><strong>{asset.originalName ?? asset.name}</strong><span>{asset.originProjectName ?? "Media esterno"}</span></button>)}{library.length === 0 && <p>Nessun audio in Libreria. Caricane uno dal pannello Audio.</p>}</>}</div></section></div>, document.body)}
+      {libraryOpen && typeof document !== "undefined" && createPortal(<div className="media-picker-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setLibraryOpen(false); }} role="presentation"><section aria-modal="true" className="media-library-picker media-library-modal audio-picker" role="dialog"><div className="media-picker-heading"><div><strong>{kind === "speech_music" ? "Parlato sorgente" : kind === "voice_cover" ? "Reference del timbro" : "Reference vocali"}</strong><span>Scegli un audio già salvato senza ricaricarlo dal disco</span></div><button onClick={() => setLibraryOpen(false)} type="button">×</button></div>{(busy === "upload" || busy === "transcribe") && <div className="audio-picker-notice">La trascrizione corrente è ancora in corso. Puoi consultare la Libreria; attendi il termine prima di scegliere un altro campione.</div>}<div className="audio-library-grid">{libraryBusy ? <p>Caricamento Libreria...</p> : <>{library.map((asset) => <button disabled={busy === "upload" || busy === "transcribe"} key={asset.id} onClick={() => { setReference(asset); setReferenceText(""); if (kind === "tts") setCloneEnabled(true); if (kind === "speech_music") setSpeechPlanReady(false); setLibraryOpen(false); if (kind === "voice_cover") setMessage("Reference timbrica pronta; Seed-VC userà direttamente il campione."); else void transcribeReference(asset); }} type="button"><audio controls onClick={(event) => event.stopPropagation()} src={fullUrl(bridgeUrl, asset.mediaPath)} /><strong>{asset.originalName ?? asset.name}</strong><span>{asset.originProjectName ?? "Media esterno"}</span></button>)}{library.length === 0 && <p>Nessun audio in Libreria. Caricane uno dal pannello Audio.</p>}</>}</div></section></div>, document.body)}
     </div>
   );
 }

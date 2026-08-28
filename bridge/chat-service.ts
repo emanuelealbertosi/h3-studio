@@ -140,6 +140,7 @@ export function normalizePlan(text: string): { reply: string; title: string | nu
 
 const EXPLICIT_INSTRUMENTAL_PATTERN = /\b(?:strumentale|instrumental|senza\s+(?:voce|voci|cantato)|no\s+vocals?|without\s+vocals?)\b/i;
 const VOCAL_MUSIC_PATTERN = /\b(?:canta(?:ta|to|re|nte)?|cantato|cantata|cantante|voce|voci|vocale|vocals?|singer|singing|lyrics?|testo\s+(?:cantato|della\s+canzone)|ritornello|chorus)\b/i;
+const VOICE_COVER_PATTERN = /\b(?:(?:con|usando|usa|utilizza)\s+(?:la\s+)?mia\s+voce|col\s+mio\s+timbro|(?:con|usando|usa|utilizza)\s+(?:la\s+)?(?:voce|audio|timbro)\s+allegat[oa]|con\s+quest[oa]\s+(?:voce|audio|timbro)|fammi\s+cantare|clona(?:re)?\s+(?:la\s+)?(?:mia\s+)?voce|voice\s+cover|my\s+voice|voice\s+reference|timbro\s+(?:dell['’]?audio|allegato))\b/i;
 
 export function musicInstrumentalIntent(request: string): boolean | null {
   if (EXPLICIT_INSTRUMENTAL_PATTERN.test(request)) return true;
@@ -241,7 +242,9 @@ The title describes the main topic, never starts with "Chat" and never contains 
 For video default to 10 seconds, one candidate, 0.5 MP and the FAST 8-step engine; these execution values are enforced by the server and must not be invented in JSON.
 Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures. Use I2V when one attached picture is the start frame, R2V for broader references, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for editing one. Video editing and extension still use action type generate_video; never invent video_editing, edit_video or continue_video action types.
 Use generate_tts when the user asks for speech, narration, dubbing, reading or voice cloning. For TTS, prompt is the exact text to speak in the requested language, not an English description. An attached Audio 1 is the voice reference and is transcribed automatically.
+For a video in which a visible subject must speak with an attached voice, use R2V. Define <Audio 1> as a voice-timbre reference, not copied signal or background music. If a picture or video defines the visible speaker, bind the audio to that actual <Subject N> and reuse its global speaker ID (S1). If no visual reference defines a subject, describe the visible target speaker and assign (S1) without inventing a <Subject N> reference label. Put the exact dialogue inside <d>[Italian] ...</d>, <d>[English] ...</d> or the correct language name, and state that the speaker physically speaks with natural lip synchronization and stops mouth motion when the line ends.
 Use generate_music when the user asks for a song, soundtrack, instrumental or music. Put the musical request in prompt, set durationSeconds when requested (default 30), and set instrumental:false whenever singing, a singer, a voice, vocals, lyrics or words to sing are requested. For a vocal song, copy every user-supplied lyric verbatim into lyrics, preserving its language and wording; never translate, summarize or omit quoted words. Use lyrics:"" only for instrumental music or when the user did not supply exact words.
+When the user asks for a song sung with an attached voice reference, still use generate_music with instrumental:false. Preserve the attached Audio 1: the server will route it through singing voice conversion after MiniMax Music.
 Write rich, production-ready prompts in English except the exact spoken TTS script. When attachments are present, refer to them as Picture 1, Picture 2, Video 1 or Audio 1 in attachment order. Never invent file paths, model names, LoRAs, workflow nodes or numeric engine settings.`;
 
 const MEMORY_SYSTEM_PROMPT = `You maintain compact long-term memory for one H3 Studio creative project.
@@ -576,14 +579,21 @@ export class ChatService {
     try {
       if (plan.type === "generate_music") {
         const durationSeconds = plan.durationSeconds ?? 30;
+        const voiceReference = attachments.find((item) => item.kind === "audio");
+        const voiceCover = Boolean(voiceReference && VOICE_COVER_PATTERN.test(originalRequest ?? ""));
         const musicPlan = await this.audioStudio.planMusic({
           idea: originalRequest?.trim() || plan.prompt,
-          instrumental: plan.instrumental !== false,
+          instrumental: voiceCover ? false : plan.instrumental !== false,
           durationSeconds,
           lyrics: plan.lyrics,
         });
         const job = await this.audioStudio.submit({
-          kind: "music", projectId, caption: musicPlan.caption, lyrics: musicPlan.lyrics, durationSeconds,
+          kind: voiceCover ? "voice_cover" : "music",
+          projectId,
+          caption: musicPlan.caption,
+          lyrics: musicPlan.lyrics,
+          durationSeconds,
+          referenceFile: voiceReference?.file,
         });
         return { type: plan.type, prompt: musicPlan.caption, jobId: job?.id, status: "started" };
       }
@@ -600,8 +610,10 @@ export class ChatService {
       if (plan.type === "generate_video") {
         const pictures = attachments.filter((item) => item.kind === "picture");
         const videos = attachments.filter((item) => item.kind === "video");
+        const audios = attachments.filter((item) => item.kind === "audio");
         let generationMode = plan.videoMode ?? "T2V";
-        if (generationMode === "T2V" && pictures.length) generationMode = "I2V";
+        if (audios.length && (generationMode === "T2V" || generationMode === "I2V")) generationMode = "R2V";
+        else if (generationMode === "T2V" && pictures.length) generationMode = "I2V";
         if ((generationMode === "VIDEO EXTENSION" || generationMode === "VIDEO EDITING") && !videos.length) {
           generationMode = pictures.length ? "I2V" : "T2V";
         }

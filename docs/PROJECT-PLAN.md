@@ -436,7 +436,10 @@ Legenda: `[x]` completato e verificato; `[~]` parziale o presente solo a livello
 - [x] Configurazione Admin separata per TTS e Music e manifest dei modelli Music.
 - [x] Prompt Compiler LLM condiviso da Krea, Flux Edit, Anima e Higgs TTS, con input naturale multilingua, prompt tecnico modificabile e unload dopo ogni piano.
 - [x] Trascrizione automatica multilingua delle reference vocali con Whisper Small in processo isolato e fallback manuale.
-- [ ] Aggiungere routing esplicito TTS/Music alla Chat multimodale.
+- [x] Routing esplicito TTS/Music alla Chat multimodale con reference audio.
+- [x] Pipeline `Canzone col mio timbro`: MiniMax Music → BS-RoFormer → Seed-VC → remix stereo, con Stop e unload garantiti.
+- [x] Video H3 parlante da Chat: reference timbrica, dialogo letterale e istruzione lip-sync nel prompt R2V.
+- [ ] Collaudare la conversione timbrica completa sulla GPU reale dopo il download dei modelli audio.cpp.
 - [ ] Collaudare voice clone italiano e una generazione Music lunga su GPU reale.
 
 ### Funzioni mancanti nel piano originario, ora esplicitate

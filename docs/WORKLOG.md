@@ -296,3 +296,10 @@
 ### 28 agosto 2026 — Persistenza sincrona modello Anima / Nova AM
 - La selezione del modello Anima aggiorna ora il riferimento autorevole prima del render React: un click rapido su Salva non può più inviare il precedente anima_turboV10.
 - Aggiunta regressione sul percorso Admin per impedire il ritorno del setter asincrono che causava il ripristino del default.
+
+### 28 agosto 2026 — Conversione timbrica locale e lip-sync H3
+- Aggiunta la modalità **Canzone col mio timbro**: MiniMax Music genera testo e performance, BS-RoFormer Q8 separa gli stem, Seed-VC Q8 trasferisce il timbro e FFmpeg produce il WAV stereo finale.
+- audio.cpp viene avviato per una sola fase alla volta e sempre terminato; Stop annulla sia il prompt ComfyUI sia il processo di separazione/conversione attivo, con scaricamento VRAM nel `finally`.
+- Aggiunti configurazione Admin, stato runtime, progressione esplicita nel pannello Audio e installer riprendibile `INSTALL_AUDIO_VOICE.bat` per binari ufficiali v0.7 e modelli esterni.
+- La Chat riconosce richieste di canzone «con la mia voce / col mio timbro» e usa automaticamente la reference allegata.
+- Per i video con reference vocale il router forza H3 Reference, lega `<Audio 1>` al soggetto parlante, preserva il dialogo e richiede sincronizzazione labiale naturale.
