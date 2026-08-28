@@ -14,6 +14,22 @@ import type { RuntimeSettingsStore } from "./runtime-settings.js";
 const MAX_SEED = 2_147_483_647;
 const activeStates = new Set(["prepared", "queued", "loading", "running", "finalizing"]);
 
+export type MusicPlan = {
+  caption: string;
+  lyrics: string;
+  instrumental: boolean;
+  summary: string;
+};
+
+const MUSIC_PLANNER_SYSTEM_PROMPT = `You are the Music Planner for H3 Studio and MiniMax Music 3.
+Convert a natural-language music request into one strict JSON object with no markdown:
+{"caption":"English production prompt","lyrics":"structured lyrics or empty string","instrumental":true,"summary":"short Italian explanation"}
+
+The caption must be written in English and specify genre, mood, BPM or tempo, instrumentation, arrangement, song structure, vocal profile and language when applicable, mix, production character and ending. Adapt the structure to the requested duration. Do not mention software, models, nodes or prompt engineering.
+If instrumental is true, lyrics must be an empty string and the caption must explicitly say instrumental with no vocals.
+If instrumental is false, lyrics must contain complete singable lyrics in the requested language, organized with English section tags such as [Intro], [Verse 1], [Pre-Chorus], [Chorus], [Bridge] and [Outro]. Use only the sections that fit the duration. Preserve any lyrics supplied by the user, correcting and structuring them without changing their intended meaning unless explicitly asked.
+The summary must be concise Italian and explain the musical choices. Never return additional keys.`;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -39,6 +55,31 @@ function seed(value: unknown) {
   return Number.isInteger(normalized) && normalized >= 0 && normalized <= MAX_SEED
     ? normalized
     : Math.floor(Math.random() * MAX_SEED);
+}
+
+function extractJsonObject(raw: string) {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+  const source = fenced ?? raw;
+  const start = source.indexOf("{");
+  const end = source.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("Gemma non ha restituito il piano musicale JSON");
+  return JSON.parse(source.slice(start, end + 1)) as unknown;
+}
+
+export function normalizeMusicPlan(raw: string, expectedInstrumental: boolean): MusicPlan {
+  const parsed = extractJsonObject(raw);
+  if (!isRecord(parsed)) throw new Error("Piano musicale Gemma non valido");
+  const caption = typeof parsed.caption === "string" ? parsed.caption.trim().slice(0, 10_000) : "";
+  const lyrics = typeof parsed.lyrics === "string" ? parsed.lyrics.trim().slice(0, 30_000) : "";
+  const summary = typeof parsed.summary === "string" ? parsed.summary.trim().slice(0, 1_000) : "";
+  if (caption.length < 20) throw new Error("Gemma ha prodotto una descrizione musicale troppo breve");
+  if (!expectedInstrumental && lyrics.length < 10) throw new Error("Gemma non ha prodotto le lyrics richieste");
+  return {
+    caption,
+    lyrics: expectedInstrumental ? "" : lyrics,
+    instrumental: expectedInstrumental,
+    summary: summary || "Piano musicale preparato da Gemma.",
+  };
 }
 
 function findAudioOutput(entry: ComfyHistoryEntry) {
@@ -143,11 +184,12 @@ export class AudioStudioService {
     const voices = existsSync(voicesDir)
       ? (await readdir(voicesDir)).filter((file) => /\.(wav|mp3|ogg|flac)$/i.test(file)).sort()
       : [];
-    const [musicModels, encoders, vaes, musicNode] = await Promise.all([
+    const [musicModels, encoders, vaes, musicNode, chatRuntime] = await Promise.all([
       this.comfy.modelFiles("diffusion_models").catch((): string[] => []),
       this.comfy.modelFiles("text_encoders").catch((): string[] => []),
       this.comfy.modelFiles("vae").catch((): string[] => []),
       this.comfy.objectInfo("MiniMaxMusic3TextEncode").catch(() => null),
+      this.comfy.chatStatus().catch(() => null),
     ]);
     return {
       tts: {
@@ -163,9 +205,51 @@ export class AudioStudioService {
           && encoders.includes(settings.music.encoder)
           && vaes.includes(settings.music.vae),
         ...settings.music,
+        plannerReady: chatRuntime?.ready === true,
+        plannerModel: settings.chat.model,
       },
       jobs: this.repository.count(),
     };
+  }
+
+  async planMusic(value: unknown): Promise<MusicPlan> {
+    if (!isRecord(value)) throw new Error("Richiesta Music Planner non valida");
+    const idea = text(value.idea, "Idea musicale", 3, 10_000);
+    const instrumental = value.instrumental !== false;
+    const durationSeconds = boundedNumber(value.durationSeconds ?? 30, "Durata", 5, 360);
+    const providedLyrics = typeof value.lyrics === "string" ? value.lyrics.trim().slice(0, 30_000) : "";
+    const settings = (await this.runtimeSettings.get()).chat;
+    try {
+      const response = await this.comfy.chatGenerate({
+        model: settings.model,
+        projector: settings.projector,
+        n_ctx: settings.nCtx,
+        n_gpu_layers: settings.nGpuLayers,
+        n_threads: settings.nThreads,
+        max_tokens: Math.max(1_024, Math.min(4_096, settings.maxNewTokens)),
+        temperature: 0.35,
+        top_p: 0.9,
+        messages: [
+          { role: "system", content: MUSIC_PLANNER_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: [
+              `REQUESTED_DURATION_SECONDS: ${durationSeconds}`,
+              `OUTPUT_MODE: ${instrumental ? "instrumental" : "song_with_vocals"}`,
+              `NATURAL_LANGUAGE_REQUEST:\n${idea}`,
+              providedLyrics ? `USER_LYRICS_TO_PRESERVE:\n${providedLyrics}` : "USER_LYRICS_TO_PRESERVE: none",
+            ].join("\n\n"),
+          },
+        ],
+        images: [],
+      });
+      if (!response.ok || !response.text?.trim()) {
+        throw new Error(response.error ?? "Gemma non ha preparato il brano");
+      }
+      return normalizeMusicPlan(response.text, instrumental);
+    } finally {
+      await this.comfy.chatUnload().catch(() => undefined);
+    }
   }
 
   async submit(value: unknown) {

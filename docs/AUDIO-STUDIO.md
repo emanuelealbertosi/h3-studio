@@ -20,6 +20,13 @@ meglio. La trascrizione esatta del campione è facoltativa ma consigliata.
 
 ## MiniMax Music 3
 
+Il **Music Planner AI**, attivo per impostazione predefinita, usa il Gemma
+configurato nella Chat per convertire una richiesta naturale in una caption
+tecnica inglese e, quando richiesto, in lyrics strutturate. Il piano resta
+visibile e modificabile prima della generazione. Gemma viene sempre scaricato
+prima che MiniMax Music inizi a caricare; disattivando il Planner rimane
+disponibile l'input manuale.
+
 Music usa i nodi nativi di ComfyUI e i tre pesi configurati in Admin:
 
 - `minimax_music3_dit_fp16.safetensors`

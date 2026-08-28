@@ -612,6 +612,16 @@ app.post("/api/audio-jobs", async (request, reply) => {
   }
 });
 
+app.post("/api/audio-jobs/music-plan", async (request, reply) => {
+  try {
+    return reply.status(200).send({ ok: true, plan: await audioStudio.planMusic(request.body) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Music Planner non disponibile";
+    app.log.error(error, "Pianificazione musicale Gemma fallita");
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
 app.get<{ Querystring: { limit?: string; projectId?: string } }>(
   "/api/audio-jobs",
   async (request) => ({

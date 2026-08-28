@@ -25,8 +25,10 @@ type AudioJob = {
 
 type Capabilities = {
   tts: { ready: boolean; root: string; voices: string[]; defaultVoice: string; unloadPolicy: string };
-  music: { ready: boolean; model: string; encoder: string; vae: string; steps: number; cfg: number };
+  music: { ready: boolean; model: string; encoder: string; vae: string; steps: number; cfg: number; plannerReady?: boolean; plannerModel?: string };
 };
+
+type MusicPlan = { caption: string; lyrics: string; instrumental: boolean; summary: string };
 
 type ExternalAudio = {
   id: string;
@@ -65,6 +67,10 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName }: 
   const [referenceText, setReferenceText] = useState("");
   const [caption, setCaption] = useState("");
   const [lyrics, setLyrics] = useState("");
+  const [musicIdea, setMusicIdea] = useState("");
+  const [musicPlanner, setMusicPlanner] = useState(true);
+  const [musicPlanReady, setMusicPlanReady] = useState(false);
+  const [musicPlanSummary, setMusicPlanSummary] = useState("");
   const [instrumental, setInstrumental] = useState(true);
   const [duration, setDuration] = useState(30);
   const [fixedSeed, setFixedSeed] = useState(false);
@@ -135,10 +141,42 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName }: 
     }
   }
 
+  async function prepareMusicPlan(manageBusy = true) {
+    if (manageBusy) setBusy("planner");
+    setMessage("Gemma sta trasformando la tua idea in un piano musicale...");
+    try {
+      const response = await fetch(`${bridgeUrl}/api/audio-jobs/music-plan`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ idea: musicIdea, instrumental, durationSeconds: duration, lyrics }),
+      });
+      const payload = await response.json() as { plan?: MusicPlan; error?: string };
+      if (!response.ok || !payload.plan) throw new Error(payload.error ?? "Music Planner non disponibile");
+      setCaption(payload.plan.caption);
+      setLyrics(payload.plan.lyrics);
+      setMusicPlanSummary(payload.plan.summary);
+      setMusicPlanReady(true);
+      setMessage(`${payload.plan.summary} Gemma e stata scaricata; puoi modificare il piano o generare.`);
+      return payload.plan;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Music Planner fallito");
+      throw error;
+    } finally {
+      if (manageBusy) setBusy(null);
+    }
+  }
+
   async function run() {
     setBusy("run");
     setMessage(null);
     try {
+      let effectiveCaption = caption;
+      let effectiveLyrics = instrumental ? "" : lyrics;
+      if (kind === "music" && musicPlanner && !musicPlanReady) {
+        const plan = await prepareMusicPlan(false);
+        effectiveCaption = plan.caption;
+        effectiveLyrics = plan.lyrics;
+      }
       const body = kind === "tts"
         ? {
             kind, projectId, text: ttsText, voice,
@@ -147,7 +185,7 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName }: 
             referenceText: cloneEnabled ? referenceText : undefined,
           }
         : {
-            kind, projectId, caption, lyrics: instrumental ? "" : lyrics,
+            kind, projectId, caption: effectiveCaption, lyrics: effectiveLyrics,
             durationSeconds: duration, seed: fixedSeed ? seed : undefined,
           };
       const response = await fetch(`${bridgeUrl}/api/audio-jobs`, {
@@ -253,20 +291,35 @@ export default function AudioStudioPanel({ bridgeUrl, projectId, projectName }: 
           </div>
         ) : (
           <div className="audio-form">
+            <div className={`music-planner ${musicPlanner ? "enabled" : ""}`}>
+              <div><label><input checked={musicPlanner} onChange={(event) => { setMusicPlanner(event.target.checked); setMusicPlanReady(false); }} type="checkbox" /> Music Planner AI</label><span>{capabilities?.music.plannerReady ? "Scrivi in linguaggio naturale: Gemma prepara la sintassi e poi viene scaricata." : "Planner non disponibile: configura Gemma in Admin oppure disattivalo per l'input manuale."}</span></div>
+            </div>
+            {musicPlanner && <>
+              <label className="audio-main-field"><span>Cosa vuoi ascoltare?</span><textarea onChange={(event) => { setMusicIdea(event.target.value); setMusicPlanReady(false); }} placeholder="Esempio: canzone synth-pop energica in italiano, voce femminile, ritornello orecchiabile, atmosfera estiva." rows={5} value={musicIdea} /></label>
+              <button className="music-plan-button" disabled={busy === "planner" || !musicIdea.trim() || !capabilities?.music.plannerReady} onClick={() => void prepareMusicPlan().catch(() => undefined)} type="button">{busy === "planner" ? "Gemma sta preparando..." : "Prepara con Gemma"}</button>
+              {musicPlanReady && <div className="music-plan-preview"><strong>Piano modificabile</strong><span>{musicPlanSummary}</span><label><span>Descrizione tecnica MiniMax</span><textarea onChange={(event) => setCaption(event.target.value)} rows={5} value={caption} /></label>{!instrumental && <label><span>Lyrics strutturate</span><textarea onChange={(event) => setLyrics(event.target.value)} rows={8} value={lyrics} /></label>}</div>}
+            </>}
+            <div hidden={musicPlanner}>
             <label className="audio-main-field"><span>Descrivi il brano</span><textarea onChange={(event) => setCaption(event.target.value)} placeholder="Genere, atmosfera, strumenti, voce, BPM, struttura e produzione…" rows={5} value={caption} /></label>
+            </div>
             <div className="audio-grid three">
               <label><span>Durata</span><select onChange={(event) => setDuration(Number(event.target.value))} value={duration}><option value="15">15 secondi</option><option value="30">30 secondi</option><option value="60">60 secondi</option><option value="120">2 minuti</option><option value="180">3 minuti</option></select></label>
               <label className="instrumental-toggle"><span>Voce</span><button className={instrumental ? "selected" : ""} onClick={() => setInstrumental(true)} type="button">Strumentale</button><button className={!instrumental ? "selected" : ""} onClick={() => setInstrumental(false)} type="button">Con testo</button></label>
               <fieldset className="audio-seed"><legend>Seed</legend><button className={!fixedSeed ? "selected" : ""} onClick={() => setFixedSeed(false)} type="button">Random</button><button className={fixedSeed ? "selected" : ""} onClick={() => setFixedSeed(true)} type="button">Fisso</button><input disabled={!fixedSeed} min="0" onChange={(event) => setSeed(Number(event.target.value))} type="number" value={seed} /></fieldset>
             </div>
+            <div hidden={musicPlanner}>
             {!instrumental && <label><span>Lyrics strutturate</span><textarea onChange={(event) => setLyrics(event.target.value)} placeholder={'[Verse]\nTesto della strofa…\n\n[Chorus]\nTesto del ritornello…'} rows={8} value={lyrics} /></label>}
+            </div>
           </div>
         )}
 
         {message && <div className="audio-message">{message}</div>}
         <div className="generation-footer audio-footer">
           <div className="preset-note"><span className="fast-badge">{kind === "tts" ? "HIGGS 8-BIT" : "MINIMAX MUSIC 3"}</span>{kind === "tts" ? "Processo isolato · unload automatico" : `${duration}s · tiled decode · ${capabilities?.music.steps ?? 30} step`}</div>
+          <div hidden={kind === "music" && musicPlanner}>
           <div className="generation-cta"><div><span>Stato motore</span><strong>{selectedReady ? "Pronto" : "Configura in Admin"}</strong></div><button disabled={busy === "run" || !selectedReady || (kind === "tts" ? !ttsText.trim() || (cloneEnabled && !reference) : !caption.trim())} onClick={() => void run()} type="button">{busy === "run" ? "Avvio…" : kind === "tts" ? "Genera voce" : "Genera musica"}</button></div>
+          </div>
+          {kind === "music" && musicPlanner && <div className="generation-cta"><div><span>Stato motore</span><strong>{capabilities?.music.plannerReady ? "Planner e motore pronti" : "Configura Gemma in Admin"}</strong></div><button disabled={busy === "run" || busy === "planner" || !selectedReady || !capabilities?.music.plannerReady || !musicIdea.trim()} onClick={() => void run()} type="button">{busy === "run" ? "Gemma prepara e avvia..." : busy === "planner" ? "Gemma prepara..." : "Genera musica"}</button></div>}
         </div>
       </section>
 

@@ -60,6 +60,16 @@
 .instrumental-toggle > span { grid-column: 1 / -1; }
 .voice-clone { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: #111314; }
 .voice-clone.enabled { border-color: rgba(190,255,55,.3); }
+.music-planner { border: 1px solid #2a2d30; border-radius: 14px; padding: 14px; background: #111315; }
+.music-planner.enabled { border-color: #566a18; background: #14180f; }
+.music-planner > div { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.music-planner label { display: flex; align-items: center; gap: 9px; font-weight: 800; }
+.music-planner input { width: auto; }
+.music-planner span { color: #858b91; font-size: 12px; text-align: right; }
+.music-plan-button { justify-self: start; border: 1px solid #60771a; background: #18200d; color: #c9ff3b; border-radius: 10px; padding: 10px 15px; font-weight: 800; }
+.music-plan-preview { display: grid; gap: 10px; border: 1px solid #3d481c; border-radius: 14px; padding: 14px; background: #11140e; }
+.music-plan-preview > strong { color: #c9ff3b; }
+.music-plan-preview > span { color: #969c90; font-size: 12px; }
 .voice-clone > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .voice-clone > div:first-child label { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 12px; }
 .voice-clone > div:first-child input { width: auto; }

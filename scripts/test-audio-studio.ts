@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { AudioJobRepository } from "../bridge/audio-job-repository.js";
+import { normalizeMusicPlan } from "../bridge/audio-studio-service.js";
 import { JobRepository } from "../bridge/job-repository.js";
 import { ProjectRepository } from "../bridge/project-repository.js";
 
@@ -15,6 +16,19 @@ const audio = new AudioJobRepository(jobs.databasePath);
 try {
   const project = projects.create("Audio test");
   if (!project) throw new Error("Progetto audio di test non creato");
+  const plannedSong = normalizeMusicPlan(JSON.stringify({
+    caption: "Energetic Italian synth-pop at 118 BPM with bright analog synths and a concise radio arrangement.",
+    lyrics: "[Verse 1]\nSotto il sole corro via\n\n[Chorus]\nQuesta estate e casa mia",
+    instrumental: false,
+    summary: "Synth-pop estivo con ritornello breve.",
+  }), false);
+  assert.match(plannedSong.caption, /118 BPM/);
+  assert.match(plannedSong.lyrics, /\[Chorus\]/);
+  const plannedInstrumental = normalizeMusicPlan(
+    '{"caption":"Cinematic instrumental orchestral cue with brass, strings and a decisive ending.","lyrics":"ignored","instrumental":true,"summary":"Tema orchestrale."}',
+    true,
+  );
+  assert.equal(plannedInstrumental.lyrics, "");
   const tts = audio.create({
     projectId: project.id,
     kind: "tts",
