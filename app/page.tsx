@@ -3467,7 +3467,7 @@ function SetupWizard({ status }: { status: SetupStatus }) {
 }
 
 function AdminPanel() {
-  const [data, setData] = useState<EngineAdminResponse | null>(null);
+  const [data, setDataState] = useState<EngineAdminResponse | null>(null);
   const dataRef = useRef<EngineAdminResponse | null>(null);
   const [installData, setInstallData] = useState<InstallAdminResponse | null>(null);
   const [message, setMessage] = useState("Caricamento configurazione…");
@@ -3477,6 +3477,19 @@ function AdminPanel() {
   const [llmRuntime, setLlmRuntime] = useState<AdminLlmRuntimeStatus | null>(null);
   const [loginRequired, setLoginRequired] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
+
+  function setData(
+    value:
+      | EngineAdminResponse
+      | null
+      | ((current: EngineAdminResponse | null) => EngineAdminResponse | null),
+  ) {
+    const next = typeof value === "function" ? value(dataRef.current) : value;
+    // Keep the authoritative Admin snapshot synchronous so Save never sends
+    // values from the previous render (models, CFG, steps or LoRAs).
+    dataRef.current = next;
+    setDataState(next);
+  }
 
   useEffect(() => {
     dataRef.current = data;
