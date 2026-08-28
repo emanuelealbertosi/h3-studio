@@ -539,4 +539,41 @@ export const JOB_DATABASE_MIGRATIONS = [
        ON chat_messages(conversation_id, created_at)`,
     ],
   },
+  {
+    version: 21,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS audio_jobs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('tts', 'music')),
+        status TEXT NOT NULL CHECK (
+          status IN ('prepared', 'queued', 'loading', 'running', 'finalizing', 'ready', 'failed', 'cancelled')
+        ),
+        prompt TEXT NOT NULL,
+        lyrics TEXT NOT NULL DEFAULT '',
+        voice TEXT NOT NULL DEFAULT '',
+        reference_file TEXT,
+        reference_text TEXT NOT NULL DEFAULT '',
+        duration_seconds REAL,
+        seed TEXT NOT NULL,
+        settings_json TEXT NOT NULL,
+        prompt_id TEXT,
+        queue_number INTEGER,
+        progress REAL,
+        phase_label TEXT NOT NULL DEFAULT 'Preparazione',
+        output_filename TEXT,
+        output_subfolder TEXT,
+        output_type TEXT CHECK (output_type IN ('input', 'output', 'temp')),
+        output_format TEXT,
+        external_media_id TEXT REFERENCES external_media(id) ON DELETE SET NULL,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      ) STRICT`,
+      `CREATE INDEX IF NOT EXISTS idx_audio_jobs_project_created
+       ON audio_jobs(project_id, created_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_audio_jobs_status
+       ON audio_jobs(status)`,
+    ],
+  },
 ] as const;

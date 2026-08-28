@@ -6,6 +6,7 @@ import ImageStudioPanel, {
   type ImageStudioIncomingReference,
 } from "./image-studio-panel";
 import ChatPanel from "./chat-panel";
+import AudioStudioPanel from "./audio-studio-panel";
 import RegenerateDialog from "./regenerate-dialog";
 import {
   compatiblePddFilesForModel,
@@ -458,6 +459,10 @@ type EngineAdminResponse = {
   kreaWorkflow: { source: string };
   imageEditWorkflow: { source: string };
   animaWorkflow: { source: string };
+  audioStudio?: {
+    tts: { ready: boolean; root: string; voices: string[]; defaultVoice: string; unloadPolicy: string };
+    music: { ready: boolean; model: string; encoder: string; vae: string; steps: number; cfg: number };
+  } | null;
   settings: {
     h3: {
       model: string;
@@ -503,6 +508,23 @@ type EngineAdminResponse = {
       maxNewTokens: number;
       temperature: number;
       topP: number;
+    };
+    tts: {
+      root: string;
+      voice: string;
+      temperature: number;
+      topP: number;
+      topK: number;
+      speed: number;
+      maxNewTokens: number;
+    };
+    music: {
+      model: string;
+      encoder: string;
+      vae: string;
+      steps: number;
+      cfg: number;
+      tiledDecode: boolean;
     };
   };
   capabilities: {
@@ -1932,7 +1954,7 @@ function MediaLibraryPanel({
                 ) : asset.kind === "video" ? (
                   <video muted playsInline preload="metadata" src={`${bridgeUrl}${asset.mediaPath}`} />
                 ) : (
-                  <span>♪</span>
+                  <audio controls preload="metadata" src={`${bridgeUrl}${asset.mediaPath}`} />
                 )}
                 <button
                   aria-label={`Rimuovi ${asset.originalName} dalla Libreria`}
@@ -3787,6 +3809,39 @@ function AdminPanel() {
               </div>
             </article>
 
+            <article className="engine-config-card audio-engine-card">
+              <div className="engine-config-heading">
+                <div><span>VOICE</span><h3>Higgs Audio v3 TTS</h3></div>
+                <b className={data.audioStudio?.tts.ready ? "admin-ready" : "admin-warning"}>{data.audioStudio?.tts.ready ? "PRONTO" : "SETUP"}</b>
+              </div>
+              <div className="admin-form image-edit-engine-form">
+                <label><span>Cartella Higgs Audio Studio</span><input value={data.settings.tts.root} onChange={(event) => setData({ ...data, settings: { ...data.settings, tts: { ...data.settings.tts, root: event.target.value } } })} /></label>
+                <label><span>Voce predefinita</span><select value={data.settings.tts.voice} onChange={(event) => setData({ ...data, settings: { ...data.settings, tts: { ...data.settings.tts, voice: event.target.value } } })}>{[...new Set([data.settings.tts.voice, ...(data.audioStudio?.tts.voices ?? [])])].filter(Boolean).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+                <label><span>Temperature</span><input min="0.05" max="2" step="0.05" type="number" value={data.settings.tts.temperature} onChange={(event) => setData({ ...data, settings: { ...data.settings, tts: { ...data.settings.tts, temperature: Number(event.target.value) } } })} /></label>
+                <label><span>Top P</span><input min="0.01" max="1" step="0.01" type="number" value={data.settings.tts.topP} onChange={(event) => setData({ ...data, settings: { ...data.settings, tts: { ...data.settings.tts, topP: Number(event.target.value) } } })} /></label>
+                <label><span>Top K</span><input min="1" max="500" step="1" type="number" value={data.settings.tts.topK} onChange={(event) => setData({ ...data, settings: { ...data.settings, tts: { ...data.settings.tts, topK: Number(event.target.value) } } })} /></label>
+                <label><span>Velocità</span><input min="0.5" max="2" step="0.05" type="number" value={data.settings.tts.speed} onChange={(event) => setData({ ...data, settings: { ...data.settings, tts: { ...data.settings.tts, speed: Number(event.target.value) } } })} /></label>
+                <label><span>Token massimi</span><input min="256" max="8192" step="256" type="number" value={data.settings.tts.maxNewTokens} onChange={(event) => setData({ ...data, settings: { ...data.settings, tts: { ...data.settings.tts, maxNewTokens: Number(event.target.value) } } })} /></label>
+                <p className="image-edit-profile-note">Higgs viene avviato in un processo isolato solo durante la sintesi e terminato sempre dopo output, errore o Stop. Supporta cloning one-shot da Libreria.</p>
+              </div>
+            </article>
+
+            <article className="engine-config-card audio-engine-card">
+              <div className="engine-config-heading">
+                <div><span>MUSIC</span><h3>MiniMax Music 3</h3></div>
+                <b className={data.audioStudio?.music.ready ? "admin-ready" : "admin-warning"}>{data.audioStudio?.music.ready ? "PRONTO" : "SETUP"}</b>
+              </div>
+              <div className="admin-form image-edit-engine-form">
+                <label><span>Modello DiT</span><select value={data.settings.music.model} onChange={(event) => setData({ ...data, settings: { ...data.settings, music: { ...data.settings.music, model: event.target.value } } })}>{compatibleEngineOptions(data.capabilities.models, data.settings.music.model, /minimax.*music/i).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+                <label><span>Text encoder</span><select value={data.settings.music.encoder} onChange={(event) => setData({ ...data, settings: { ...data.settings, music: { ...data.settings.music, encoder: event.target.value } } })}>{compatibleEngineOptions(data.capabilities.textEncoders, data.settings.music.encoder, /minimax.*music/i).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+                <label><span>VAE / DAV</span><select value={data.settings.music.vae} onChange={(event) => setData({ ...data, settings: { ...data.settings, music: { ...data.settings.music, vae: event.target.value } } })}>{compatibleEngineOptions(data.capabilities.vaes, data.settings.music.vae, /minimax.*music|music.*dav/i).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+                <label><span>Step</span><input min="4" max="40" step="1" type="number" value={data.settings.music.steps} onChange={(event) => setData({ ...data, settings: { ...data.settings, music: { ...data.settings.music, steps: Number(event.target.value) } } })} /></label>
+                <label><span>CFG</span><input min="0.1" max="10" step="0.1" type="number" value={data.settings.music.cfg} onChange={(event) => setData({ ...data, settings: { ...data.settings, music: { ...data.settings.music, cfg: Number(event.target.value) } } })} /></label>
+                <label className="admin-inline-check"><input checked={data.settings.music.tiledDecode} onChange={(event) => setData({ ...data, settings: { ...data.settings, music: { ...data.settings.music, tiledDecode: event.target.checked } } })} type="checkbox" /><span>Decode audio tiled (consigliato)</span></label>
+                <p className="image-edit-profile-note">Workflow nativo ComfyUI: caption + lyrics strutturate, fino a 6 minuti. Decode tiled attivo per contenere la VRAM.</p>
+              </div>
+            </article>
+
             <article className="engine-config-card chat-engine-card">
               <div className="engine-config-heading">
                 <div>
@@ -3857,7 +3912,8 @@ function AdminPanel() {
 
 function StudioApp() {
   const [activeView, setActiveView] = useState<"chat" | "studio" | "projects" | "montages" | "characters" | "library" | "admin">("studio");
-  const [studioMediaMode, setStudioMediaMode] = useState<"video" | "image">("video");
+  const [studioMediaMode, setStudioMediaMode] = useState<"video" | "image" | "audio">("video");
+  const [audioResetToken, setAudioResetToken] = useState(0);
   const [imageResetToken, setImageResetToken] = useState(0);
   const [imageStudioHandoff, setImageStudioHandoff] = useState<{
     token: number;
@@ -5370,7 +5426,7 @@ function StudioApp() {
                     ? "Assets"
                   : activeView === "chat"
                     ? "Chat"
-                    : studioMediaMode === "image" ? "Immagine 01" : "Shot 01"}
+                    : studioMediaMode === "image" ? "Immagine 01" : studioMediaMode === "audio" ? "Audio 01" : "Shot 01"}
             </h1>
           </div>
           <div className="topbar-actions">
@@ -5379,6 +5435,7 @@ function StudioApp() {
                 {activeView === "studio" && <div className="studio-media-toggle" aria-label="Tipo di generazione">
                   <button className={studioMediaMode === "video" ? "active" : ""} onClick={() => setStudioMediaMode("video")} type="button">▶ Video</button>
                   <button className={studioMediaMode === "image" ? "active" : ""} onClick={() => setStudioMediaMode("image")} type="button">▧ Immagini</button>
+                  <button className={studioMediaMode === "audio" ? "active" : ""} onClick={() => setStudioMediaMode("audio")} type="button">♫ Audio</button>
                 </div>}
                 <label>
                   <span>Progetto</span>
@@ -5393,11 +5450,11 @@ function StudioApp() {
                 </label>
                 {activeView === "studio" && <button onClick={() => {
                   if (studioMediaMode === "video") beginNewGeneration(studioProjectId);
-                  else {
+                  else if (studioMediaMode === "image") {
                     setImageStudioHandoff(null);
                     setImageResetToken((current) => current + 1);
-                  }
-                }} type="button">{studioMediaMode === "video" ? "Nuovo shot" : "Nuova immagine"}</button>}
+                  } else setAudioResetToken((current) => current + 1);
+                }} type="button">{studioMediaMode === "video" ? "Nuovo shot" : studioMediaMode === "image" ? "Nuova immagine" : "Nuovo audio"}</button>}
                 <button onClick={() => void createStudioProject()} title="Crea un nuovo progetto" type="button">＋</button>
               </div>
             )}
@@ -5471,6 +5528,14 @@ function StudioApp() {
               projectId={studioProjectId}
               projectName={studioProject?.name}
               projects={studioProjects}
+            />
+          </div>
+          <div hidden={studioMediaMode !== "audio"}>
+            <AudioStudioPanel
+              bridgeUrl={bridgeUrl}
+              key={`${studioProjectId}-${audioResetToken}`}
+              projectId={studioProjectId}
+              projectName={studioProject?.name}
             />
           </div>
           {studioMediaMode === "video" && (

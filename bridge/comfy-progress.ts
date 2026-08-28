@@ -30,7 +30,7 @@ export class ComfyProgressTracker {
   private readonly clientId = `h3-studio-bridge-${randomUUID()}`;
   private readonly progress = new Map<string, ComfyPromptProgress>();
   private readonly nodeClasses = new Map<string, Map<string, string>>();
-  private readonly mediaKinds = new Map<string, "video" | "image">();
+  private readonly mediaKinds = new Map<string, "video" | "image" | "audio">();
   private socket: WebSocket | null = null;
   private socketConnected = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -52,7 +52,7 @@ export class ComfyProgressTracker {
   register(
     promptId: string,
     prompt: ComfyApiPrompt,
-    mediaKind: "video" | "image" = "video",
+    mediaKind: "video" | "image" | "audio" = "video",
   ) {
     this.nodeClasses.set(
       promptId,
@@ -190,7 +190,9 @@ export class ComfyProgressTracker {
         phaseLabel:
           this.mediaKinds.get(promptId) === "image"
             ? "Generazione immagine"
-            : "Generazione video",
+            : this.mediaKinds.get(promptId) === "audio"
+              ? "Generazione audio"
+              : "Generazione video",
         progress,
         exact: progress !== null,
         currentNode:

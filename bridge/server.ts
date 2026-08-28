@@ -30,6 +30,8 @@ import {
 import { ImageStudioService } from "./image-studio-service.js";
 import { ChatRepository } from "./chat-repository.js";
 import { ChatService } from "./chat-service.js";
+import { AudioJobRepository } from "./audio-job-repository.js";
+import { AudioStudioService } from "./audio-studio-service.js";
 import {
   InstallSettingsStore,
   WORKFLOW_CATALOG,
@@ -102,6 +104,7 @@ const adminAuth = new AdminAuthService(jobRepository.databasePath);
 const projectRepository = new ProjectRepository(jobRepository.databasePath);
 const creativeLibrary = new CreativeLibraryRepository(jobRepository.databasePath);
 const externalMedia = new ExternalMediaRepository(jobRepository.databasePath);
+const audioJobRepository = new AudioJobRepository(jobRepository.databasePath);
 const imageJobRepository = new ImageJobRepository(jobRepository.databasePath);
 const variantRepository = new CandidateVariantRepository(jobRepository.databasePath);
 const kreaAssets = new KreaAssetService(
@@ -150,6 +153,16 @@ const postprocess = new PostprocessService(
 );
 const recoveredVariants = await postprocess.recover();
 const recoveredImages = await imageStudio.recover();
+const audioStudio = new AudioStudioService(
+  comfy,
+  audioJobRepository,
+  runtimeSettings,
+  progressTracker,
+  externalMedia,
+  installSettings.comfyOutputDir,
+  config.dataDir,
+);
+const recoveredAudio = await audioStudio.recover();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -342,11 +355,12 @@ app.addHook("onRequest", async (request, reply) => {
 });
 
 app.get("/api/health", async () => {
-  const [comfyui, workflow, engineSettings, imageSummary] = await Promise.all([
+  const [comfyui, workflow, engineSettings, imageSummary, audioSummary] = await Promise.all([
     comfy.health(),
     workflowStore.status(),
     runtimeSettings.get(),
     imageStudio.summary(),
+    audioStudio.status(),
   ]);
 
   return {
@@ -365,6 +379,7 @@ app.get("/api/health", async () => {
     fastEngine: engineSettings.fast,
     standardEngine: engineSettings.h3,
     imageStudio: imageSummary,
+    audioStudio: audioSummary,
     progressEvents: {
       connected: progressTracker.connected,
     },
@@ -374,6 +389,8 @@ app.get("/api/health", async () => {
       variants: variantRepository.count(),
       recoveredVariants,
       recoveredImages,
+      recoveredAudio,
+      audioJobs: audioJobRepository.count(),
       externalMedia: externalMedia.count(),
     },
     checkedAt: new Date().toISOString(),
@@ -571,6 +588,74 @@ app.post("/api/image-jobs", async (request, reply) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invio immagine fallito";
     app.log.error(error, "Invio job immagine H3 Studio fallito");
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
+app.get("/api/audio-jobs/capabilities", async (_request, reply) => {
+  try {
+    return { ok: true, audioStudio: await audioStudio.status() };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Motori audio non disponibili";
+    return reply.status(503).send({ ok: false, error: message });
+  }
+});
+
+app.post("/api/audio-jobs", async (request, reply) => {
+  try {
+    const job = await audioStudio.submit(request.body);
+    return reply.status(202).send({ ok: true, job });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invio audio fallito";
+    app.log.error(error, "Invio job audio H3 Studio fallito");
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
+app.get<{ Querystring: { limit?: string; projectId?: string } }>(
+  "/api/audio-jobs",
+  async (request) => ({
+    ok: true,
+    jobs: await audioStudio.list(
+      Number.parseInt(request.query.limit ?? "50", 10),
+      request.query.projectId?.trim() || null,
+    ),
+  }),
+);
+
+app.get<{ Params: { jobId: string } }>("/api/audio-jobs/:jobId", async (request, reply) => {
+  const job = await audioStudio.get(request.params.jobId);
+  if (!job) return reply.status(404).send({ ok: false, error: "Job audio non trovato" });
+  return { ok: true, job };
+});
+
+app.post<{ Params: { jobId: string } }>("/api/audio-jobs/:jobId/cancel", async (request, reply) => {
+  try {
+    const job = await audioStudio.cancel(request.params.jobId);
+    if (!job) return reply.status(404).send({ ok: false, error: "Job audio non trovato" });
+    return { ok: true, job };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Interruzione audio fallita";
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
+app.delete<{ Params: { jobId: string } }>("/api/audio-jobs/:jobId", async (request, reply) => {
+  try {
+    const result = await audioStudio.delete(request.params.jobId);
+    const storage = result.deleted.output
+      ? await removeComfyOutputFiles([{
+          filename: result.deleted.output.filename,
+          subfolder: result.deleted.output.subfolder,
+          type: result.deleted.output.type,
+        }])
+      : { removedFiles: 0, warnings: [] as string[] };
+    if (result.externalMediaId) {
+      try { externalMedia.delete(result.externalMediaId); } catch { /* already removed */ }
+    }
+    return { ok: true, ...storage };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Eliminazione audio fallita";
     return reply.status(400).send({ ok: false, error: message });
   }
 });
@@ -1454,7 +1539,7 @@ app.get<{
 });
 
 async function engineSettingsPayload() {
-  const [settings, models, loras, pddFiles, textEncoders, vaes, llmFiles, chatRuntime, workflow, fastWorkflow, fastRuntime, imageAttentionBackends] = await Promise.all([
+  const [settings, models, loras, pddFiles, textEncoders, vaes, llmFiles, chatRuntime, workflow, fastWorkflow, fastRuntime, imageAttentionBackends, audioStatus] = await Promise.all([
     runtimeSettings.get(),
     comfy.models("diffusion_models"),
     comfy.models("loras"),
@@ -1467,6 +1552,7 @@ async function engineSettingsPayload() {
     fastWorkflowStore.status(),
     fastRuntimeStatus(),
     imageStudio.attentionBackends().catch((): string[] => []),
+    audioStudio.status().catch(() => null),
   ]);
   return {
     ok: true,
@@ -1491,6 +1577,7 @@ async function engineSettingsPayload() {
       source: workflowPath(config.workflowOutputDir, installSettings.imageAnimaWorkflowId),
     },
     settings,
+    audioStudio: audioStatus,
     defaults: DEFAULT_RUNTIME_SETTINGS,
     capabilities: {
       models: [...new Set(models)].sort(),
@@ -1631,6 +1718,8 @@ async function saveEngineSettings(
       (body as { anima?: unknown }).anima ?? currentSettings.anima;
     const chatSettings =
       (body as { chat?: unknown }).chat ?? currentSettings.chat;
+    const tts = (body as { tts?: unknown }).tts ?? currentSettings.tts;
+    const music = (body as { music?: unknown }).music ?? currentSettings.music;
     if (
       typeof h3 !== "object" || h3 === null || Array.isArray(h3) ||
       typeof fast !== "object" || fast === null || Array.isArray(fast) ||
@@ -1638,6 +1727,8 @@ async function saveEngineSettings(
       typeof imageEdit !== "object" || imageEdit === null || Array.isArray(imageEdit) ||
       typeof anima !== "object" || anima === null || Array.isArray(anima)
       || typeof chatSettings !== "object" || chatSettings === null || Array.isArray(chatSettings)
+      || typeof tts !== "object" || tts === null || Array.isArray(tts)
+      || typeof music !== "object" || music === null || Array.isArray(music)
     ) {
       return reply.status(400).send({ ok: false, error: "Configurazione H3, FAST, Krea, Anima o Chat mancante" });
     }
@@ -1700,6 +1791,15 @@ async function saveEngineSettings(
     if (!llmFiles.includes(String((chatSettings as { projector?: unknown }).projector ?? ""))) {
       return reply.status(400).send({ ok: false, error: "Projector mmproj Chat non installato" });
     }
+    if (!models.includes(String((music as { model?: unknown }).model ?? ""))) {
+      return reply.status(400).send({ ok: false, error: "Modello MiniMax Music non installato" });
+    }
+    if (!textEncoders.includes(String((music as { encoder?: unknown }).encoder ?? ""))) {
+      return reply.status(400).send({ ok: false, error: "Text encoder MiniMax Music non installato" });
+    }
+    if (!vaes.includes(String((music as { vae?: unknown }).vae ?? ""))) {
+      return reply.status(400).send({ ok: false, error: "VAE MiniMax Music non installata" });
+    }
     const requestedAttention = String(
       (imageEdit as { attentionBackend?: unknown }).attentionBackend ?? "auto",
     );
@@ -1736,7 +1836,7 @@ async function saveEngineSettings(
     if (missingLora) {
       return reply.status(400).send({ ok: false, error: `LoRA non installato: ${missingLora}` });
     }
-    const settings = await runtimeSettings.update({ ...body, imageEdit, anima, chat: chatSettings });
+    const settings = await runtimeSettings.update({ ...body, imageEdit, anima, chat: chatSettings, tts, music });
     return { ok: true, settings };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Impostazioni non valide";
@@ -1753,6 +1853,7 @@ app.put("/api/admin/fast-settings", saveEngineSettings);
 app.addHook("onClose", async () => {
   progressTracker.stop();
   adminAuth.close();
+  audioJobRepository.close();
   imageJobRepository.close();
   chatRepository.close();
   variantRepository.close();

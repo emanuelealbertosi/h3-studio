@@ -64,6 +64,25 @@ export type ChatEngineSettings = {
   topP: number;
 };
 
+export type TtsEngineSettings = {
+  root: string;
+  voice: string;
+  temperature: number;
+  topP: number;
+  topK: number;
+  speed: number;
+  maxNewTokens: number;
+};
+
+export type MusicEngineSettings = {
+  model: string;
+  encoder: string;
+  vae: string;
+  steps: number;
+  cfg: number;
+  tiledDecode: boolean;
+};
+
 export type RuntimeSettings = {
   h3: H3EngineSettings;
   fast: FastEngineSettings;
@@ -71,6 +90,8 @@ export type RuntimeSettings = {
   imageEdit: ImageEditEngineSettings;
   anima: AnimaEngineSettings;
   chat: ChatEngineSettings;
+  tts: TtsEngineSettings;
+  music: MusicEngineSettings;
 };
 
 export type ResolvedEngineSettings = H3EngineSettings & {
@@ -139,6 +160,23 @@ export const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
     temperature: 0.35,
     topP: 0.9,
   },
+  tts: {
+    root: "F:\\higgsaudio\\HiggsAudio-Studio",
+    voice: "English_Female.wav",
+    temperature: 1,
+    topP: 0.95,
+    topK: 50,
+    speed: 1,
+    maxNewTokens: 2_048,
+  },
+  music: {
+    model: "minimax_music3_dit_fp16.safetensors",
+    encoder: "minimax_music3_text_encoder_pruned_int8_convrot.safetensors",
+    vae: "minimax_music3_dav.safetensors",
+    steps: 30,
+    cfg: 1.7,
+    tiledDecode: true,
+  },
 });
 
 function cloneDefaults(): RuntimeSettings {
@@ -163,6 +201,8 @@ function cloneDefaults(): RuntimeSettings {
       loras: DEFAULT_RUNTIME_SETTINGS.anima.loras.map((slot) => ({ ...slot })),
     },
     chat: { ...DEFAULT_RUNTIME_SETTINGS.chat },
+    tts: { ...DEFAULT_RUNTIME_SETTINGS.tts },
+    music: { ...DEFAULT_RUNTIME_SETTINGS.music },
   };
 }
 
@@ -219,6 +259,8 @@ function migrateLegacySettings(value: Record<string, unknown>): RuntimeSettings 
     imageEdit: defaults.imageEdit,
     anima: defaults.anima,
     chat: defaults.chat,
+    tts: defaults.tts,
+    music: defaults.music,
   };
 }
 
@@ -235,6 +277,8 @@ function validateSettings(value: unknown): RuntimeSettings {
   const imageEdit = isRecord(value.imageEdit) ? value.imageEdit : defaults.imageEdit;
   const anima = isRecord(value.anima) ? value.anima : defaults.anima;
   const chat = isRecord(value.chat) ? value.chat : defaults.chat;
+  const tts = isRecord(value.tts) ? value.tts : defaults.tts;
+  const music = isRecord(value.music) ? value.music : defaults.music;
 
   const h3Model = typeof value.h3.model === "string" ? value.h3.model.trim() : "";
   const fastModel = typeof fast.model === "string" ? fast.model.trim() : "";
@@ -261,6 +305,17 @@ function validateSettings(value: unknown): RuntimeSettings {
   const chatMaxNewTokens = Number(chat.maxNewTokens);
   const chatTemperature = Number(chat.temperature);
   const chatTopP = Number(chat.topP);
+  const ttsRoot = typeof tts.root === "string" ? tts.root.trim() : "";
+  const ttsVoice = typeof tts.voice === "string" ? tts.voice.trim() : "";
+  const ttsTemperature = Number(tts.temperature);
+  const ttsTopP = Number(tts.topP);
+  const ttsTopK = Number(tts.topK);
+  const ttsSpeed = Number(tts.speed);
+  const ttsMaxNewTokens = Number(tts.maxNewTokens);
+  const musicModel = typeof music.model === "string" ? music.model.trim() : "";
+  const musicEncoder = typeof music.encoder === "string" ? music.encoder.trim() : "";
+  const musicVae = typeof music.vae === "string" ? music.vae.trim() : "";
+  const musicCfg = Number(music.cfg);
   const imageEditKvCache =
     imageEdit.kvCacheEnabled === undefined
       ? defaults.imageEdit.kvCacheEnabled
@@ -331,6 +386,29 @@ function validateSettings(value: unknown): RuntimeSettings {
   if (!Number.isFinite(chatTopP) || chatTopP <= 0 || chatTopP > 1) {
     throw new Error("Top P Chat deve essere maggiore di 0 e non superiore a 1");
   }
+  if (!ttsRoot) throw new Error("Indica la cartella di Higgs Audio Studio");
+  if (!ttsVoice) throw new Error("Seleziona una voce Higgs predefinita");
+  if (!Number.isFinite(ttsTemperature) || ttsTemperature < 0.05 || ttsTemperature > 2) {
+    throw new Error("La temperature TTS deve essere compresa fra 0,05 e 2");
+  }
+  if (!Number.isFinite(ttsTopP) || ttsTopP <= 0 || ttsTopP > 1) {
+    throw new Error("Top P TTS deve essere maggiore di 0 e non superiore a 1");
+  }
+  if (!Number.isInteger(ttsTopK) || ttsTopK < 1 || ttsTopK > 500) {
+    throw new Error("Top K TTS deve essere compreso fra 1 e 500");
+  }
+  if (!Number.isFinite(ttsSpeed) || ttsSpeed < 0.5 || ttsSpeed > 2) {
+    throw new Error("La velocità TTS deve essere compresa fra 0,5 e 2");
+  }
+  if (!Number.isInteger(ttsMaxNewTokens) || ttsMaxNewTokens < 256 || ttsMaxNewTokens > 8_192) {
+    throw new Error("I token TTS devono essere compresi fra 256 e 8.192");
+  }
+  if (!musicModel || !musicEncoder || !musicVae) {
+    throw new Error("Configura modello, text encoder e VAE MiniMax Music");
+  }
+  if (!Number.isFinite(musicCfg) || musicCfg < 0.1 || musicCfg > 10) {
+    throw new Error("Il CFG MiniMax Music deve essere compreso fra 0,1 e 10");
+  }
   assertPddModelCompatibility(fastModel, pddFile);
 
   return {
@@ -379,6 +457,23 @@ function validateSettings(value: unknown): RuntimeSettings {
       temperature: chatTemperature,
       topP: chatTopP,
     },
+    tts: {
+      root: ttsRoot,
+      voice: ttsVoice,
+      temperature: ttsTemperature,
+      topP: ttsTopP,
+      topK: ttsTopK,
+      speed: ttsSpeed,
+      maxNewTokens: ttsMaxNewTokens,
+    },
+    music: {
+      model: musicModel,
+      encoder: musicEncoder,
+      vae: musicVae,
+      steps: validateStepCount(music.steps, "MiniMax Music"),
+      cfg: musicCfg,
+      tiledDecode: music.tiledDecode !== false,
+    },
   };
 }
 
@@ -412,6 +507,8 @@ export class RuntimeSettingsStore {
           imageEdit: isRecord(value.imageEdit) ? value.imageEdit : current.imageEdit,
           anima: isRecord(value.anima) ? value.anima : current.anima,
           chat: isRecord(value.chat) ? value.chat : current.chat,
+          tts: isRecord(value.tts) ? value.tts : current.tts,
+          music: isRecord(value.music) ? value.music : current.music,
         })
       : validateSettings(value);
     await mkdir(path.dirname(this.filePath), { recursive: true });

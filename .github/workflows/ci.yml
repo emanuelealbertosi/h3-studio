@@ -24,6 +24,7 @@ jobs:
       - run: npm run test:repair-processing-times
       - run: npm run test:images
       - run: npm run test:chat
+      - run: npm run test:audio
       - run: npm run test:fast
       - run: npm run test:cancel
       - run: npm run test:restart

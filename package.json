@@ -27,6 +27,7 @@
     "test:krea-contract": "tsx scripts/test-krea-contract.ts",
     "test:images": "tsx scripts/test-image-studio.ts",
     "test:chat": "tsx scripts/test-chat.ts",
+    "test:audio": "tsx scripts/test-audio-studio.ts",
     "test:fast": "tsx scripts/test-fast-engine.ts",
     "test:continuation": "node scripts/test-continuation-boundary.mjs",
     "test:composer": "python scripts/test-composer-json-repair.py",

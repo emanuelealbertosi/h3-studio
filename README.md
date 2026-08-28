@@ -74,6 +74,15 @@ possono essere collegate come reference senza un nuovo upload. Il profilo Flux p
 Distilled FP8 a quattro step e CFG 1; workflow, modello, encoder, VAE, cache e
 attention backend sono gestiti dall’Admin.
 
+Lo **Studio Audio** è la terza modalità dello stesso progetto. **Higgs Audio
+v3 TTS** genera parlato e supporta il cloning one-shot da un campione caricato
+o già presente in Libreria; il runtime viene avviato in un processo isolato e
+terminato sempre dopo output, errore o Stop, così il modello non resta in VRAM.
+**MiniMax Music 3** usa invece i nodi nativi di ComfyUI con caption, lyrics a
+sezioni, durata fino a sei minuti, seed e decode tiled. Entrambi espongono
+progresso, interruzione, player, download, tempo di esecuzione e registrano
+l'output come audio riutilizzabile in Libreria.
+
 Ogni candidato completato espone derivati non distruttivi **Face**, **Upscale
 1 MP** e **Upscale 2 MP**. I target compaiono soltanto quando superano la
 risoluzione della sorgente: un originale da 0,98 MP propone quindi solo 2 MP.
@@ -116,6 +125,7 @@ video corrispondenti dall'output ComfyUI.
 - `docs/CREATIVE-LIBRARY.md`: personaggi, oggetti, reference e sheet Krea 2.
 - `docs/IMAGE-STUDIO.md`: generazione Krea/Anima, edit Flux Klein, reference e condivisione immagini fra progetti.
 - `docs/CHAT.md`: assistente Gemma 4 Vision, allegati, azioni e runtime locale.
+- `docs/AUDIO-STUDIO.md`: Higgs TTS, voice cloning, MiniMax Music e rilascio VRAM.
 - `docs/INSTALLATION.md`: clone, primo avvio, sicurezza e dipendenze ComfyUI.
 - `docs/GITHUB-RELEASE.md`: sanitizzazione, CI e checklist di pubblicazione.
 - `docs/WORKLOG.md`: cronologia sintetica del lavoro.

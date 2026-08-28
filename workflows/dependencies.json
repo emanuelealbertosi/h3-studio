@@ -198,6 +198,44 @@
       "requiredFor": ["video", "fast"]
     },
     {
+      "id": "minimax-music-core",
+      "label": "ComfyUI core MiniMax Music 3",
+      "kind": "custom_node",
+      "requiredClasses": [
+        "MiniMaxMusic3TextEncode",
+        "EmptyMiniMaxMusic3LatentAudio",
+        "VAEDecodeAudioTiled",
+        "SaveAudio"
+      ],
+      "url": "https://github.com/Comfy-Org/ComfyUI",
+      "notes": "Aggiorna ComfyUI se i nodi MiniMax Music 3 nativi non sono disponibili.",
+      "requiredFor": ["music"]
+    },
+    {
+      "id": "minimax-music-model",
+      "label": "MiniMax Music 3 DiT",
+      "kind": "model",
+      "folder": "diffusion_models",
+      "filenames": ["minimax_music3_dit_fp16.safetensors"],
+      "requiredFor": ["music"]
+    },
+    {
+      "id": "minimax-music-encoder",
+      "label": "MiniMax Music 3 text encoder INT8 ConvRot",
+      "kind": "model",
+      "folder": "text_encoders",
+      "filenames": ["minimax_music3_text_encoder_pruned_int8_convrot.safetensors"],
+      "requiredFor": ["music"]
+    },
+    {
+      "id": "minimax-music-vae",
+      "label": "MiniMax Music 3 DAV",
+      "kind": "model",
+      "folder": "vae",
+      "filenames": ["minimax_music3_dav.safetensors"],
+      "requiredFor": ["music"]
+    },
+    {
       "id": "h3-planner-llm",
       "label": "LLM locale del planner",
       "kind": "model",

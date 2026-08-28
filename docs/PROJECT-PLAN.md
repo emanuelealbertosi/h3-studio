@@ -426,6 +426,17 @@ Legenda: `[x]` completato e verificato; `[~]` parziale o presente solo a livello
 - [ ] Firebase Hosting/Auth/Firestore opzionali.
 - [ ] Pairing sicuro UI ospitata ↔ bridge locale.
 
+### Milestone 10 — Audio Studio
+
+- [x] Modalità Audio nello Studio, associata al progetto e coerente con Video/Immagini.
+- [x] Higgs Audio v3 TTS locale con voci installate e cloning one-shot da Libreria/upload.
+- [x] Processo Higgs effimero con Stop e terminazione garantita in `finally` dopo successo, errore o cancellazione.
+- [x] MiniMax Music 3 via ComfyUI con caption, lyrics, durata, seed, progresso e decode tiled.
+- [x] Output persistenti, player, download, tempo di esecuzione e registrazione in Libreria.
+- [x] Configurazione Admin separata per TTS e Music e manifest dei modelli Music.
+- [ ] Aggiungere routing esplicito TTS/Music alla Chat multimodale.
+- [ ] Collaudare voice clone italiano e una generazione Music lunga su GPU reale.
+
 ### Funzioni mancanti nel piano originario, ora esplicitate
 
 - Varianti derivate immutabili per evitare che Face Refine o Upscale sovrascrivano l'originale.

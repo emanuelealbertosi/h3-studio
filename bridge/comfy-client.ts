@@ -166,6 +166,13 @@ export class ComfyClient {
     );
   }
 
+  async freeMemory(unloadModels = true) {
+    await this.requestVoid("/free", {
+      unload_models: unloadModels,
+      free_memory: true,
+    });
+  }
+
   async history(maxItems = 50): Promise<ComfyHistory> {
     const safeMaxItems = Math.min(200, Math.max(1, Math.trunc(maxItems)));
     return this.requestJson<ComfyHistory>(
