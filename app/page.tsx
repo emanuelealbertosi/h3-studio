@@ -3706,7 +3706,14 @@ function AdminPanel() {
       setMessage(payload.message ?? "Configurazione salvata");
       return true;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Salvataggio installazione fallito");
+      const failureMessage = error instanceof Error
+        ? error.message
+        : "Salvataggio installazione fallito";
+      setMessage(failureMessage);
+      setSaveNotice({
+        kind: "error",
+        text: `Salvataggio collegamento/workflow fallito: ${failureMessage}`,
+      });
       return false;
     } finally {
       if (manageBusy) setSaving(false);
