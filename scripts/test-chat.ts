@@ -122,6 +122,9 @@ try {
   assert.match(server, /\/api\/chat\/conversations\/:conversationId\/regenerate/);
   assert.match(server, /preserveMedia/);
   assert.match(server, /deleteChatMedia/);
+  assert.match(server, /external-media\/:mediaId\/rename/);
+  assert.match(server, /image-jobs\/:jobId\/candidates\/:candidateIndex\/rename/);
+  assert.match(server, /jobs\/:jobId\/candidates\/:candidateIndex\/rename/);
   assert.match(server, /await comfy\.chatUnload\(\)\.catch/);
   assert.ok((server.match(/await comfy\.chatUnload\(\)\.catch/g) ?? []).length >= 5);
   assert.match(service, /durationSeconds: 10/);

@@ -1968,6 +1968,34 @@ a:focus-visible {
   transition: 140ms ease;
 }
 
+.media-rename-button {
+  position: absolute;
+  top: 9px;
+  right: 49px;
+  z-index: 5;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(215, 255, 82, .34);
+  border-radius: 9px;
+  background: rgba(10, 11, 13, .78);
+  color: var(--accent);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: 140ms ease;
+}
+.media-rename-button:hover:not(:disabled) {
+  border-color: rgba(215, 255, 82, .75);
+  background: rgba(66, 76, 25, .88);
+  color: #fff;
+  transform: translateY(-1px);
+}
+.media-rename-button:disabled { cursor: wait; opacity: .45; }
 .video-trash-button:hover:not(:disabled) {
   border-color: rgba(255, 112, 112, 0.75);
   background: rgba(118, 28, 35, 0.88);

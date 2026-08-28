@@ -182,6 +182,7 @@ type ImagePickerOutput = {
 
 type ImagePickerCandidate = {
   index: number;
+  displayName?: string | null;
   status: string;
   output: ImagePickerOutput | null;
   projectLinks?: Array<
@@ -222,6 +223,7 @@ type AssetLibraryImage = {
   tag: ImageProjectTag;
   projectName?: string | null;
   source: "image-studio" | "legacy";
+  assetId?: string;
   jobId?: string;
   candidateIndex?: number;
   referenceId?: string;
@@ -624,6 +626,7 @@ type RemoteJob = {
   candidates: Array<{
     index: number;
     seed: number;
+    displayName?: string | null;
     promptId: string | null;
     status: CandidateStatus | "prepared";
     phaseLabel?: string;
@@ -1800,6 +1803,7 @@ function MediaLibraryPanel({
   const [montages, setMontages] = useState<TimelineDetail[]>([]);
   const [message, setMessage] = useState("Caricamento libreria media…");
   const [deletingVideo, setDeletingVideo] = useState<string | null>(null);
+  const [renamingMedia, setRenamingMedia] = useState<string | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -1903,6 +1907,90 @@ function MediaLibraryPanel({
     }
   }
 
+  async function renameTimeline(timeline: TimelineDetail) {
+    const name = window.prompt("Nuovo nome del montaggio", timeline.name)?.trim();
+    if (!name || name === timeline.name) return;
+    setRenamingMedia(`timeline:${timeline.id}`);
+    try {
+      const response = await fetch(`${bridgeUrl}/api/timelines/${timeline.id}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const payload = await response.json() as { timeline?: TimelineDetail; error?: string };
+      if (!response.ok || !payload.timeline) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+      setMontages((current) => current.map((item) => item.id === timeline.id ? payload.timeline! : item));
+      setMessage(`Montaggio rinominato “${payload.timeline.name}”`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Rinomina montaggio fallita");
+    } finally {
+      setRenamingMedia(null);
+    }
+  }
+  async function renameCreativeAsset(asset: CreativeAsset) {
+    const name = window.prompt("Nuovo nome dell'asset", asset.name)?.trim();
+    if (!name || name === asset.name) return;
+    setRenamingMedia(`creative:${asset.id}`);
+    try {
+      const response = await fetch(`${bridgeUrl}/api/library/${asset.id}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const payload = await response.json() as { asset?: CreativeAsset; error?: string };
+      if (!response.ok || !payload.asset) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+      setAssets((current) => current.map((item) => item.id === asset.id ? payload.asset! : item));
+      setMessage(`Asset rinominato “${payload.asset.name}”`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Rinomina asset fallita");
+    } finally {
+      setRenamingMedia(null);
+    }
+  }
+
+  async function renameExternalMedia(asset: ExternalMediaAsset) {
+    const name = window.prompt("Nuovo nome del media", asset.originalName)?.trim();
+    if (!name || name === asset.originalName) return;
+    setRenamingMedia(`external:${asset.id}`);
+    try {
+      const response = await fetch(`${bridgeUrl}/api/external-media/${asset.id}/rename`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const payload = await response.json() as { asset?: ExternalMediaAsset; error?: string };
+      if (!response.ok || !payload.asset) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+      setExternalAssets((current) => current.map((item) => item.id === asset.id ? payload.asset! : item));
+      setMessage(`Media rinominato “${payload.asset.originalName}”`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Rinomina media fallita");
+    } finally {
+      setRenamingMedia(null);
+    }
+  }
+
+  async function renameVideo(job: RemoteJob, candidate: RemoteJob["candidates"][number]) {
+    const currentName = candidate.displayName ?? `Video ${job.id.slice(0, 8)} · candidato ${candidate.index}`;
+    const name = window.prompt("Nuovo nome del video", currentName)?.trim();
+    if (!name || name === currentName) return;
+    const key = `video:${job.id}:${candidate.index}`;
+    setRenamingMedia(key);
+    try {
+      const response = await fetch(`${bridgeUrl}/api/jobs/${job.id}/candidates/${candidate.index}/rename`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const payload = await response.json() as { job?: RemoteJob; error?: string };
+      if (!response.ok || !payload.job) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+      setJobs((current) => current.map((item) => item.id === job.id ? payload.job! : item));
+      setMessage(`Video rinominato “${name}”`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Rinomina video fallita");
+    } finally {
+      setRenamingMedia(null);
+    }
+  }
   const videos = jobs.flatMap((job) =>
     job.candidates.filter((candidate) => candidate.output).map((candidate) => ({ job, candidate })),
   );
@@ -1920,6 +2008,7 @@ function MediaLibraryPanel({
             <article key={timeline.id}>
               <div className="media-library-preview">
                 {timeline.clips[0] ? <video muted playsInline preload="metadata" src={`${bridgeUrl}${timeline.clips[0].output.mediaPath}`} /> : <span>≋</span>}
+                <button aria-label={`Rinomina ${timeline.name}`} className="media-rename-button" disabled={renamingMedia === `timeline:${timeline.id}`} onClick={() => void renameTimeline(timeline)} title="Rinomina montaggio" type="button">✎</button>
               </div>
               <div><strong>{timeline.name}</strong><small>{timeline.projectName} · {timeline.clipCount} clip</small></div>
               <button onClick={() => onOpenMontage(timeline.projectId, timeline.id)} type="button">Apri montaggio</button>
@@ -1934,7 +2023,10 @@ function MediaLibraryPanel({
         <div className="media-library-grid">
           {assets.map((asset) => (
             <article key={asset.id}>
-              <div className="media-library-preview">{asset.hero ? <img alt="" src={`${bridgeUrl}${asset.hero.mediaPath}`} /> : <span>{asset.kind === "character" ? "◎" : "◇"}</span>}</div>
+              <div className="media-library-preview">
+                {asset.hero ? <img alt="" src={`${bridgeUrl}${asset.hero.mediaPath}`} /> : <span>{asset.kind === "character" ? "◎" : "◇"}</span>}
+                <button aria-label={`Rinomina ${asset.name}`} className="media-rename-button" disabled={renamingMedia === `creative:${asset.id}`} onClick={() => void renameCreativeAsset(asset)} title="Rinomina asset" type="button">✎</button>
+              </div>
               <div><strong>{asset.name}</strong><small>{asset.referenceCount} reference</small></div>
               <button disabled={!asset.referenceCount} onClick={() => void useAsset(asset)} type="button">Usa nello Studio</button>
             </article>
@@ -1956,6 +2048,7 @@ function MediaLibraryPanel({
                 ) : (
                   <audio controls preload="metadata" src={`${bridgeUrl}${asset.mediaPath}`} />
                 )}
+                <button aria-label={`Rinomina ${asset.originalName}`} className="media-rename-button" disabled={renamingMedia === `external:${asset.id}`} onClick={() => void renameExternalMedia(asset)} title="Rinomina media" type="button">✎</button>
                 <button
                   aria-label={`Rimuovi ${asset.originalName} dalla Libreria`}
                   className="video-trash-button"
@@ -1987,6 +2080,7 @@ function MediaLibraryPanel({
             <article key={`${job.id}-${candidate.index}`}>
               <div className="media-library-preview">
                 <video muted playsInline preload="metadata" src={`${bridgeUrl}${candidate.output!.mediaPath}`} />
+                <button aria-label={`Rinomina video ${candidate.index}`} className="media-rename-button" disabled={renamingMedia === `video:${job.id}:${candidate.index}`} onClick={() => void renameVideo(job, candidate)} title="Rinomina video" type="button">✎</button>
                 <button
                   aria-label={`Elimina candidato ${candidate.index}`}
                   className="video-trash-button"
@@ -1998,7 +2092,7 @@ function MediaLibraryPanel({
                   🗑
                 </button>
               </div>
-              <div><strong>{job.projectName ?? "Senza progetto"}</strong><small>{job.id.slice(0, 8)} · candidato {candidate.index}</small></div>
+              <div><strong>{candidate.displayName ?? `Video ${job.id.slice(0, 8)} · candidato ${candidate.index}`}</strong><small>{job.projectName ?? "Senza progetto"}</small></div>
               <button onClick={() => onUseVideo(job, candidate)} type="button">
                 Manda a Studio
                 <span>Allegato video</span>
@@ -2030,6 +2124,7 @@ function AssetLibraryPanel({
   const [previewImage, setPreviewImage] = useState<AssetLibraryImage | null>(null);
   const [previewZoomed, setPreviewZoomed] = useState(false);
   const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
+  const [renamingImageId, setRenamingImageId] = useState<string | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -2106,7 +2201,7 @@ function AssetLibraryPanel({
         seen.add(key);
         collected.push({
           id: `generated:${job.id}:${candidate.index}`,
-          name: `Immagine ${job.id.slice(0, 8)} · candidato ${candidate.index}`,
+          name: candidate.displayName ?? `Immagine ${job.id.slice(0, 8)} · candidato ${candidate.index}`,
           detail: job.prompt,
           file,
           mediaPath: candidate.output.mediaPath,
@@ -2135,6 +2230,7 @@ function AssetLibraryPanel({
           height: reference.height,
           tag: asset.kind,
           source: "legacy",
+          assetId: asset.id,
           referenceId: reference.id,
         });
       }
@@ -2184,6 +2280,43 @@ function AssetLibraryPanel({
     setPreviewImage(image);
   }
 
+  async function renameAssetImage(image: AssetLibraryImage) {
+    const currentName = image.source === "legacy"
+      ? legacyAssets.find((asset) => asset.id === image.assetId)?.name ?? image.name
+      : image.name;
+    const name = window.prompt("Nuovo nome dell'immagine", currentName)?.trim();
+    if (!name || name === currentName) return;
+    setRenamingImageId(image.id);
+    try {
+      if (image.source === "image-studio" && image.jobId && image.candidateIndex !== undefined) {
+        const response = await fetch(`${bridgeUrl}/api/image-jobs/${image.jobId}/candidates/${image.candidateIndex}/rename`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        const payload = await response.json() as { job?: ImagePickerJob; error?: string };
+        if (!response.ok || !payload.job) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+        setImageJobs((current) => current.map((job) => job.id === image.jobId ? payload.job! : job));
+      } else if (image.assetId) {
+        const response = await fetch(`${bridgeUrl}/api/library/${image.assetId}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        const payload = await response.json() as { asset?: CreativeAsset; error?: string };
+        if (!response.ok || !payload.asset) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+        setLegacyAssets((current) => current.map((asset) => asset.id === image.assetId ? payload.asset! : asset));
+      } else {
+        throw new Error("Origine dell'asset non riconosciuta");
+      }
+      if (previewImage?.id === image.id) setPreviewImage(null);
+      setMessage(`Immagine rinominata “${name}”`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Rinomina immagine fallita");
+    } finally {
+      setRenamingImageId(null);
+    }
+  }
   async function deleteAssetImage(image: AssetLibraryImage) {
     const confirmed = window.confirm(
       `Eliminare definitivamente “${image.name}” dagli Assets? Non sarà più disponibile nei progetti e nei picker dello Studio.`,
@@ -2308,6 +2441,7 @@ function AssetLibraryPanel({
                   <p>{image.detail}</p>
                 </button>
                 <div className="asset-library-card-actions">
+                  <button aria-label={`Rinomina ${image.name}`} disabled={renamingImageId === image.id} onClick={() => void renameAssetImage(image)} title="Rinomina" type="button">{renamingImageId === image.id ? "…" : "✎"}</button>
                   <button
                     aria-label={`Ingrandisci ${image.name}`}
                     onClick={() => openImagePreview(image)}

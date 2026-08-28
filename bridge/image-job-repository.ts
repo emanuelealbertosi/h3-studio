@@ -109,6 +109,7 @@ type ImageCandidateRow = {
   job_id: string;
   candidate_index: number;
   seed: string;
+  display_name: string | null;
   filename_prefix: string;
   prompt_id: string | null;
   queue_number: number | null;
@@ -145,6 +146,13 @@ type ImageProjectLinkRow = {
   updated_at: string;
 };
 
+function displayName(value: unknown) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized || normalized.length > 120) {
+    throw new Error("Il nome dell'immagine deve contenere da 1 a 120 caratteri");
+  }
+  return normalized;
+}
 function outputFromRow(row: ImageCandidateRow) {
   if (!row.output_filename || !row.output_type) return null;
   const subfolder = row.output_subfolder ?? "";
@@ -433,6 +441,7 @@ export class ImageJobRepository {
       candidates: candidates.map((candidate) => ({
         index: candidate.candidate_index,
         seed: Number(candidate.seed),
+        displayName: candidate.display_name,
         filenamePrefix: candidate.filename_prefix,
         promptId: candidate.prompt_id,
         queueNumber: candidate.queue_number,
@@ -517,6 +526,15 @@ export class ImageJobRepository {
       .run(projectId, jobId, candidateIndex);
     if (result.changes !== 1) throw new Error("Associazione immagine-progetto non trovata");
     return this.get(jobId)!;
+  }
+
+  renameCandidate(jobId: string, candidateIndex: number, value: unknown) {
+    const result = this.database
+      .prepare(`UPDATE image_candidates SET display_name = ?
+                WHERE job_id = ? AND candidate_index = ?`)
+      .run(displayName(value), jobId, candidateIndex);
+    if (result.changes !== 1) throw new Error("Candidato immagine non trovato");
+    return this.get(jobId);
   }
 
   deleteCandidate(jobId: string, candidateIndex: number) {

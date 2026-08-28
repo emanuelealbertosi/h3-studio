@@ -576,4 +576,11 @@ export const JOB_DATABASE_MIGRATIONS = [
        ON audio_jobs(status)`,
     ],
   },
+  {
+    version: 22,
+    statements: [
+      `ALTER TABLE candidates ADD COLUMN display_name TEXT`,
+      `ALTER TABLE image_candidates ADD COLUMN display_name TEXT`,
+    ],
+  },
 ] as const;

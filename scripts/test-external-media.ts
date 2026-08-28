@@ -42,6 +42,9 @@ try {
   assert.equal(duplicate.file, first.file);
   assert.equal(external.count(), 1);
   assert.equal(external.list()[0].originalName, "Portrait.png");
+  const renamed = external.rename(first.id, "Ritratto principale");
+  assert.equal(renamed.originalName, "Ritratto principale");
+  assert.equal(renamed.file, first.file);
 
   const database = new DatabaseSync(jobs.databasePath);
   const now = new Date().toISOString();
@@ -118,6 +121,14 @@ try {
       engine_profile TEXT NOT NULL DEFAULT 'standard'
         CHECK (engine_profile IN ('standard', 'fast')),
       pdd_file TEXT
+    ) STRICT;
+    CREATE TABLE candidates (
+      job_id TEXT NOT NULL,
+      candidate_index INTEGER NOT NULL
+    ) STRICT;
+    CREATE TABLE image_candidates (
+      job_id TEXT NOT NULL,
+      candidate_index INTEGER NOT NULL
     ) STRICT;
   `);
   const migrationStamp = new Date().toISOString();

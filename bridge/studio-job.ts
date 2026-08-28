@@ -89,6 +89,7 @@ export type StudioJob = {
   candidates: Array<{
     index: number;
     seed: number;
+    displayName: string | null;
     filenamePrefix: string;
     promptId: string | null;
     queueNumber: number | null;

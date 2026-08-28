@@ -316,6 +316,8 @@ try {
   assert.equal(storedComposition.aspectFormat, "16:9");
   assert.equal(storedComposition.width, 1792);
   assert.equal(storedComposition.height, 1008);
+  const renamedComposition = images.renameCandidate(preparedComposition.id, 1, "Turnaround Elara");
+  assert.equal(renamedComposition?.candidates[0].displayName, "Turnaround Elara");
   await prepareRuntime.update({
     ...DEFAULT_RUNTIME_SETTINGS,
     krea: {

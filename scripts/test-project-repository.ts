@@ -91,6 +91,8 @@ try {
     )
     .run(now, now);
   database.close();
+  const renamedJob = jobs.renameCandidate("test-job", 1, "Duello del drago");
+  assert.equal(renamedJob?.candidates[0].displayName, "Duello del drago");
 
   const projects = new ProjectRepository(jobs.databasePath);
   try {

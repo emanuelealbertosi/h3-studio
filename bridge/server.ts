@@ -428,6 +428,18 @@ app.get("/api/external-media", async () => ({
   assets: externalMedia.list(),
 }));
 
+app.post<{ Params: { mediaId: string }; Body: { name?: string } }>(
+  "/api/external-media/:mediaId/rename",
+  async (request, reply) => {
+    try {
+      return { ok: true, asset: externalMedia.rename(request.params.mediaId, request.body?.name) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Rinomina media esterno fallita";
+      return reply.status(400).send({ ok: false, error: message });
+    }
+  },
+);
+
 app.post<{ Params: { mediaId: string } }>(
   "/api/external-media/:mediaId/delete",
   async (request, reply) => {
@@ -964,6 +976,22 @@ app.post<{
   }
 });
 
+app.post<{ Params: { jobId: string; candidateIndex: string }; Body: { name?: string } }>(
+  "/api/image-jobs/:jobId/candidates/:candidateIndex/rename",
+  async (request, reply) => {
+    try {
+      const candidateIndex = Number(request.params.candidateIndex);
+      if (!Number.isInteger(candidateIndex) || candidateIndex < 1 || candidateIndex > 4) {
+        return reply.status(400).send({ ok: false, error: "Candidato immagine non valido" });
+      }
+      return { ok: true, job: imageJobRepository.renameCandidate(request.params.jobId, candidateIndex, request.body?.name) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Rinomina immagine fallita";
+      return reply.status(400).send({ ok: false, error: message });
+    }
+  },
+);
+
 app.post<{ Params: { jobId: string; candidateIndex: string } }>(
   "/api/image-jobs/:jobId/candidates/:candidateIndex/delete",
   async (request, reply) => {
@@ -1067,6 +1095,22 @@ app.get<{ Params: { jobId: string; candidateIndex: string } }>(
       (item) => item.sourceCandidateIndex === Number(request.params.candidateIndex),
     ),
   }),
+);
+
+app.post<{ Params: { jobId: string; candidateIndex: string }; Body: { name?: string } }>(
+  "/api/jobs/:jobId/candidates/:candidateIndex/rename",
+  async (request, reply) => {
+    try {
+      const candidateIndex = Number(request.params.candidateIndex);
+      if (!Number.isInteger(candidateIndex) || candidateIndex < 1 || candidateIndex > 4) {
+        return reply.status(400).send({ ok: false, error: "Candidato video non valido" });
+      }
+      return { ok: true, job: jobRepository.renameCandidate(request.params.jobId, candidateIndex, request.body?.name) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Rinomina video fallita";
+      return reply.status(400).send({ ok: false, error: message });
+    }
+  },
 );
 
 app.post<{ Params: { jobId: string; candidateIndex: string } }>(

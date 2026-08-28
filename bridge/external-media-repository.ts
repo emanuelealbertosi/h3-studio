@@ -167,6 +167,15 @@ export class ExternalMediaRepository {
     );
   }
 
+  rename(id: string, value: unknown) {
+    const name = requiredText(value, "Nome", 120);
+    const result = this.database
+      .prepare("UPDATE external_media SET original_name = ?, updated_at = ? WHERE id = ?")
+      .run(name, new Date().toISOString(), id);
+    if (result.changes !== 1) throw new Error("Media esterno non trovato");
+    return this.get(id)!;
+  }
+
   delete(id: string) {
     const result = this.database.prepare("DELETE FROM external_media WHERE id = ?").run(id);
     if (result.changes !== 1) throw new Error("Media esterno non trovato");

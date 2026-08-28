@@ -64,6 +64,7 @@ type CandidateRow = {
   job_id: string;
   candidate_index: number;
   seed: string;
+  display_name: string | null;
   filename_prefix: string;
   prompt_id: string | null;
   queue_number: number | null;
@@ -77,6 +78,14 @@ type CandidateRow = {
   created_at: string;
   updated_at: string;
 };
+
+function displayName(value: unknown) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized || normalized.length > 120) {
+    throw new Error("Il nome del media deve contenere da 1 a 120 caratteri");
+  }
+  return normalized;
+}
 
 function mediaFromRow(row: CandidateRow): MediaOutput | null {
   if (!row.output_filename || !row.output_type) return null;
@@ -397,6 +406,15 @@ export class JobRepository {
       );
   }
 
+  renameCandidate(jobId: string, candidateIndex: number, value: unknown) {
+    const result = this.database
+      .prepare(`UPDATE candidates SET display_name = ?
+                WHERE job_id = ? AND candidate_index = ?`)
+      .run(displayName(value), jobId, candidateIndex);
+    if (result.changes !== 1) throw new Error("Candidato video non trovato");
+    return this.get(jobId);
+  }
+
   candidateSnapshot(jobId: string, candidateIndex: number) {
     const row = this.database
       .prepare(
@@ -410,6 +428,7 @@ export class JobRepository {
       candidate: {
         index: row.candidate_index,
         seed: Number(row.seed),
+        displayName: row.display_name,
         status: row.status,
         apiPrompt: JSON.parse(row.api_prompt_json) as ComfyApiPrompt,
         output: mediaFromRow(row),
@@ -478,6 +497,7 @@ export class JobRepository {
       candidates: candidates.map((candidate) => ({
         index: candidate.candidate_index,
         seed: Number(candidate.seed),
+        displayName: candidate.display_name,
         filenamePrefix: candidate.filename_prefix,
         promptId: candidate.prompt_id,
         queueNumber: candidate.queue_number,
