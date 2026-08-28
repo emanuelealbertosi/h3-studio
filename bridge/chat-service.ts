@@ -5,17 +5,20 @@ import {
   type ChatAttachment,
 } from "./chat-repository.js";
 import type { ImageStudioService } from "./image-studio-service.js";
+import type { AudioStudioService } from "./audio-studio-service.js";
 import type { RuntimeSettingsStore } from "./runtime-settings.js";
 import type { StudioJobService } from "./studio-job.js";
 
 type PlannedAction = {
-  type: "generate_video" | "generate_image" | "edit_image" | "generate_anima";
+  type: "generate_video" | "generate_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
   prompt: string;
   videoMode?: "T2V" | "I2V" | "R2V" | "VIDEO EXTENSION" | "VIDEO EDITING";
   aspect?: "16:9" | "9:16" | "1:1";
+  durationSeconds?: number;
+  instrumental?: boolean;
 };
 
-type ChatRoute = "auto" | "video" | "krea" | "anima" | "edit";
+type ChatRoute = "auto" | "video" | "krea" | "anima" | "edit" | "tts" | "music";
 
 const RECENT_MESSAGE_COUNT = 10;
 const COMPACTION_TRIGGER_COUNT = 16;
@@ -81,7 +84,7 @@ function normalizePlan(text: string): { reply: string; title: string | null; act
   if (!reply) throw new Error("Risposta Chat vuota");
   if (parsed.action === null || parsed.action === undefined) return { reply, title, action: null };
   if (!isRecord(parsed.action)) throw new Error("Azione Chat non valida");
-  const allowed = new Set(["generate_video", "generate_image", "edit_image", "generate_anima"]);
+  const allowed = new Set(["generate_video", "generate_image", "edit_image", "generate_anima", "generate_tts", "generate_music"]);
   const type = typeof parsed.action.type === "string" ? parsed.action.type : "";
   const prompt = typeof parsed.action.prompt === "string" ? parsed.action.prompt.trim() : "";
   if (!allowed.has(type) || prompt.length < 3 || prompt.length > 20_000) {
@@ -93,11 +96,16 @@ function normalizePlan(text: string): { reply: string; title: string | null; act
   const aspect = parsed.action.aspect === "9:16" || parsed.action.aspect === "1:1"
     ? parsed.action.aspect
     : "16:9";
-  return { reply, title, action: { type: type as PlannedAction["type"], prompt, videoMode, aspect } };
+  const requestedDuration = Number(parsed.action.durationSeconds);
+  const durationSeconds = Number.isFinite(requestedDuration)
+    ? Math.min(360, Math.max(5, Math.round(requestedDuration)))
+    : undefined;
+  const instrumental = parsed.action.instrumental !== false;
+  return { reply, title, action: { type: type as PlannedAction["type"], prompt, videoMode, aspect, durationSeconds, instrumental } };
 }
 
 function normalizeRoute(value: unknown): ChatRoute {
-  return value === "video" || value === "krea" || value === "anima" || value === "edit"
+  return value === "video" || value === "krea" || value === "anima" || value === "edit" || value === "tts" || value === "music"
     ? value
     : "auto";
 }
@@ -110,7 +118,11 @@ export function routeAction(action: PlannedAction | null, route: ChatRoute) {
       ? "generate_image"
       : route === "anima"
         ? "generate_anima"
-        : "edit_image";
+        : route === "edit"
+          ? "edit_image"
+          : route === "tts"
+            ? "generate_tts"
+            : "generate_music";
   return { ...action, type: forcedType } as PlannedAction;
 }
 
@@ -124,7 +136,11 @@ function routeInstruction(route: ChatRoute) {
       ? "generate_image"
       : route === "anima"
         ? "generate_anima"
-        : "edit_image";
+        : route === "edit"
+          ? "edit_image"
+          : route === "tts"
+            ? "generate_tts"
+            : "generate_music";
   return `ROUTE_OVERRIDE=${route}. If and only if the user explicitly requests media creation, use action type ${action}. The selector alone never authorizes a render.`;
 }
 
@@ -154,13 +170,15 @@ const CHAT_SYSTEM_PROMPT = `You are H3 Studio, a concise Italian-speaking creati
 Always return exactly one JSON object and no markdown:
 {"reply":"natural Italian reply","title":"concise 3-7 word Italian conversation title","action":null}
 or
-{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|edit_image|generate_anima","prompt":"complete generation prompt in English","videoMode":"T2V|I2V|R2V|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1"}}
+{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1","durationSeconds":30,"instrumental":true}}
 
 Only create an action when the user explicitly asks to generate, animate, continue or edit media. Questions and ordinary conversation use action:null.
 The title describes the main topic, never starts with "Chat" and never contains quotation marks.
 For video default to 10 seconds, one candidate, 0.5 MP and the FAST 8-step engine; these execution values are enforced by the server and must not be invented in JSON.
 Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures. Use I2V when one attached picture is the start frame, R2V for broader references, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for editing one.
-Write rich, production-ready prompts in English. When attachments are present, refer to them as Picture 1, Picture 2, Video 1 or Audio 1 in attachment order. Never invent file paths, model names, LoRAs, workflow nodes or numeric engine settings.`;
+Use generate_tts when the user asks for speech, narration, dubbing, reading or voice cloning. For TTS, prompt is the exact text to speak in the requested language, not an English description. An attached Audio 1 is the voice reference and is transcribed automatically.
+Use generate_music when the user asks for a song, soundtrack, instrumental or music. Put the musical request in prompt, set durationSeconds when requested (default 30), and set instrumental:false only when vocals or lyrics are wanted.
+Write rich, production-ready prompts in English except the exact spoken TTS script. When attachments are present, refer to them as Picture 1, Picture 2, Video 1 or Audio 1 in attachment order. Never invent file paths, model names, LoRAs, workflow nodes or numeric engine settings.`;
 
 const MEMORY_SYSTEM_PROMPT = `You maintain compact long-term memory for one H3 Studio creative project.
 Return plain Italian text only, no JSON and no markdown. Merge the existing memory with the transcript.
@@ -175,6 +193,7 @@ export class ChatService {
     private readonly runtimeSettings: RuntimeSettingsStore,
     private readonly studioJobs: StudioJobService,
     private readonly imageStudio: ImageStudioService,
+    private readonly audioStudio: AudioStudioService,
   ) {}
 
   conversations(projectId?: string | null) {
@@ -235,7 +254,9 @@ export class ChatService {
     await this.comfy.chatUnload().catch(() => undefined);
     const job = source.action.type === "generate_video"
       ? await this.studioJobs.regenerate(source.action.jobId, 1, prompt)
-      : await this.imageStudio.regenerate(source.action.jobId, 1, prompt);
+      : source.action.type === "generate_tts" || source.action.type === "generate_music"
+        ? await this.audioStudio.regenerate(source.action.jobId, prompt)
+        : await this.imageStudio.regenerate(source.action.jobId, 1, prompt);
     if (!job?.id) throw new Error("Rigenerazione non avviata");
     const assistant = this.repository.add({
       projectId: conversation.projectId,
@@ -422,7 +443,20 @@ export class ChatService {
     for (const source of this.repository.recentMediaSources(projectId, conversationId)) {
       const action = source.action;
       if (action?.status === "started" && action.jobId) {
-        if (action.type === "generate_video") {
+        if (action.type === "generate_tts" || action.type === "generate_music") {
+          const job = await this.audioStudio.get(action.jobId).catch(() => null);
+          if (job?.output) {
+            return [{
+              kind: "audio" as const,
+              file: job.output.file,
+              name: `Audio ${job.id.slice(0, 8)} · ${job.kind === "tts" ? "voce" : "musica"}`,
+              mediaPath: job.output.mediaPath,
+              duration: job.durationSeconds,
+              hasAudio: true,
+              remembered: true,
+            }];
+          }
+        } else if (action.type === "generate_video") {
           const job = await this.studioJobs.get(action.jobId).catch(() => null);
           const candidate = job?.candidates.find((item) =>
             item.index === job.selectedCandidateIndex && item.status === "ready" && item.output,
@@ -472,6 +506,27 @@ export class ChatService {
     attachments: ChatAttachment[],
   ): Promise<ChatActionRecord> {
     try {
+      if (plan.type === "generate_music") {
+        const durationSeconds = plan.durationSeconds ?? 30;
+        const musicPlan = await this.audioStudio.planMusic({
+          idea: plan.prompt,
+          instrumental: plan.instrumental !== false,
+          durationSeconds,
+        });
+        const job = await this.audioStudio.submit({
+          kind: "music", projectId, caption: musicPlan.caption, lyrics: musicPlan.lyrics, durationSeconds,
+        });
+        return { type: plan.type, prompt: musicPlan.caption, jobId: job?.id, status: "started" };
+      }
+      if (plan.type === "generate_tts") {
+        await this.comfy.chatUnload().catch(() => undefined);
+        const reference = attachments.find((item) => item.kind === "audio");
+        const job = await this.audioStudio.submit({
+          kind: "tts", projectId, text: plan.prompt,
+          referenceFile: reference?.file,
+        });
+        return { type: plan.type, prompt: plan.prompt, jobId: job?.id, status: "started" };
+      }
       await this.comfy.chatUnload();
       if (plan.type === "generate_video") {
         const pictures = attachments.filter((item) => item.kind === "picture");

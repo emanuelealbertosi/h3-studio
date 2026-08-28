@@ -14,7 +14,7 @@ export type ChatAttachment = {
 };
 
 export type ChatActionRecord = {
-  type: "generate_video" | "generate_image" | "edit_image" | "generate_anima";
+  type: "generate_video" | "generate_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
   prompt: string;
   jobId?: string;
   status: "started" | "failed";
@@ -345,7 +345,11 @@ export class ChatRepository {
     return rows.flatMap((row) => {
       const action = parseJson<ChatActionRecord | null>(row.action_json, null);
       if (!action?.jobId || action.status !== "started") return [];
-      const kind = action.type === "generate_video" ? "video" as const : "image" as const;
+      const kind = action.type === "generate_video"
+        ? "video" as const
+        : action.type === "generate_tts" || action.type === "generate_music"
+          ? "audio" as const
+          : "image" as const;
       const key = kind + ":" + action.jobId;
       if (seen.has(key)) return [];
       seen.add(key);

@@ -137,6 +137,16 @@ const studioJobs = new StudioJobService(
   progressTracker,
   jobRepository,
 );
+const audioStudio = new AudioStudioService(
+  comfy,
+  audioJobRepository,
+  runtimeSettings,
+  progressTracker,
+  externalMedia,
+  installSettings.comfyOutputDir,
+  config.dataDir,
+);
+const recoveredAudio = await audioStudio.recover();
 const chatRepository = new ChatRepository(jobRepository.databasePath);
 const chat = new ChatService(
   comfy,
@@ -144,6 +154,7 @@ const chat = new ChatService(
   runtimeSettings,
   studioJobs,
   imageStudio,
+  audioStudio,
 );
 const recoveredCandidates = await studioJobs.recover();
 const postprocess = new PostprocessService(
@@ -155,16 +166,6 @@ const postprocess = new PostprocessService(
 );
 const recoveredVariants = await postprocess.recover();
 const recoveredImages = await imageStudio.recover();
-const audioStudio = new AudioStudioService(
-  comfy,
-  audioJobRepository,
-  runtimeSettings,
-  progressTracker,
-  externalMedia,
-  installSettings.comfyOutputDir,
-  config.dataDir,
-);
-const recoveredAudio = await audioStudio.recover();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -222,6 +223,7 @@ async function deleteChatMedia(conversationId: string) {
   const references = chat.mediaJobs(conversationId);
   const videoJobs: Array<NonNullable<Awaited<ReturnType<typeof studioJobs.get>>>> = [];
   const imageJobs: Array<NonNullable<Awaited<ReturnType<typeof imageStudio.get>>>> = [];
+  const audioJobs: Array<NonNullable<Awaited<ReturnType<typeof audioStudio.get>>>> = [];
 
   for (const reference of references) {
     if (reference.kind === "video") {
@@ -235,6 +237,15 @@ async function deleteChatMedia(conversationId: string) {
         throw new Error("Attendi la fine di Face/Upscale prima di eliminare i media della Chat");
       }
       videoJobs.push(job);
+      continue;
+    }
+    if (reference.kind === "audio") {
+      const job = await audioStudio.get(reference.jobId);
+      if (!job) continue;
+      if (["prepared", "queued", "loading", "running", "finalizing"].includes(job.status)) {
+        throw new Error("Attendi o interrompi gli audio della Chat prima di eliminarne anche i media");
+      }
+      audioJobs.push(job);
       continue;
     }
     const job = await imageStudio.get(reference.jobId);
@@ -260,9 +271,20 @@ async function deleteChatMedia(conversationId: string) {
       files.push(...deleted.files);
     }
   }
+  for (const job of audioJobs) {
+    const deleted = await audioStudio.delete(job.id);
+    if (deleted.deleted.output) files.push({
+      filename: deleted.deleted.output.filename,
+      subfolder: deleted.deleted.output.subfolder,
+      type: deleted.deleted.output.type,
+    });
+    if (deleted.externalMediaId) {
+      try { externalMedia.delete(deleted.externalMediaId); } catch { /* already removed */ }
+    }
+  }
   const storage = await removeComfyOutputFiles(files);
   return {
-    removedJobs: videoJobs.length + imageJobs.length,
+    removedJobs: videoJobs.length + imageJobs.length + audioJobs.length,
     removedClips,
     ...storage,
   };

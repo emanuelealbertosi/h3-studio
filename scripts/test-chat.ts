@@ -98,15 +98,18 @@ try {
   assert.equal(routeAction({ ...proposedImage, type: "generate_anima" }, "krea")?.type, "generate_image");
   assert.equal(routeAction(proposedImage, "video")?.type, "generate_video");
   assert.equal(routeAction(proposedImage, "edit")?.type, "edit_image");
+  assert.equal(routeAction(proposedImage, "tts")?.type, "generate_tts");
+  assert.equal(routeAction(proposedImage, "music")?.type, "generate_music");
   assert.equal(routeAction(proposedImage, "auto")?.type, "generate_image");
   assert.equal(routeAction(null, "anima"), null);
   assert.equal(shouldRecallMedia("Ora modificala rendendo il cielo rosso"), true);
   assert.equal(shouldRecallMedia("Crea una animazione partendo da questa immagine"), true);
   assert.equal(shouldRecallMedia("Parliamo di regia cinematografica"), false);
 
-  const [server, service, panel, dialog, styles, node, installer, manifest] = await Promise.all([
+  const [server, service, audioService, panel, dialog, styles, node, installer, manifest] = await Promise.all([
     readFile("bridge/server.ts", "utf8"),
     readFile("bridge/chat-service.ts", "utf8"),
+    readFile("bridge/audio-studio-service.ts", "utf8"),
     readFile("app/chat-panel.tsx", "utf8"),
     readFile("app/regenerate-dialog.tsx", "utf8"),
     readFile("app/globals.css", "utf8"),
@@ -129,12 +132,22 @@ try {
   assert.match(service, /recallLatestMedia/);
   assert.match(service, /recentMediaSources/);
   assert.match(service, /generate_anima for anime, manga, illustration, drawing or cartoon-style/);
+  assert.match(service, /generate_tts/);
+  assert.match(service, /generate_music/);
+  assert.match(service, /audioStudio\.planMusic/);
+  assert.match(service, /referenceFile: reference\?\.file/);
+  assert.match(audioService, /Trascrizione reference con Whisper/);
+  assert.match(audioService, /transcribeReference/);
   assert.match(panel, /\(\^\|\\s\)@\$/);
   assert.match(panel, /chat-picker-grid/);
   assert.match(panel, /Crea con/);
   assert.match(panel, /"auto" \| "video" \| "krea" \| "anima" \| "edit"/);
   assert.match(panel, /trackedActions/);
   assert.match(panel, /\/api\/image-jobs\/\$\{action\.jobId\}/);
+  assert.match(panel, /\/api\/audio-jobs\/\$\{action\.jobId\}/);
+  assert.match(panel, /audio\/\*/);
+  assert.match(panel, /Carica dal disco/);
+  assert.match(panel, /Musica H3/);
   assert.match(panel, /cancelAction/);
   assert.match(panel, /chat-render-preview/);
   assert.match(panel, /Interrompi/);

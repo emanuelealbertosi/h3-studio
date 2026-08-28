@@ -4319,6 +4319,16 @@ a:focus-visible {
   object-fit: contain;
   background: #050506;
 }
+.chat-render-preview.audio {
+  min-height: 112px;
+  max-height: none;
+  aspect-ratio: auto;
+  display: grid;
+  align-items: center;
+  padding: 16px;
+}
+.chat-render-preview.audio > audio { width: 100%; }
+.chat-render-preview.audio .progress-overlay { inset: 0; }
 .chat-render-preview .progress-overlay { padding: 20px; }
 .chat-render-preview .progress-overlay > span {
   max-width: min(420px, 82%);
@@ -4346,11 +4356,16 @@ a:focus-visible {
 .chat-route-bar button:disabled,
 .chat-library-button:disabled { cursor: not-allowed; opacity: .38; }
 .chat-route-bar > small { overflow: hidden; color: #686a70; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
-.chat-input-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) 82px; gap: 8px; align-items: end; }
+.chat-input-row { display: grid; grid-template-columns: 40px 40px minmax(0, 1fr) 82px; gap: 8px; align-items: end; }
 .chat-input-row textarea { min-height: 56px; max-height: 180px; resize: vertical; border: 0; outline: 0; padding: 9px 4px; background: transparent; color: var(--ink); font: inherit; font-size: 11px; line-height: 1.5; }
 .chat-library-button,
+.chat-upload-button,
 .chat-send-button { height: 40px; border-radius: 11px; font-size: 9px; font-weight: 850; }
 .chat-library-button { border: 1px solid var(--line); background: #18191c; color: var(--accent); font-size: 19px; }
+.chat-upload-button { border: 1px solid var(--line); display: grid; place-items: center; background: #18191c; color: var(--accent); cursor: pointer; font-size: 17px; }
+.chat-upload-button:hover { border-color: rgba(215, 255, 82, .35); }
+.chat-upload-button:has(input:disabled) { cursor: not-allowed; opacity: .38; }
+.chat-upload-button input { display: none; }
 .chat-send-button { border: 0; background: var(--accent); color: var(--accent-ink); }
 .chat-send-button:disabled { opacity: .35; }
 .chat-composer > small { display: block; margin: 5px 48px 0; color: #67696e; font-size: 7px; }
@@ -4395,7 +4410,7 @@ a:focus-visible {
   .chat-route-bar { grid-template-columns: 1fr; }
   .chat-route-bar > div { overflow-x: auto; }
   .chat-route-bar > small { display: none; }
-  .chat-input-row { grid-template-columns: 38px minmax(0, 1fr); }
+  .chat-input-row { grid-template-columns: 38px 38px minmax(0, 1fr); }
   .chat-send-button { grid-column: 1 / -1; }
   .chat-composer > small { margin-left: 4px; }
   .chat-picker-backdrop { padding: 3vh 10px; }

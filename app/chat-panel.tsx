@@ -16,7 +16,7 @@ type ChatConversation = {
   createdAt: string;
   updatedAt: string;
 };
-type ChatRoute = "auto" | "video" | "krea" | "anima" | "edit";
+type ChatRoute = "auto" | "video" | "krea" | "anima" | "edit" | "tts" | "music";
 type ChatMemory = { active: boolean; summarizedMessages: number; summary: string };
 type ChatTrackedCandidate = {
   index: number;
@@ -29,7 +29,7 @@ type ChatTrackedCandidate = {
 };
 type ChatTrackedJob = {
   id: string;
-  kind: "video" | "image";
+  kind: "video" | "image" | "audio";
   status: string;
   width?: number;
   height?: number;
@@ -54,7 +54,7 @@ type ChatMessage = {
   content: string;
   attachments: Attachment[];
   action: null | {
-    type: "generate_video" | "generate_image" | "edit_image" | "generate_anima";
+    type: "generate_video" | "generate_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
     prompt: string;
     jobId?: string;
     status: "started" | "failed";
@@ -84,6 +84,10 @@ type VideoJob = {
     mediaPath: string;
   } | null }>;
 };
+type AudioJob = {
+  id: string; status: string; phaseLabel?: string | null; progress?: number | null;
+  error?: string | null; output?: { mediaPath: string; filename?: string } | null;
+};
 
 function annotated(output: { filename: string; subfolder: string; type: string }) {
   const path = [output.subfolder, output.filename].filter(Boolean).join("/");
@@ -94,7 +98,30 @@ function actionLabel(type: NonNullable<ChatMessage["action"]>["type"]) {
   if (type === "generate_video") return "Video H3";
   if (type === "generate_anima") return "Immagine Anima";
   if (type === "edit_image") return "Edit Flux.2 Klein";
+  if (type === "generate_tts") return "Voce / TTS Higgs";
+  if (type === "generate_music") return "Musica H3";
   return "Immagine Krea";
+}
+
+function audioAction(type: NonNullable<ChatMessage["action"]>["type"]) {
+  return type === "generate_tts" || type === "generate_music";
+}
+
+function trackedAudioJob(job: AudioJob): ChatTrackedJob {
+  return {
+    id: job.id,
+    kind: "audio",
+    status: job.status,
+    candidates: [{
+      index: 0,
+      status: job.status,
+      phaseLabel: job.phaseLabel,
+      progress: job.progress,
+      progressExact: typeof job.progress === "number",
+      error: job.error,
+      output: job.output,
+    }],
+  };
 }
 
 function terminalCandidate(candidate: ChatTrackedCandidate | undefined) {
@@ -133,7 +160,7 @@ export default function ChatPanel({
   projectName?: string;
   projects: Project[];
   onSelectProject: (projectId: string) => void;
-  onOpenStudio: (kind: "video" | "image") => void;
+  onOpenStudio: (kind: "video" | "image" | "audio") => void;
 }) {
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -156,6 +183,7 @@ export default function ChatPanel({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [library, setLibrary] = useState<Attachment[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("Caricamento Chat locale…");
   const [runtime, setRuntime] = useState<{ ready: boolean; loaded: boolean; error?: string | null } | null>(null);
@@ -168,7 +196,7 @@ export default function ChatPanel({
     .slice(-20), [messages]);
   const trackedActionKey = trackedActions.map((action) => `${action.jobId}:${action.type}`).join("|");
   const renderActive = trackedActions.some((action) => trackedJobActive(jobStates[action.jobId!]));
-  const chatLocked = busy || renderActive || cancellingJobId !== null || deletingConversation || regeneratingAction;
+  const chatLocked = busy || uploadingAttachment || renderActive || cancellingJobId !== null || deletingConversation || regeneratingAction;
 
   useEffect(() => {
     let disposed = false;
@@ -250,13 +278,16 @@ export default function ChatPanel({
     let timer: ReturnType<typeof setTimeout> | null = null;
     const poll = async () => {
       const updates = await Promise.all(trackedActions.map(async (action): Promise<[string, ChatTrackedJob]> => {
-        const kind = action.type === "generate_video" ? "video" : "image";
-        const endpoint = kind === "video" ? `/api/jobs/${action.jobId}` : `/api/image-jobs/${action.jobId}`;
+        const isAudio = audioAction(action.type);
+        const kind: ChatTrackedJob["kind"] = isAudio ? "audio" : action.type === "generate_video" ? "video" : "image";
+        const endpoint = isAudio
+          ? `/api/audio-jobs/${action.jobId}`
+          : kind === "video" ? `/api/jobs/${action.jobId}` : `/api/image-jobs/${action.jobId}`;
         try {
           const response = await fetch(`${bridgeUrl}${endpoint}`, { cache: "no-store" });
-          const payload = await response.json() as { job?: Omit<ChatTrackedJob, "kind">; error?: string };
+          const payload = await response.json() as { job?: Omit<ChatTrackedJob, "kind"> | AudioJob; error?: string };
           if (!response.ok || !payload.job) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
-          return [action.jobId!, { ...payload.job, kind }];
+          return [action.jobId!, isAudio ? trackedAudioJob(payload.job as AudioJob) : { ...payload.job as Omit<ChatTrackedJob, "kind">, kind }];
         } catch (error) {
           return [action.jobId!, {
             id: action.jobId!, kind, status: "failed", candidates: [],
@@ -325,6 +356,36 @@ export default function ChatPanel({
       : [...current, item].slice(0, 8));
     setText((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}@${item.name} `);
     setPickerOpen(false);
+  }
+
+  async function uploadAttachment(files: FileList | null) {
+    const file = files?.[0];
+    if (!file || chatLocked) return;
+    setUploadingAttachment(true);
+    setNotice("Caricamento del media nella Libreria...");
+    try {
+      const body = new FormData();
+      body.append("file", file, file.name);
+      const response = await fetch(`${bridgeUrl}/api/assets/upload?${new URLSearchParams({ projectId })}`, { method: "POST", body });
+      const payload = await response.json() as { asset?: ExternalAsset; error?: string };
+      if (!response.ok || !payload.asset) throw new Error(payload.error ?? "Upload media fallito");
+      addAttachment({
+        id: `external:${payload.asset.id}`,
+        kind: payload.asset.kind,
+        file: payload.asset.file,
+        name: payload.asset.originalName ?? payload.asset.name,
+        mediaPath: payload.asset.mediaPath,
+        width: payload.asset.width,
+        height: payload.asset.height,
+        duration: payload.asset.duration,
+        hasAudio: payload.asset.hasAudio,
+      });
+      setNotice(payload.asset.kind === "audio" ? "Reference audio allegata e salvata in Libreria" : "Media allegato e salvato in Libreria");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Upload media fallito");
+    } finally {
+      setUploadingAttachment(false);
+    }
   }
 
   function selectConversation(conversation: ChatConversation) {
@@ -535,14 +596,18 @@ export default function ChatPanel({
     setCancellingJobId(action.jobId);
     setNotice("Interruzione del job Chat…");
     try {
-      const endpoint = action.type === "generate_video"
-        ? `/api/jobs/${action.jobId}/cancel`
-        : `/api/image-jobs/${action.jobId}/cancel`;
+      const isAudio = audioAction(action.type);
+      const endpoint = isAudio
+        ? `/api/audio-jobs/${action.jobId}/cancel`
+        : action.type === "generate_video" ? `/api/jobs/${action.jobId}/cancel` : `/api/image-jobs/${action.jobId}/cancel`;
       const response = await fetch(`${bridgeUrl}${endpoint}`, { method: "POST" });
-      const payload = await response.json() as { job?: Omit<ChatTrackedJob, "kind">; error?: string };
+      const payload = await response.json() as { job?: Omit<ChatTrackedJob, "kind"> | AudioJob; error?: string };
       if (!response.ok || !payload.job) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
-      const kind = action.type === "generate_video" ? "video" : "image";
-      setJobStates((current) => ({ ...current, [action.jobId!]: { ...payload.job!, kind } }));
+      const kind: ChatTrackedJob["kind"] = isAudio ? "audio" : action.type === "generate_video" ? "video" : "image";
+      setJobStates((current) => ({
+        ...current,
+        [action.jobId!]: isAudio ? trackedAudioJob(payload.job as AudioJob) : { ...payload.job as Omit<ChatTrackedJob, "kind">, kind },
+      }));
       setNotice("Produzione interrotta");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Interruzione fallita");
@@ -554,7 +619,8 @@ export default function ChatPanel({
   const suggestions = useMemo(() => [
     "Creami un video di 10 secondi con…",
     "Genera un'immagine fotorealistica di…",
-    "Crea un'immagine anime di…",
+    "Leggi questo testo con una voce calda…",
+    "Crea una musica cinematografica di 30 secondi…",
   ], []);
   const routes: Array<{ id: ChatRoute; label: string; help: string }> = [
     { id: "auto", label: "Auto", help: "Gemma sceglie in base alla richiesta" },
@@ -562,6 +628,8 @@ export default function ChatPanel({
     { id: "krea", label: "Krea", help: "Forza una immagine fotografica/generale" },
     { id: "anima", label: "Anima", help: "Forza disegno, anime, manga o illustrazione" },
     { id: "edit", label: "Edit", help: "Forza Flux Klein sulle immagini allegate" },
+    { id: "tts", label: "TTS", help: "Voce Higgs; un audio allegato diventa la reference da clonare" },
+    { id: "music", label: "Musica", help: "MiniMax Music con planner Gemma automatico" },
   ];
 
   return (
@@ -655,7 +723,7 @@ export default function ChatPanel({
         {!messages.length && (
           <div className="chat-welcome">
             <span>H3</span><h3>Parlami normalmente.</h3>
-            <p>Posso ragionare con te oppure avviare direttamente Video H3, immagini Krea, edit Flux.2 Klein e immagini Anima. Scegli “Anima” sotto al messaggio quando vuoi garantire un disegno o un’illustrazione.</p>
+            <p>Posso ragionare con te oppure creare Video H3, immagini Krea/Anima, edit Flux, voci TTS con cloning e musica. Per clonare una voce allega un audio dal disco o dalla Libreria e scegli TTS.</p>
             <div>{suggestions.map((suggestion) => <button disabled={chatLocked} key={suggestion} onClick={() => setText(suggestion)} type="button">{suggestion}</button>)}</div>
           </div>
         )}
@@ -691,16 +759,18 @@ export default function ChatPanel({
                         onClick={() => setRegenerateTarget({ messageId: message.id, action })}
                         type="button"
                       >↻ Rigenera</button>}
-                      {action.status === "started" && <button onClick={() => onOpenStudio(action.type === "generate_video" ? "video" : "image")} type="button">Apri nello Studio</button>}
+                      {action.status === "started" && <button onClick={() => onOpenStudio(audioAction(action.type) ? "audio" : action.type === "generate_video" ? "video" : "image")} type="button">Apri nello Studio</button>}
                     </div>
                   </div>
                   {action.jobId && <div
-                    className={`chat-render-preview ${ready ? "ready" : failed ? "failed" : "working"}`}
+                    className={`chat-render-preview ${tracked?.kind === "audio" ? "audio" : ""} ${ready ? "ready" : failed ? "failed" : "working"}`}
                     style={tracked?.kind === "image" && tracked.width && tracked.height ? { aspectRatio: `${tracked.width} / ${tracked.height}` } : undefined}
                   >
-                    {ready && mediaUrl ? tracked?.kind === "video"
-                      ? <video controls playsInline preload="metadata" src={mediaUrl} />
-                      : <a href={mediaUrl} rel="noreferrer" target="_blank"><img alt={candidate?.output?.filename ?? actionLabel(action.type)} src={mediaUrl} /></a>
+                    {ready && mediaUrl ? tracked?.kind === "audio"
+                      ? <audio controls preload="metadata" src={mediaUrl} />
+                      : tracked?.kind === "video"
+                        ? <video controls playsInline preload="metadata" src={mediaUrl} />
+                        : <a href={mediaUrl} rel="noreferrer" target="_blank"><img alt={candidate?.output?.filename ?? actionLabel(action.type)} src={mediaUrl} /></a>
                       : <>
                         <div className="video-noise" />
                         <div className="video-blur" />
@@ -741,6 +811,7 @@ export default function ChatPanel({
         ))}</div>}
         <div className="chat-input-row">
           <button className="chat-library-button" disabled={chatLocked} onClick={() => void loadLibrary()} title="Scegli dalla Libreria" type="button">＋</button>
+          <label className="chat-upload-button" title="Carica dal disco">{uploadingAttachment ? "..." : "↑"}<input accept="image/*,video/*,audio/*" disabled={chatLocked} onChange={(event) => { void uploadAttachment(event.currentTarget.files); event.currentTarget.value = ""; }} type="file" /></label>
           <textarea
             disabled={chatLocked}
             onChange={(event) => { const value = event.target.value; setText(value); if (/(^|\s)@$/.test(value)) void loadLibrary(); }}
@@ -772,7 +843,7 @@ export default function ChatPanel({
         busy={regeneratingAction}
         initialPrompt={regenerateTarget.action.prompt}
         key={`${regenerateTarget.messageId}:${regenerateTarget.action.jobId}`}
-        mediaLabel={regenerateTarget.action.type === "generate_video" ? "video" : "immagine"}
+        mediaLabel={audioAction(regenerateTarget.action.type) ? "audio" : regenerateTarget.action.type === "generate_video" ? "video" : "immagine"}
         onCancel={() => { if (!regeneratingAction) setRegenerateTarget(null); }}
         onConfirm={regenerateChatAction}
         scopeLabel="Generazione Chat · 1 candidato"

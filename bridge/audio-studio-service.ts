@@ -362,6 +362,22 @@ export class AudioStudioService {
     return this.repository.get(job.id)!;
   }
 
+  async regenerate(id: string, promptValue: unknown) {
+    const source = this.repository.get(id);
+    if (!source) throw new Error("Job audio da rigenerare non trovato");
+    const prompt = text(promptValue, source.kind === "tts" ? "Testo TTS" : "Descrizione musica", 1, source.kind === "tts" ? 20_000 : 10_000);
+    if (source.kind === "tts") {
+      return this.submit({
+        kind: "tts", projectId: source.projectId, text: prompt, voice: source.voice,
+        referenceFile: source.referenceFile, referenceText: source.referenceText,
+      });
+    }
+    return this.submit({
+      kind: "music", projectId: source.projectId, caption: prompt,
+      lyrics: source.lyrics, durationSeconds: source.durationSeconds ?? 30,
+    });
+  }
+
   private async materializeReference(jobId: string, file: string) {
     const match = /^(.*?)(?: \[(input|output|temp)\])?$/.exec(file.replace(/\\/g, "/"));
     const relative = match?.[1] ?? file;
@@ -440,9 +456,15 @@ export class AudioStudioService {
       return;
     }
     let referencePath: string | null = null;
+    let effectiveReferenceText = job.referenceText;
     const controller = new AbortController();
     try {
       this.repository.update(jobId, { status: "loading", phaseLabel: "Scaricamento modelli ComfyUI", progress: 2, error: null });
+      if (job.referenceFile && !effectiveReferenceText) {
+        this.repository.update(jobId, { status: "loading", phaseLabel: "Trascrizione reference con Whisper", progress: 3, error: null });
+        const transcription = await this.transcribeReference({ file: job.referenceFile });
+        effectiveReferenceText = transcription.text;
+      }
       await this.comfy.chatUnload().catch(() => undefined);
       await this.comfy.freeMemory(true).catch(() => undefined);
       if (this.cancelledJobs.has(jobId)) throw new Error("Sintesi interrotta");
@@ -493,7 +515,7 @@ export class AudioStudioService {
           temperature: settings.tts.temperature, top_p: settings.tts.topP,
           top_k: settings.tts.topK, speed: settings.tts.speed,
           max_new_tokens: settings.tts.maxNewTokens,
-          ...(referencePath ? { references: [{ audio_path: referencePath, text: job.referenceText || undefined }] } : {}),
+          ...(referencePath ? { references: [{ audio_path: referencePath, text: effectiveReferenceText || undefined }] } : {}),
         }),
       });
       if (!response.ok) throw new Error(`Higgs Audio HTTP ${response.status}: ${await response.text()}`);
