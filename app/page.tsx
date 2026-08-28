@@ -5895,6 +5895,26 @@ function StudioApp() {
         </header>
 
         <div className={`content ${activeView === "chat" ? "chat-content" : ""}`}>
+          <div hidden={activeView !== "studio" || studioMediaMode !== "image"}>
+            <ImageStudioPanel
+              bridgeUrl={bridgeUrl}
+              incomingReferences={imageStudioHandoff?.references}
+              initialJobId={imageStudioHandoff?.jobId}
+              key={`${imageResetToken}-${imageStudioHandoff?.token ?? 0}`}
+              projectId={studioProjectId}
+              projectName={studioProject?.name}
+              projects={studioProjects}
+            />
+          </div>
+          <div hidden={activeView !== "studio" || studioMediaMode !== "audio"}>
+            <AudioStudioPanel
+              bridgeUrl={bridgeUrl}
+              initialJobId={audioStudioJobId}
+              key={`${studioProjectId}-${audioResetToken}`}
+              projectId={studioProjectId}
+              projectName={studioProject?.name}
+            />
+          </div>
           {activeView === "admin" ? (
             <AdminPanel />
           ) : activeView === "projects" ? (
@@ -5941,26 +5961,7 @@ function StudioApp() {
             />
           ) : (
           <>
-          <div hidden={studioMediaMode !== "image"}>
-            <ImageStudioPanel
-              bridgeUrl={bridgeUrl}
-              incomingReferences={imageStudioHandoff?.references}
-              initialJobId={imageStudioHandoff?.jobId}
-              key={`${imageResetToken}-${imageStudioHandoff?.token ?? 0}`}
-              projectId={studioProjectId}
-              projectName={studioProject?.name}
-              projects={studioProjects}
-            />
-          </div>
-          <div hidden={studioMediaMode !== "audio"}>
-            <AudioStudioPanel
-              bridgeUrl={bridgeUrl}
-              initialJobId={audioStudioJobId}
-              key={`${studioProjectId}-${audioResetToken}`}
-              projectId={studioProjectId}
-              projectName={studioProject?.name}
-            />
-          </div>
+
           {studioMediaMode === "video" && (
           <>
           <section

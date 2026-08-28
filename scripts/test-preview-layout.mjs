@@ -220,5 +220,7 @@ assert.match(page, /data\.settings\.krea\.encoder,[\s\S]*?qwen\.\*\(\?:vl\|visio
 assert.match(page, /data\.settings\.krea\.vae,[\s\S]*?qwen\.\*image\.\*vae/);
 assert.match(page, /data\.settings\.imageEdit\.encoder,[\s\S]*?qwen\[_-\]\?3/);
 assert.match(page, /data\.settings\.imageEdit\.vae,[\s\S]*?flux\.\*2\.\*vae/);
+assert.match(page, /hidden=\{activeView !== "studio" \|\| studioMediaMode !== "image"\}/);
+assert.match(page, /hidden=\{activeView !== "studio" \|\| studioMediaMode !== "audio"\}/);
 
 console.log("Preview layout, image turnaround and Assets handoff UI: OK");
