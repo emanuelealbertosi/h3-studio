@@ -1,5 +1,12 @@
 # Worklog
 
+### 29 agosto 2026 — I2V con visual lock e monoshot continuo
+
+- Picture 1 viene ora inviata al planner Vision a 384 px solo in I2V; il render H3 continua a usare la sorgente originale.
+- Il planner non può più inventare outfit, ambienti, luce, composizione o punto macchina quando non sono richiesti dall'utente.
+- Nei job I2V da uno shot, il parser converte automaticamente eventuali `[Shot 2+]` in azioni temporali dello stesso `[Shot 1]`, evitando tagli e reframing impliciti.
+- Aggiunte regressioni automatiche sul routing Vision e sul flattening dei marker interni.
+
 ### 29 agosto 2026 — Upscale con aspect ratio sorgente
 
 - Corretto il post-process Upscale: non forza più `megapixels + format` sui job creati con `Mantieni proporzioni`.

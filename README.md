@@ -49,6 +49,11 @@ inattivi prima del conditioning.
 I controlli creativi Camera, Obiettivo ed Effetti aggiungono direttive leggibili
 al prompt senza nascondere o sostituire il testo dell’utente.
 
+In **I2V**, Picture 1 viene analizzata dal planner Vision in una copia ridotta a
+384 px, senza cambiare la sorgente usata dal render. Il visual lock conserva i
+dettagli visibili e, nei monoshot, impedisce al planner di introdurre da solo un
+secondo taglio, un nuovo outfit o una diversa inquadratura.
+
 Lo Studio espone cinque preset: **FAST / 8 / 12 / 20 / 30**. FAST è un motore
 separato basato su Alibaba PDD-Acc a 8 NFE, con modello Ref2VA o FL2VA dedicato
 **non-pruned** (il default è `minimax_h3_ref2va_int8_convrot.safetensors`),

@@ -579,6 +579,8 @@ export function prepareStudioJob(
       "shot_count",
       "max_auto_shots",
       "shot_seconds",
+      "llm_media_context",
+      "context_resolution",
       "audio_1_role",
       "keyframe_positions",
       "source_video_audio",
@@ -612,6 +614,10 @@ export function prepareStudioJob(
     requestNode.inputs.shot_count = request.shotCount;
     requestNode.inputs.max_auto_shots = request.shotCount;
     requestNode.inputs.shot_seconds = request.durationSeconds;
+    requestNode.inputs.llm_media_context =
+      request.generationMode === "I2V" ? "IMAGES" : "OFF - text only";
+    requestNode.inputs.context_resolution =
+      request.generationMode === "I2V" ? 384 : 512;
     requestNode.inputs.audio_1_role = audioRouting.role;
     requestNode.inputs.keyframe_positions = request.keyframePositions;
     requestNode.inputs.source_video_audio = request.sourceVideoAudio;

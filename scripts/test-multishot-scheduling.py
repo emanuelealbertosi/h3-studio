@@ -16,6 +16,15 @@ def load(name):
 
 builders = load("h3_prompt_builders")
 refs = load("h3_multishot_refs")
+timestamps = load("h3_internal_timestamps")
+
+flattened, changed, note = timestamps.flatten_monoshot_markers(
+    "[Shot 1] The woman turns. [Shot 2] At 00:02.500 She raises a hand.")
+assert changed is True
+assert "[Shot 2]" not in flattened
+assert flattened.startswith("[Shot 1]")
+assert "At 00:02.500 She raises a hand." in flattened
+assert "flattened 1 extra" in note
 
 state = {
     "version": 1,

@@ -9,6 +9,7 @@ from .h3_prompt_builders import build_it2v_scripts, build_r2v_script
 from .h3_internal_timestamps import (
     collapse_planned_clips,
     ensure_internal_timestamps,
+    flatten_monoshot_markers,
 )
 
 _CONTEXT_MODES = (
@@ -335,9 +336,10 @@ class H3AIOAutopromptRequest:
         manifest.extend(visual_labels)
         manifest_text = "\n".join(manifest)
         shot_rule = (
-            "Write exactly 1 generated clip. Never return a second top-level "
-            "clip; express scene changes as timed internal [Shot N] markers "
-            "inside that single clip."
+            "Write exactly 1 generated clip as one continuous [Shot 1]. "
+            "Do not add [Shot 2+] markers, cuts, reframings, angle changes, "
+            "zooms or camera moves unless the user explicitly requests them. "
+            "Express sequential actions as chronological beats inside [Shot 1]."
             if int(max_shots) == 1 else
             "Write exactly %d generated clips." % int(max_shots)
             if exact_shots else
@@ -361,7 +363,12 @@ class H3AIOAutopromptRequest:
                 "Generate only from text. Ignore every loaded media asset."),
             "I2V": (
                 "Picture 1 is the exact opening frame of generated clip 1. "
-                "Later clips continue only from memory."),
+                "Treat Picture 1 as authoritative for identity, face, body, "
+                "hair, outfit or state of dress, props, environment, lighting, "
+                "composition, capture style and camera angle. Preserve every "
+                "visible fact exactly; do not invent, replace, add or restyle "
+                "anything unless the natural user request explicitly asks for "
+                "that change. Later clips continue only from memory."),
             "R2V": (
                 "Use loaded assets as references. Picture 1 is a concrete "
                 "opening frame only when the dedicated switch is enabled."),
@@ -425,6 +432,8 @@ MODE-SPECIFIC RULE: {operation_rule}
 Rules:
 - shots[] are separate generated clips joined through frame memory.
 - Every description MUST start with exactly [Shot 1] and Shot 1 MUST NOT have a timestamp.
+- In a one-clip I2V plan, keep one continuous camera setup. Never add [Shot 2+], a cut, a new angle, a push-in, a zoom or an unrequested reframing. Put later actions into the prose of [Shot 1].
+- In I2V, use only visual facts actually visible in Picture 1. When a detail is uncertain, instruct the model to preserve the exact visible detail instead of guessing it.
 - For T2V/I2V, continuity_bible is mandatory: write one compact, immutable visual paragraph describing every recurring character or creature (apparent age, face, hair, build, clothing, materials, exact colors), signature props, environment, time of day, lighting, palette and capture style. Use concrete visible facts only; never put actions, camera moves, shot numbers, dialogue or audio in it.
 - Treat each generated clip as independently encoded. Repeat the same exact continuity_bible wording in every clip where those elements remain present; the parser also injects it automatically. Never shorten a named subject to a generic label such as "the wizard", "the woman" or "the dragon" without preserving its defining visual traits.
 - Do not over-compress the descriptions. For a 10-second clip, normally use about 90-150 English words for the visual description: preserve the immutable details, then describe chronological action, readable body mechanics, camera movement, secondary motion, lighting interaction and a stable final composition. Scale this detail budget sensibly for shorter or longer clips; do not overload the available duration.
@@ -542,6 +551,13 @@ class H3AIOPlanParser:
             description = str(shot.get("description") or "").strip()
             if not description:
                 raise ValueError("shots[%d].description is empty." % index)
+            if mode == "I2V" and int(max_shots) == 1:
+                description, flattened, flatten_note = (
+                    flatten_monoshot_markers(description))
+                if flattened:
+                    print(
+                        "[H3AIO] I2V monoshot auto-fix: %s" % flatten_note,
+                        flush=True)
             description, timestamps_changed, timestamp_note = (
                 ensure_internal_timestamps(description, shot_seconds))
             if timestamps_changed:
@@ -552,9 +568,17 @@ class H3AIOPlanParser:
                 marker = "[Shot 1]"
                 if description.startswith(marker):
                     body = description[len(marker):].lstrip()
+                    visual_lock = (
+                        " I2V visual lock: Preserve exactly the identity, face, "
+                        "hair, body, outfit or state of dress, props, setting, "
+                        "lighting, composition, lens and camera position visible "
+                        "in <Picture 1>; do not add, remove, replace or restyle "
+                        "visible elements unless explicitly requested."
+                        if mode == "I2V" else "")
                     description = (
                         marker + " Continuity lock: " +
-                        continuity_bible.rstrip(" .") + ". " + body)
+                        continuity_bible.rstrip(" .") + "." + visual_lock +
+                        " " + body)
                 else:
                     description = (
                         marker + " Continuity lock: " +

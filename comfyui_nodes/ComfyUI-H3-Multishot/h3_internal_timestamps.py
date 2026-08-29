@@ -69,6 +69,38 @@ def ensure_internal_timestamps(description, duration_seconds):
     return fixed, True, "normalized %d internal shot marker(s)" % count
 
 
+def flatten_monoshot_markers(description):
+    """Keep one continuous Shot 1 while preserving later timed action beats.
+
+    A single-shot I2V plan must not silently turn into a cut or a new camera
+    setup. Remove only the extra structural markers; their prose and explicit
+    timestamps remain available as chronological action within Shot 1.
+    """
+    text = str(description or "").strip()
+    matches = list(SHOT_TAG.finditer(text))
+    if len(matches) <= 1:
+        return text, False, "single continuous shot already valid"
+
+    first = matches[0]
+    if int(first.group(1)) != 1:
+        return text, False, "first internal marker is not Shot 1"
+
+    removed = 0
+
+    def replace(match):
+        nonlocal removed
+        if match.start() == first.start():
+            return "[Shot 1]"
+        removed += 1
+        stamp = timestamp_seconds(match)
+        return " At %s" % _format_timestamp(stamp) if stamp is not None else " Then"
+
+    flattened = SHOT_TAG.sub(replace, text)
+    flattened = re.sub(r"[ \t]+", " ", flattened)
+    return flattened.strip(), True, (
+        "flattened %d extra internal shot marker(s) into action beats" % removed)
+
+
 def _internal_segments(description):
     """Return the prose belonging to each internal Shot marker."""
     text = str(description or "").strip()

@@ -279,8 +279,14 @@ const keepAspectSize = uniqueNode(
   keepAspectI2v.candidates[0].prompt,
   "H3AspectMegapixelSize",
 );
+const keepAspectI2vRequest = uniqueNode(
+  keepAspectI2v.candidates[0].prompt,
+  "H3AIOAutopromptRequest",
+);
 assert.equal(keepAspectSize.inputs.size_mode, "source aspect + megapixels");
 assert.equal(keepAspectSize.inputs.aspect_format, "16:9 landscape");
+assert.equal(keepAspectI2vRequest.inputs.llm_media_context, "IMAGES");
+assert.equal(keepAspectI2vRequest.inputs.context_resolution, 384);
 const keepAspectKeyframes = prepareStudioJob(
   source,
   {
