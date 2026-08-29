@@ -29,8 +29,11 @@ di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
   un'immagine generale, seleziona **Krea**.
 - In **Auto**, anime, manga, disegno, illustrazione e cartoon vengono instradati
   ad Anima; le immagini fotografiche o generiche usano Krea.
-- Una richiesta esplicita di video usa 10 secondi, un candidato, 0,5 MP e FAST
-  8-step. Per cambiare questi parametri apri poi il job nello Studio.
+- Una richiesta video senza durata usa 10 secondi, un candidato, 0,5 MP e FAST
+  8-step. Se indichi la durata totale, la Chat attiva automaticamente il
+  multishot: per esempio 30 secondi diventano `3 × 10 s`. Sono supportati fino
+  a 12 shot; oltre 120 secondi usa chunk da 15 secondi, fino a un massimo di
+  180 secondi. Per cambiare gli altri parametri apri poi il job nello Studio.
 
 Le azioni compaiono come schede vive nella conversazione. Durante la preparazione
 del modello LLM e poi durante la produzione, il riquadro mostra lo splash sfocato, la

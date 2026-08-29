@@ -6,10 +6,12 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ChatRepository } from "../bridge/chat-repository.js";
 import {
+  extractRequestedVideoDuration,
   extractRequestedLyrics,
   musicInstrumentalIntent,
   normalizePlan,
   preserveMusicIntent,
+  resolveChatVideoTiming,
   routeAction,
   shouldRecallMedia,
 } from "../bridge/chat-service.js";
@@ -134,6 +136,23 @@ try {
   assert.equal(shouldRecallMedia("Ora modificala rendendo il cielo rosso"), true);
   assert.equal(shouldRecallMedia("Crea una animazione partendo da questa immagine"), true);
   assert.equal(shouldRecallMedia("Parliamo di regia cinematografica"), false);
+  assert.deepEqual(resolveChatVideoTiming(), {
+    shotCount: 1, durationSeconds: 10, totalSeconds: 10,
+  });
+  assert.deepEqual(resolveChatVideoTiming(30), {
+    shotCount: 3, durationSeconds: 10, totalSeconds: 30,
+  });
+  assert.deepEqual(resolveChatVideoTiming(120), {
+    shotCount: 12, durationSeconds: 10, totalSeconds: 120,
+  });
+  assert.deepEqual(resolveChatVideoTiming(180), {
+    shotCount: 12, durationSeconds: 15, totalSeconds: 180,
+  });
+  assert.throws(() => resolveChatVideoTiming(181), /massimo 180 secondi/i);
+  assert.equal(extractRequestedVideoDuration("crea un video di 30s"), 30);
+  assert.equal(extractRequestedVideoDuration("crea un video di 30 secondi"), 30);
+  assert.equal(extractRequestedVideoDuration("crea un video di 2 minuti"), 120);
+  assert.equal(extractRequestedVideoDuration("crea un video fantasy"), null);
 
   const [server, service, audioService, panel, dialog, styles, node, installer, manifest, page, imagePanel, audioPanel] = await Promise.all([
     readFile("bridge/server.ts", "utf8"),
@@ -159,7 +178,9 @@ try {
   assert.match(server, /jobs\/:jobId\/candidates\/:candidateIndex\/rename/);
   assert.match(server, /await comfy\.chatUnload\(\)\.catch/);
   assert.ok((server.match(/await comfy\.chatUnload\(\)\.catch/g) ?? []).length >= 5);
-  assert.match(service, /durationSeconds: 10/);
+  assert.match(service, /explicitDuration \?\? \(VIDEO_DURATION_CUE\.test\(requestText\)/);
+  assert.match(service, /shotCount: timing\.shotCount/);
+  assert.match(service, /durationSeconds: timing\.durationSeconds/);
   assert.match(service, /megapixels: 0\.5/);
   assert.match(service, /qualityMode: "fast"/);
   assert.match(service, /ROUTE_OVERRIDE/);

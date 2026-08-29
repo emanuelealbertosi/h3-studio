@@ -1,5 +1,11 @@
 # Worklog
 
+### 29 agosto 2026 — Durata Chat collegata al multishot
+
+- Le richieste video della Chat non ignorano più `durationSeconds`: 30 secondi vengono inviati allo Studio come `3 × 10 s`.
+- Il default resta 10 secondi, FAST, 0,5 MP e un candidato; la Chat può pianificare fino a 12 shot e 180 secondi complessivi.
+- Aggiunte regressioni per default, 30, 120, 180 secondi e rifiuto delle durate superiori.
+
 ### 29 agosto 2026 — I2V con visual lock e monoshot continuo
 
 - Picture 1 viene ora inviata al planner Vision a 384 px solo in I2V; il render H3 continua a usare la sorgente originale.

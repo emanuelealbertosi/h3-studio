@@ -66,6 +66,34 @@ export function shouldRecallMedia(content: string) {
   return MEDIA_RECALL_PATTERN.test(content);
 }
 
+const VIDEO_DURATION_CUE = /\b(?:second[io]|sec(?:onds?)?|minut[oi]|min(?:utes?)?)\b|\d+(?:[.,]\d+)?\s*[sm]\b/i;
+
+export function extractRequestedVideoDuration(content: string) {
+  const text = String(content ?? "");
+  const minutes = text.match(/\b(\d+(?:[.,]\d+)?)\s*(?:minut[oi]|min(?:utes?)?)\b/i);
+  if (minutes) return Math.round(Number(minutes[1].replace(",", ".")) * 60);
+  const seconds = text.match(/\b(\d+(?:[.,]\d+)?)\s*(?:second[io]|sec(?:onds?)?|s)\b/i);
+  return seconds ? Math.round(Number(seconds[1].replace(",", "."))) : null;
+}
+
+export function resolveChatVideoTiming(requestedDuration?: number) {
+  const requested = requestedDuration === undefined
+    ? 10
+    : Math.max(5, Math.round(requestedDuration));
+  if (requested <= 5) return { shotCount: 1, durationSeconds: 5 as const, totalSeconds: 5 };
+  if (requested <= 10) return { shotCount: 1, durationSeconds: 10 as const, totalSeconds: 10 };
+  if (requested <= 15) return { shotCount: 1, durationSeconds: 15 as const, totalSeconds: 15 };
+  if (requested <= 120) {
+    const shotCount = Math.ceil(requested / 10);
+    return { shotCount, durationSeconds: 10 as const, totalSeconds: shotCount * 10 };
+  }
+  if (requested <= 180) {
+    const shotCount = Math.ceil(requested / 15);
+    return { shotCount, durationSeconds: 15 as const, totalSeconds: shotCount * 15 };
+  }
+  throw new Error("La Chat video supporta al massimo 180 secondi (12 shot da 15s)");
+}
+
 function extractJson(text: string) {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
   const source = fenced ?? text;
@@ -235,11 +263,11 @@ const CHAT_SYSTEM_PROMPT = `You are H3 Studio, a concise Italian-speaking creati
 Always return exactly one JSON object and no markdown:
 {"reply":"natural Italian reply","title":"concise 3-7 word Italian conversation title","action":null}
 or
-{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1","durationSeconds":30,"instrumental":true,"lyrics":"exact requested words to sing or empty string"}}
+{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1","durationSeconds":10,"instrumental":true,"lyrics":"exact requested words to sing or empty string"}}
 
 Only create an action when the user explicitly asks to generate, animate, continue or edit media. Questions and ordinary conversation use action:null.
 The title describes the main topic, never starts with "Chat" and never contains quotation marks.
-For video default to 10 seconds, one candidate, 0.5 MP and the FAST 8-step engine; these execution values are enforced by the server and must not be invented in JSON.
+For video default to 10 seconds, one candidate, 0.5 MP and the FAST 8-step engine. When the user explicitly requests a total video duration, preserve it in durationSeconds; the server converts it into up to 12 H3 shots. Do not invent a duration that the user did not request.
 Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures. Use I2V when one attached picture is the start frame, R2V for broader references, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for editing one. Video editing and extension still use action type generate_video; never invent video_editing, edit_video or continue_video action types.
 Use generate_tts when the user asks for speech, narration, dubbing, reading or voice cloning. For TTS, prompt is the exact text to speak in the requested language, not an English description. An attached Audio 1 is the voice reference and is transcribed automatically.
 For a video in which a visible subject must speak with an attached voice, use R2V. Define <Audio 1> as a voice-timbre reference, not copied signal or background music. If a picture or video defines the visible speaker, bind the audio to that actual <Subject N> and reuse its global speaker ID (S1). If no visual reference defines a subject, describe the visible target speaker and assign (S1) without inventing a <Subject N> reference label. Put the exact dialogue inside <d>[Italian] ...</d>, <d>[English] ...</d> or the correct language name, and state that the speaker physically speaks with natural lip synchronization and stops mouth motion when the line ends.
@@ -608,6 +636,13 @@ export class ChatService {
       }
       await this.comfy.chatUnload();
       if (plan.type === "generate_video") {
+        const requestText = originalRequest ?? "";
+        const explicitDuration = extractRequestedVideoDuration(requestText);
+        const timing = resolveChatVideoTiming(
+          explicitDuration ?? (VIDEO_DURATION_CUE.test(requestText)
+            ? plan.durationSeconds
+            : undefined),
+        );
         const pictures = attachments.filter((item) => item.kind === "picture");
         const videos = attachments.filter((item) => item.kind === "video");
         const audios = attachments.filter((item) => item.kind === "audio");
@@ -623,7 +658,8 @@ export class ChatService {
           projectId,
           prompt: plan.prompt,
           candidateCount: 1,
-          durationSeconds: 10,
+          shotCount: timing.shotCount,
+          durationSeconds: timing.durationSeconds,
           megapixels: 0.5,
           generationMode,
           aspectFormat: plan.aspect === "9:16" ? "9:16 portrait" : plan.aspect === "1:1" ? "1:1 square" : "16:9 landscape",
