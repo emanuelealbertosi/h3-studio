@@ -117,6 +117,33 @@ const fastSampler = uniqueNode(fast.candidates[0].prompt, "H3ReferenceMemorySamp
 const fastShift = uniqueNode(fast.candidates[0].prompt, "MiniMaxH3SigmaShift");
 assert.equal(fast.engineSettings.profile, "fast");
 assert.equal(fast.engineSettings.steps, 8);
+
+const editWithStaleFastFlags = prepareStudioJob(
+  source,
+  {
+    ...baseRequest,
+    generationMode: "VIDEO EDITING",
+    mediaState: JSON.stringify([
+      { kind: "video", file: "edit-source.mp4 [input]", duration: 5 },
+    ]),
+    qualityMode: "fast",
+    turboEnabled: true,
+  },
+  structuredClone(DEFAULT_RUNTIME_SETTINGS),
+  "00000000-0000-4000-8000-000000000098",
+);
+const editWithStaleFastSampler = uniqueNode(
+  editWithStaleFastFlags.candidates[0].prompt,
+  "H3ReferenceMemorySampler",
+);
+assert.equal(editWithStaleFastFlags.engineSettings.profile, "standard");
+assert.equal(
+  editWithStaleFastFlags.engineSettings.model,
+  DEFAULT_RUNTIME_SETTINGS.h3.model,
+);
+assert.equal(editWithStaleFastFlags.engineSettings.pddFile, null);
+assert.equal(editWithStaleFastFlags.engineSettings.steps, 8);
+assert.equal(editWithStaleFastSampler.inputs.pdd_acc_file, undefined);
 assert.equal(
   fast.engineSettings.model,
   "minimax_h3_ref2va_int8_convrot.safetensors",

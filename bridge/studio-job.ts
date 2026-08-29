@@ -538,7 +538,14 @@ function resolveEngineSettings(
 ): ResolvedEngineSettings {
   const musicVideo =
     audioRoutingFromMediaState(request.mediaState).role === "music_video_lipsync";
-  const fast = request.qualityMode === "fast" && request.turboEnabled && !musicVideo;
+  // PDD is a preview engine, not the model path we want for structural video
+  // edits. Keep VIDEO EDITING on the configured standard H3 model even when a
+  // stale client still submits the FAST flags.
+  const fast =
+    request.qualityMode === "fast" &&
+    request.turboEnabled &&
+    !musicVideo &&
+    request.generationMode !== "VIDEO EDITING";
   if (fast) {
     assertPddModelCompatibility(
       runtimeSettings.fast.model,
@@ -805,7 +812,8 @@ export class StudioJobService {
       rawRequest.qualityMode !== "min" &&
       rawRequest.qualityMode !== "med" &&
       rawRequest.qualityMode !== "max" &&
-      rawRequest.turboEnabled !== false;
+      rawRequest.turboEnabled !== false &&
+      rawRequest.generationMode !== "VIDEO EDITING";
     if (wantsFast) {
       const [pddInfo, samplerInfo] = await Promise.all([
         this.comfy.objectInfo("MiniMaxH3PDDAccApply").catch(() => null),

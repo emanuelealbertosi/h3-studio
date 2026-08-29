@@ -5738,6 +5738,12 @@ function StudioApp() {
       },
     ]);
     setMode(operation);
+    if (operation === "edit") {
+      // Video Edit always uses the configured standard H3/Hybrid engine. The
+      // FAST PDD profile is intentionally reserved for preview generation.
+      setQualityMode("fast");
+      setTurboEnabled(false);
+    }
     setSourceJobId(context?.sourceJobId ?? currentJobId);
     if (context?.projectId) setStudioProjectId(context.projectId);
     setActiveView("studio");
@@ -6458,6 +6464,10 @@ function StudioApp() {
                   onChange={(event) => {
                     const nextMode = event.target.value as StudioMode;
                     setMode(nextMode);
+                    if (nextMode === "edit") {
+                      setQualityMode("fast");
+                      setTurboEnabled(false);
+                    }
                     if (nextMode === "t2v" && aspectFormat === KEEP_SOURCE_ASPECT_FORMAT) {
                       setAspectFormat("16:9 landscape");
                     }
@@ -6583,8 +6593,14 @@ function StudioApp() {
                   ].map((item) => (
                     <button
                       className={generationPreset === item.value ? "selected" : ""}
+                      disabled={mode === "edit" && item.value === "fast"}
                       key={item.value}
                       onClick={() => selectGenerationPreset(item.value as GenerationPreset)}
+                      title={
+                        mode === "edit" && item.value === "fast"
+                          ? "Edit usa il modello H3 standard/Hybrid; PDD FAST non è disponibile"
+                          : undefined
+                      }
                       type="button"
                     >
                       <strong>{item.label}</strong>
