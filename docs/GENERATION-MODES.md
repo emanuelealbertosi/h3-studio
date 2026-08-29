@@ -20,7 +20,7 @@ In **Edit video** lo Studio espone due motori distinti:
 
 - **H3 creativo** è il default e usa il normale workflow MiniMax H3 Hybrid;
 - **Bernini fedele** usa Bernini-R Preview 1.3B con il video sorgente come canvas,
-  audio sorgente conservato, circa 480p, 20 step e una durata massima di 15 secondi.
+  audio sorgente conservato, circa 480p, 20 step e una durata massima di 20 secondi.
 
 Bernini è pensato per sostituzioni e correzioni locali conservative. Il modello
 1.3B è una preview leggera: sugli edit complessi con molto moto o molte reference
