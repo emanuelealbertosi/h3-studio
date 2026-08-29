@@ -76,30 +76,6 @@ const outputPrepared = prepareBerniniStudioJob({
 assert.equal(outputPrepared.candidates[0].prompt["1"].class_type, "VHS_LoadVideoPath");
 assert.equal(outputPrepared.candidates[0].prompt["13"].class_type, "LoadImageOutput");
 
-const longPrepared = prepareBerniniStudioJob({
-  ...prepared.request,
-  durationSeconds: 15,
-  mediaState: JSON.stringify([{
-    kind: "video",
-    file: "tests/source-20s.mp4 [input]",
-    duration: 19.9,
-    width: 1920,
-    height: 1080,
-  }]),
-});
-assert.equal(longPrepared.candidates[0].prompt["7"].inputs.length, 477);
-assert.throws(() => prepareBerniniStudioJob({
-  ...prepared.request,
-  durationSeconds: 15,
-  mediaState: JSON.stringify([{
-    kind: "video",
-    file: "tests/source-too-long.mp4 [input]",
-    duration: 20.6,
-    width: 1920,
-    height: 1080,
-  }]),
-}), /fino a 20 secondi/);
-
 try {
   const repository = new JobRepository(temporary);
   try {

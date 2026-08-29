@@ -8,7 +8,6 @@ export const BERNINI_TEXT_ENCODER =
   "umt5_xxl_fp8_e4m3fn_scaled.safetensors";
 export const BERNINI_VAE = "wan_2.1_vae.safetensors";
 export const BERNINI_PREVIEW_STEPS = 20;
-export const BERNINI_PREVIEW_MAX_SOURCE_SECONDS = 20;
 
 const NEGATIVE_PROMPT =
   "oversaturated, overexposed, static, scene cut, camera cut, blurry details, subtitles, illustration, painting, grey cast, worst quality, low quality, JPEG artifacts, ugly, malformed anatomy, extra fingers, deformed hands, deformed face, disfigured limbs, fused fingers, frozen frame, cluttered background, duplicated people, walking backwards, flicker, temporal inconsistency";
@@ -95,9 +94,9 @@ export function buildBerniniPrompt(
     throw new Error("Bernini richiede un video sorgente");
   }
   const duration = sourceDuration(request, source);
-  if (duration > BERNINI_PREVIEW_MAX_SOURCE_SECONDS + 0.5) {
+  if (duration > 15.5) {
     throw new Error(
-      `Bernini Preview 1.3B accetta clip fino a ${BERNINI_PREVIEW_MAX_SOURCE_SECONDS} secondi per singolo edit`,
+      "Bernini Preview 1.3B accetta clip fino a 15 secondi per singolo edit",
     );
   }
   const dimensions = berniniDimensions(source);

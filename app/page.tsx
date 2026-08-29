@@ -6511,7 +6511,7 @@ function StudioApp() {
                         setQualityMode("med");
                         setTurboEnabled(false);
                       }}
-                      title="Bernini Preview 1.3B: usa il video come canvas e applica un edit più fedele. 480p, 20 step, massimo 20s."
+                      title="Bernini Preview 1.3B: usa il video come canvas e applica un edit più fedele. 480p, 20 step, massimo 15s."
                       type="button"
                     >
                       Bernini fedele
