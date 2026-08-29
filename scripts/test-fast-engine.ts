@@ -200,6 +200,68 @@ assert.equal(standard8.engineSettings.pddFile, null);
 assert.equal(standardSampler.inputs.steps, 8);
 assert.notEqual(standardSampler.inputs.pdd_acc_file, fast.engineSettings.pddFile);
 
+const musicVideo = prepareStudioJob(
+  source,
+  {
+    ...baseRequest,
+    generationMode: "R2V",
+    durationSeconds: 15,
+    megapixels: 0.7,
+    mediaState: JSON.stringify([
+      { kind: "picture", file: "singer.png [input]" },
+      {
+        kind: "audio",
+        file: "music/jazz.flac [input]",
+        duration: 30,
+        audio_role: "music_video_lipsync",
+      },
+    ]),
+    qualityMode: "fast",
+    turboEnabled: true,
+  },
+  structuredClone(DEFAULT_RUNTIME_SETTINGS),
+  "00000000-0000-4000-8000-000000000020",
+);
+const musicRequest = uniqueNode(
+  musicVideo.candidates[0].prompt,
+  "H3AIOAutopromptRequest",
+);
+const musicSampler = uniqueNode(
+  musicVideo.candidates[0].prompt,
+  "H3MusicVideoReferenceMemorySampler",
+);
+assert.equal(musicVideo.request.shotCount, 2);
+assert.equal(musicVideo.engineSettings.profile, "standard");
+assert.equal(musicVideo.engineSettings.steps, 8);
+assert.equal(musicRequest.inputs.audio_1_role, "music_video_lipsync");
+assert.equal(musicRequest.inputs.shot_count, 2);
+assert.deepEqual(musicSampler.inputs.soundtrack, ["66", 17]);
+assert.equal(musicSampler.inputs.audio_output_mode, "original_soundtrack");
+assert.equal(musicSampler.inputs.trim_to_soundtrack, true);
+assert.equal(musicSampler.inputs.pdd_acc_file, undefined);
+assert.equal(musicSampler.inputs.keyframe_plan, undefined);
+assert.equal(publicDryRun(musicVideo).audioRoutingRole, "music_video_lipsync");
+assert.throws(
+  () => prepareStudioJob(
+    source,
+    {
+      ...baseRequest,
+      generationMode: "R2V",
+      mediaState: JSON.stringify([
+        {
+          kind: "audio",
+          file: "music/unknown.flac [input]",
+          audio_role: "music_video_lipsync",
+        },
+      ]),
+      qualityMode: "fast",
+      turboEnabled: false,
+    },
+    structuredClone(DEFAULT_RUNTIME_SETTINGS),
+  ),
+  /durata rilevata/i,
+);
+
 const keepAspectI2v = prepareStudioJob(
   source,
   {

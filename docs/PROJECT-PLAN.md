@@ -439,6 +439,8 @@ Legenda: `[x]` completato e verificato; `[~]` parziale o presente solo a livello
 - [x] Routing esplicito TTS/Music alla Chat multimodale con reference audio.
 - [x] Pipeline `Canzone col mio timbro`: MiniMax Music → BS-RoFormer → Seed-VC → remix stereo, con Stop e unload garantiti.
 - [x] Video H3 parlante da Chat: reference timbrica, dialogo letterale e istruzione lip-sync nel prompt R2V.
+- [x] `Music video + lip-sync` nel Video Studio: segmentazione temporale del brano, `<Soundtrack>` per-shot, memoria H3, trim esatto e mux dell'audio originale; fallback standard 8-step senza PDD.
+- [ ] Collaudare su GPU reale un brano cantato da 20–30 secondi e valutare fedeltà labiale, identità e continuità fra shot.
 - [ ] Collaudare la conversione timbrica completa sulla GPU reale dopo il download dei modelli audio.cpp.
 - [ ] Collaudare voice clone italiano e una generazione Music lunga su GPU reale.
 

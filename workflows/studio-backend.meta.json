@@ -9,6 +9,7 @@
   "requiredClasses": [
     "H3ModelLoaderAny",
     "H3ReferenceMemorySampler",
+    "H3MusicVideoReferenceMemorySampler",
     "H3SaveContinuation",
     "H3AIOAutopromptRequest",
     "H3AIOPlanParser",

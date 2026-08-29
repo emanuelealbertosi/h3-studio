@@ -8,6 +8,7 @@
       "requiredClasses": [
         "H3ModelLoaderAny",
         "H3ReferenceMemorySampler",
+        "H3MusicVideoReferenceMemorySampler",
         "H3AIOAutopromptRequest",
         "H3AIOPlanParser",
         "H3AIOGenerationRouter",

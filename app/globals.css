@@ -3581,6 +3581,21 @@ a:focus-visible {
   color: var(--ink);
   font-size: 9px;
 }
+.media-asset-body .audio-routing-role select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid rgba(215, 255, 82, .28);
+  border-radius: 8px;
+  padding: 7px 30px 7px 8px;
+  background: #0b0c0e;
+  color: var(--ink);
+  font-size: 9px;
+}
+.media-asset-body .audio-routing-role small {
+  color: var(--accent);
+  font-size: 8px;
+  line-height: 1.45;
+}
 .media-asset-body .shot-schedule {
   display: grid;
   gap: 5px;

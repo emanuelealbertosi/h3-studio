@@ -36,11 +36,25 @@ const GENERATION_MODES = [
   "VIDEO EXTENSION",
   "VIDEO EDITING",
 ] as const;
+const AUDIO_ROUTING_ROLES = [
+  "reference_audio",
+  "voice_ref",
+  "ignore",
+  "exact_soundtrack",
+  "exact_soundtrack_plus_h3_sfx",
+  "music_video_lipsync",
+] as const;
+const EFFECTIVE_SHOT_SECONDS: Record<5 | 10 | 15, number> = {
+  5: 123 / 24,
+  10: 242 / 24,
+  15: 362 / 24,
+};
 
 type AspectFormat = (typeof ASPECT_FORMATS)[number];
 export type GenerationMode = (typeof GENERATION_MODES)[number];
 export type SeedMode = "random" | "base" | "fixed";
 export type QualityMode = "fast" | "min" | "med" | "max";
+export type AudioRoutingRole = (typeof AUDIO_ROUTING_ROLES)[number];
 
 export type StudioJobRequest = {
   prompt: string;
@@ -135,6 +149,36 @@ function uniqueNode(prompt: ComfyApiPrompt, classType: string): ComfyApiNode {
   return matches[0];
 }
 
+function uniqueNodeEntry(
+  prompt: ComfyApiPrompt,
+  classType: string,
+): [string, ComfyApiNode] {
+  const matches = Object.entries(prompt).filter(
+    ([, node]) => node.class_type === classType,
+  );
+  if (matches.length !== 1) {
+    throw new Error(
+      `Firma workflow non valida: atteso un nodo ${classType}, trovati ${matches.length}`,
+    );
+  }
+  return matches[0];
+}
+
+function audioRoutingFromMediaState(mediaState: string) {
+  const items = JSON.parse(mediaState || "[]") as Array<Record<string, unknown>>;
+  const audio = items.find((item) => item.kind === "audio");
+  const requested = typeof audio?.audio_role === "string"
+    ? audio.audio_role
+    : "reference_audio";
+  const role = AUDIO_ROUTING_ROLES.includes(requested as AudioRoutingRole)
+    ? requested as AudioRoutingRole
+    : "reference_audio";
+  const duration = typeof audio?.duration === "number" && Number.isFinite(audio.duration)
+    ? audio.duration
+    : null;
+  return { role, duration };
+}
+
 function requireInput(node: ComfyApiNode, input: string) {
   if (!(input in node.inputs)) {
     throw new Error(
@@ -193,7 +237,7 @@ function normalizeRequest(value: unknown): StudioJobRequest {
     throw new Error("candidateCount deve essere 1, 2, 3 o 4");
   }
 
-  const shotCount = value.shotCount === undefined ? 1 : Number(value.shotCount);
+  let shotCount = value.shotCount === undefined ? 1 : Number(value.shotCount);
   if (!Number.isInteger(shotCount) || shotCount < 1 || shotCount > 12) {
     throw new Error("shotCount deve essere un intero da 1 a 12");
   }
@@ -253,6 +297,7 @@ function normalizeRequest(value: unknown): StudioJobRequest {
   }
 
   const media = normalizeMediaState(value.mediaState);
+  const audioRouting = audioRoutingFromMediaState(media.json);
   if (
     aspectFormat === "keep source aspect" &&
     media.pictures + media.videos < 1
@@ -289,6 +334,24 @@ function normalizeRequest(value: unknown): StudioJobRequest {
     media.pictures + media.videos + media.audios < 1
   ) {
     throw new Error("Reference richiede almeno un asset");
+  }
+  if (audioRouting.role === "music_video_lipsync") {
+    if (generationMode !== "R2V") {
+      throw new Error("Music video + lip-sync richiede la modalità Reference");
+    }
+    if (!audioRouting.duration || audioRouting.duration <= 0) {
+      throw new Error(
+        "Music video + lip-sync richiede un Audio 1 con durata rilevata",
+      );
+    }
+    shotCount = Math.ceil(
+      audioRouting.duration / EFFECTIVE_SHOT_SECONDS[durationSeconds],
+    );
+    if (shotCount > 12) {
+      throw new Error(
+        "Il brano richiede più di 12 shot: scegli shot da 15s o accorcia l’audio",
+      );
+    }
   }
 
   const referenceRoles =
@@ -442,7 +505,9 @@ function resolveEngineSettings(
   request: StudioJobRequest,
   runtimeSettings: RuntimeSettings,
 ): ResolvedEngineSettings {
-  const fast = request.qualityMode === "fast" && request.turboEnabled;
+  const musicVideo =
+    audioRoutingFromMediaState(request.mediaState).role === "music_video_lipsync";
+  const fast = request.qualityMode === "fast" && request.turboEnabled && !musicVideo;
   if (fast) {
     assertPddModelCompatibility(
       runtimeSettings.fast.model,
@@ -498,6 +563,8 @@ export function prepareStudioJob(
     const prompt = clonePrompt(sourcePrompt);
     const requestNode = uniqueNode(prompt, "H3AIOAutopromptRequest");
     const sampler = uniqueNode(prompt, "H3ReferenceMemorySampler");
+    const [routerId] = uniqueNodeEntry(prompt, "H3AIOGenerationRouter");
+    const audioRouting = audioRoutingFromMediaState(request.mediaState);
     const size = uniqueNode(prompt, "H3AspectMegapixelSize");
     const saver = uniqueNode(prompt, "H3SaveContinuation");
     const media = uniqueNode(prompt, "MiniMaxH3MediaLoader");
@@ -512,6 +579,7 @@ export function prepareStudioJob(
       "shot_count",
       "max_auto_shots",
       "shot_seconds",
+      "audio_1_role",
       "keyframe_positions",
       "source_video_audio",
     ]) {
@@ -544,6 +612,7 @@ export function prepareStudioJob(
     requestNode.inputs.shot_count = request.shotCount;
     requestNode.inputs.max_auto_shots = request.shotCount;
     requestNode.inputs.shot_seconds = request.durationSeconds;
+    requestNode.inputs.audio_1_role = audioRouting.role;
     requestNode.inputs.keyframe_positions = request.keyframePositions;
     requestNode.inputs.source_video_audio = request.sourceVideoAudio;
     sampler.inputs.seed = candidateSeed;
@@ -583,6 +652,18 @@ export function prepareStudioJob(
       sampler.inputs.pdd_acc_file = resolvedEngine.pddFile;
       shift.inputs.shift_video = 12;
       shift.inputs.shift_audio = 3;
+    }
+    if (audioRouting.role === "music_video_lipsync") {
+      sampler.class_type = "H3MusicVideoReferenceMemorySampler";
+      sampler.inputs.soundtrack = [routerId, 17];
+      sampler.inputs.audio_output_mode = "original_soundtrack";
+      sampler.inputs.trim_to_soundtrack = true;
+      delete sampler.inputs.keyframe_plan;
+      delete sampler.inputs.pdd_acc_file;
+      delete sampler.inputs.studio_context_prefix;
+      delete sampler.inputs.studio_context_clip_index;
+      delete sampler.inputs.studio_source_context_prefix;
+      delete sampler.inputs.studio_source_context_clip_index;
     }
 
     candidates.push({
@@ -649,6 +730,7 @@ export function publicDryRun(
     keyframePositions: prepared.request.keyframePositions,
     projectId: prepared.request.projectId,
     sourceJobId: prepared.request.sourceJobId,
+    audioRoutingRole: audioRoutingFromMediaState(prepared.request.mediaState).role,
     muteDiegetic: prepared.request.muteDiegetic,
     muteNonDiegetic: prepared.request.muteNonDiegetic,
     continuationOnly: prepared.candidates.every(

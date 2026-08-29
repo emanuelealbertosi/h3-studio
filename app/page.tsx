@@ -130,6 +130,14 @@ const uiModeByGeneration: Record<GenerationMode, StudioMode> = {
   "VIDEO EDITING": "edit",
 };
 
+type AudioRoutingRole =
+  | "reference_audio"
+  | "voice_ref"
+  | "ignore"
+  | "exact_soundtrack"
+  | "exact_soundtrack_plus_h3_sfx"
+  | "music_video_lipsync";
+
 type MediaAsset = {
   kind: "picture" | "video" | "audio";
   file: string;
@@ -147,6 +155,7 @@ type MediaAsset = {
   height?: number | null;
   has_audio?: boolean;
   audio_mode?: "paired" | "standalone" | "off";
+  audio_role?: AudioRoutingRole;
   uid: string;
 };
 
@@ -5621,6 +5630,7 @@ function StudioApp() {
             : asset.kind === "audio"
               ? "standalone" as const
               : "off" as const,
+        audio_role: asset.kind === "audio" ? "reference_audio" as const : undefined,
         uid: crypto.randomUUID(),
       },
     ].slice(0, 18));
@@ -5656,7 +5666,13 @@ function StudioApp() {
         }
         uploaded.push({
           ...payload.asset,
-          audio_mode: payload.asset.kind === "video" ? "paired" : "off",
+          audio_mode:
+            payload.asset.kind === "video"
+              ? "paired"
+              : payload.asset.kind === "audio"
+                ? "standalone"
+                : "off",
+          audio_role: payload.asset.kind === "audio" ? "reference_audio" : undefined,
           uid: crypto.randomUUID(),
         });
         if (payload.external) {
@@ -6699,6 +6715,49 @@ function StudioApp() {
                               value={asset.caption ?? ""}
                             />
                           </label>
+                          {asset.kind === "audio" && mediaAssets
+                            .slice(0, index + 1)
+                            .filter((item) => item.kind === "audio").length === 1 && (
+                            <label className="audio-routing-role">
+                              <span>Uso di Audio 1</span>
+                              <select
+                                onChange={(event) => {
+                                  const audioRole = event.target.value as AudioRoutingRole;
+                                  setMediaAssets((current) => current.map((item) =>
+                                    item.uid === asset.uid
+                                      ? { ...item, audio_role: audioRole }
+                                      : item
+                                  ));
+                                  if (audioRole === "music_video_lipsync") {
+                                    setMode("reference");
+                                    setTurboEnabled(false);
+                                    if (asset.duration && asset.duration > 0) {
+                                      setShotCount(Math.min(
+                                        12,
+                                        Math.max(1, Math.ceil(asset.duration / duration)),
+                                      ));
+                                    }
+                                    setRunMessage(
+                                      "Music video: shot sincronizzati automaticamente, brano originale nel master finale e Turbo disattivato.",
+                                    );
+                                  }
+                                }}
+                                value={asset.audio_role ?? "reference_audio"}
+                              >
+                                <option value="reference_audio">Reference audio H3</option>
+                                <option value="voice_ref">Riferimento voce / timbro</option>
+                                <option value="exact_soundtrack">Soundtrack esatto</option>
+                                <option value="exact_soundtrack_plus_h3_sfx">Soundtrack esatto + SFX H3</option>
+                                <option value="music_video_lipsync">Music video + lip-sync</option>
+                                <option value="ignore">Ignora Audio 1</option>
+                              </select>
+                              {asset.audio_role === "music_video_lipsync" && (
+                                <small>
+                                  Il brano viene diviso per shot e preservato identico; H3 sincronizza la performance sulle porzioni corrispondenti.
+                                </small>
+                              )}
+                            </label>
+                          )}
                           {shotCount > 1 && (
                             <div className="shot-schedule">
                               <span>Presenza negli shot</span>

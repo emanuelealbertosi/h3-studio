@@ -99,6 +99,15 @@ sezioni, durata fino a sei minuti, seed e decode tiled. Entrambi espongono
 progresso, interruzione, player, download, tempo di esecuzione e registrano
 l'output come audio riutilizzabile in Libreria.
 
+Nel Video Studio, la card `Audio 1` espone anche **Music video + lip-sync**:
+il brano viene suddiviso automaticamente sulle finestre H3, ogni shot riceve
+la porzione temporale corretta come `<Soundtrack>`, la memoria visiva collega
+gli shot e il master viene rifilato alla durata del brano usando l'audio
+originale invariato. Il numero di shot è calcolato dalla durata rilevata
+(massimo 12); questa modalità usa il sampler standard e disattiva
+automaticamente PDD/Turbo, mantenendo comunque 8 step quando era selezionato
+FAST.
+
 La modalità **Parlato → brano** prende un audio da disco o Libreria, ne usa
 trascrizione e durata reale per progettare una base strumentale con il planner
 LLM, quindi produce un unico WAV stereo con voce preservata, ducking regolabile,

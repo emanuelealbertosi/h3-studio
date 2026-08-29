@@ -52,6 +52,29 @@ deterministicamente la modalità strumentale e le parole fornite dall'utente
 vengono conservate nella loro lingua. Il popup **Rigenera** mostra separatamente
 caption tecnica e lyrics, entrambe modificabili.
 
+## Music video e lip-sync H3
+
+Un brano completato o importato può essere inviato al Video Studio e impostato,
+nella card `Audio 1`, come **Music video + lip-sync**. Non è un semplice mux e
+non chiede a MiniMax Music di creare un secondo brano:
+
+- la durata rilevata determina automaticamente il numero di shot H3;
+- il sampler riceve per ogni shot la porzione temporale corrispondente come
+  `<Soundtrack>`;
+- il planner descrive performance, bocca e respiro sincronizzati senza
+  inventare o trascrivere il testo;
+- l'audio H3 generato viene scartato e il file originale diventa il master
+  finale;
+- video e audio sono rifilati alla durata esatta del brano;
+- PDD/Turbo viene escluso automaticamente perché non è compatibile con il
+  sampler musicale; il preset FAST diventa standard 8-step.
+
+La modalità richiede `Reference`, un `Audio 1` con durata leggibile e al
+massimo 12 shot. Un'immagine del cantante può essere aggiunta come Picture
+reference. **Soundtrack esatto** resta disponibile quando serve soltanto
+conservare/muxare l'audio senza il condizionamento temporale dedicato al
+lip-sync.
+
 ## Parlato → brano
 
 Questa modalità conserva il parlato originale e gli costruisce intorno una base
