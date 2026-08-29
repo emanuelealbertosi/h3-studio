@@ -38,7 +38,6 @@ type JobRow = {
   duration_seconds: number;
   megapixels: number;
   generation_mode: GenerationMode;
-  video_edit_engine: StudioJobRequest["videoEditEngine"];
   aspect_format: StudioJobRequest["aspectFormat"];
   requested_seed: string | null;
   model: string;
@@ -295,8 +294,8 @@ export class JobRepository {
             keyframe_positions, source_video_audio,
             project_id, source_job_id, mute_diegetic, mute_non_diegetic,
             quality_mode, turbo_enabled, engine_profile, pdd_file,
-            model, lora, lora_strength, steps, video_edit_engine
-          ) VALUES (?, 'prepared', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            model, lora, lora_strength, steps
+          ) VALUES (?, 'prepared', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           prepared.jobId,
@@ -327,7 +326,6 @@ export class JobRepository {
           JSON.stringify(settings.loras),
           settings.loraStrength,
           settings.steps,
-          prepared.request.videoEditEngine,
         );
 
       const insertCandidate = this.database.prepare(
@@ -486,7 +484,6 @@ export class JobRepository {
           | 0.7
           | 0.98,
         generationMode: job.generation_mode,
-        videoEditEngine: job.video_edit_engine,
         aspectFormat: job.aspect_format,
         seedMode: job.seed_mode,
         qualityMode: job.quality_mode,

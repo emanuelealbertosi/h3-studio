@@ -679,7 +679,6 @@ type RemoteJob = {
     durationSeconds: 5 | 10 | 15;
     megapixels: Megapixels;
     generationMode: GenerationMode;
-    videoEditEngine?: "h3" | "bernini";
     aspectFormat: string;
     seedMode?: SeedMode;
     qualityMode?: QualityMode;
@@ -4659,7 +4658,6 @@ function StudioApp() {
   const [duration, setDuration] = useState<5 | 10 | 15>(10);
   const [megapixels, setMegapixels] = useState<Megapixels>(0.5);
   const [mode, setMode] = useState<StudioMode>("t2v");
-  const [videoEditEngine, setVideoEditEngine] = useState<"h3" | "bernini">("h3");
   const [aspectFormat, setAspectFormat] = useState("16:9 landscape");
   const [seedMode, setSeedMode] = useState<SeedMode>("random");
   const [seedValue, setSeedValue] = useState("1024");
@@ -4834,9 +4832,7 @@ function StudioApp() {
   }, [mediaAssets, mediaExternalAssets, mediaGeneratedImages, mediaLibraryAssets, mediaRecentJobs, mentionState?.query]);
   const modeConfig = modes.find((item) => item.value === mode) ?? modes[0];
   const effectiveSteps =
-    mode === "edit" && videoEditEngine === "bernini"
-      ? 20
-      : qualityMode === "fast"
+    qualityMode === "fast"
       ? fastSteps
       : qualityMode === "min"
         ? 12
@@ -4844,9 +4840,7 @@ function StudioApp() {
           ? 20
           : 30;
   const generationPreset: GenerationPreset =
-    mode === "edit" && videoEditEngine === "bernini"
-      ? "20"
-      : qualityMode === "fast"
+    qualityMode === "fast"
       ? turboEnabled ? "fast" : "8"
       : qualityMode === "min"
         ? "12"
@@ -4989,7 +4983,6 @@ function StudioApp() {
     setCurrentJobMegapixels(job.request.megapixels);
     setAspectFormat(job.request.aspectFormat);
     setMode(uiModeByGeneration[job.request.generationMode] ?? "t2v");
-    setVideoEditEngine(job.request.videoEditEngine ?? "h3");
     setSeedMode(
       job.request.seedMode ??
         (job.request.seed === undefined ? "random" : "base"),
@@ -5331,7 +5324,6 @@ function StudioApp() {
           durationSeconds: duration,
           megapixels,
           generationMode,
-          videoEditEngine: mode === "edit" ? videoEditEngine : "h3",
           aspectFormat,
           seedMode,
           qualityMode,
@@ -6490,37 +6482,6 @@ function StudioApp() {
                 </select>
               </label>
 
-              {mode === "edit" && (
-                <fieldset className="segmented-control">
-                  <legend>Motore Edit</legend>
-                  <div>
-                    <button
-                      className={videoEditEngine === "h3" ? "selected" : ""}
-                      onClick={() => setVideoEditEngine("h3")}
-                      title="Edit creativo H3: segue bene prompt, movimento e ritmo, ma può reinterpretare il sorgente."
-                      type="button"
-                    >
-                      H3 creativo
-                    </button>
-                    <button
-                      className={videoEditEngine === "bernini" ? "selected" : ""}
-                      onClick={() => {
-                        setVideoEditEngine("bernini");
-                        setDuration(5);
-                        setMegapixels(0.5);
-                        setQualityMode("med");
-                        setTurboEnabled(false);
-                      }}
-                      title="Bernini Preview 1.3B: usa il video come canvas e applica un edit più fedele. 480p, 20 step, massimo 15s."
-                      type="button"
-                    >
-                      Bernini fedele
-                    </button>
-                  </div>
-                  <small>{videoEditEngine === "bernini" ? "Preview 1.3B · 480p · 20 step · audio sorgente conservato" : "Hybrid H3 · edit creativo"}</small>
-                </fieldset>
-              )}
-
               <label className="select-control">
                 <span>Formato</span>
                 <select
@@ -6602,19 +6563,10 @@ function StudioApp() {
                   ].map((item) => (
                     <button
                       className={megapixels === item.value ? "selected" : ""}
-                      disabled={
-                        (duration === 15 && item.value > 0.7) ||
-                        (mode === "edit" && videoEditEngine === "bernini" && item.value > 0.5)
-                      }
+                      disabled={duration === 15 && item.value > 0.7}
                       key={item.value}
                       onClick={() => setMegapixels(item.value as Megapixels)}
-                      title={
-                        mode === "edit" && videoEditEngine === "bernini" && item.value > 0.5
-                          ? "Bernini Preview 1.3B lavora a circa 480p"
-                          : duration === 15 && item.value > 0.7
-                            ? "Non disponibile a 15 secondi"
-                            : undefined
-                      }
+                      title={duration === 15 && item.value > 0.7 ? "Non disponibile a 15 secondi" : undefined}
                       type="button"
                     >
                       <strong>{item.label}</strong>
@@ -6641,16 +6593,11 @@ function StudioApp() {
                   ].map((item) => (
                     <button
                       className={generationPreset === item.value ? "selected" : ""}
-                      disabled={
-                        (mode === "edit" && item.value === "fast") ||
-                        (mode === "edit" && videoEditEngine === "bernini" && item.value !== "20")
-                      }
+                      disabled={mode === "edit" && item.value === "fast"}
                       key={item.value}
                       onClick={() => selectGenerationPreset(item.value as GenerationPreset)}
                       title={
-                        mode === "edit" && videoEditEngine === "bernini" && item.value !== "20"
-                          ? "Bernini Preview 1.3B usa il profilo fisso a 20 step"
-                          : mode === "edit" && item.value === "fast"
+                        mode === "edit" && item.value === "fast"
                           ? "Edit usa il modello H3 standard/Hybrid; PDD FAST non è disponibile"
                           : undefined
                       }
@@ -7035,11 +6982,7 @@ function StudioApp() {
             <div className="composer-footer">
               <div className="preset-note">
                 <span className="fast-badge">{generationPreset === "fast" ? "FAST" : `${effectiveSteps} STEP`}</span>
-                {mode === "edit" && videoEditEngine === "bernini"
-                  ? "Bernini fedele Preview 1.3B · 20 step · circa 480p"
-                  : generationPreset === "fast"
-                    ? "Alibaba PDD-Acc · 8 step"
-                    : `H3 standard · ${effectiveSteps} step`} · {shotCount > 1 ? `${shotCount} shot × ${duration}s ≈ ${shotCount * duration}s` : `${duration}s`} · {formatMegapixels(megapixels)} MP
+                {generationPreset === "fast" ? "Alibaba PDD-Acc · 8 step" : `H3 standard · ${effectiveSteps} step`} · {shotCount > 1 ? `${shotCount} shot × ${duration}s ≈ ${shotCount * duration}s` : `${duration}s`} · {formatMegapixels(megapixels)} MP
               </div>
               <div className="generation-cta">
                 <div>

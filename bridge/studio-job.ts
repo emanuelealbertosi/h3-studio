@@ -10,13 +10,6 @@ import { assertPddModelCompatibility } from "./pdd-compatibility.js";
 import type { FastWorkflowStore } from "./fast-workflow-store.js";
 import type { ComfyProgressTracker } from "./comfy-progress.js";
 import type { JobRepository } from "./job-repository.js";
-import {
-  BERNINI_PREVIEW_MODEL,
-  BERNINI_PREVIEW_STEPS,
-  BERNINI_TEXT_ENCODER,
-  BERNINI_VAE,
-  buildBerniniPrompt,
-} from "./bernini-workflow.js";
 
 const MAX_SEED = 9_007_199_254_740_000;
 const BASE_SECONDS_5S_05MP = 172;
@@ -68,7 +61,6 @@ export type GenerationMode = (typeof GENERATION_MODES)[number];
 export type SeedMode = "random" | "base" | "fixed";
 export type QualityMode = "fast" | "min" | "med" | "max";
 export type AudioRoutingRole = (typeof AUDIO_ROUTING_ROLES)[number];
-export type VideoEditEngine = "h3" | "bernini";
 
 export type StudioJobRequest = {
   prompt: string;
@@ -77,7 +69,6 @@ export type StudioJobRequest = {
   durationSeconds: 5 | 10 | 15;
   megapixels: 0.5 | 0.7 | 0.98;
   generationMode: GenerationMode;
-  videoEditEngine: VideoEditEngine;
   aspectFormat: AspectFormat;
   seedMode: SeedMode;
   qualityMode: QualityMode;
@@ -240,7 +231,7 @@ function normalizeMediaState(value: unknown) {
   return { json: JSON.stringify(items), pictures, videos, audios };
 }
 
-export function normalizeRequest(value: unknown): StudioJobRequest {
+function normalizeRequest(value: unknown): StudioJobRequest {
   if (!isRecord(value)) throw new Error("Body JSON mancante");
   const prompt = typeof value.prompt === "string" ? value.prompt.trim() : "";
   if (prompt.length < 3 || prompt.length > 20_000) {
@@ -277,11 +268,6 @@ export function normalizeRequest(value: unknown): StudioJobRequest {
       : "T2V";
   if (!GENERATION_MODES.includes(generationMode as GenerationMode)) {
     throw new Error("Modalità di generazione non supportata");
-  }
-  const videoEditEngine: VideoEditEngine =
-    value.videoEditEngine === "bernini" ? "bernini" : "h3";
-  if (videoEditEngine === "bernini" && generationMode !== "VIDEO EDITING") {
-    throw new Error("Bernini fedele è disponibile soltanto in Edit video");
   }
 
   const aspectFormat =
@@ -425,7 +411,6 @@ export function normalizeRequest(value: unknown): StudioJobRequest {
     durationSeconds: durationSeconds as 5 | 10 | 15,
     megapixels: megapixels as 0.5 | 0.7 | 0.98,
     generationMode: generationMode as GenerationMode,
-    videoEditEngine,
     aspectFormat: aspectFormat as AspectFormat,
     seedMode,
     qualityMode,
@@ -736,48 +721,6 @@ export function prepareStudioJob(
   return { jobId, request, candidates, engineSettings: resolvedEngine };
 }
 
-export function prepareBerniniStudioJob(
-  rawRequest: unknown,
-  jobId = randomUUID(),
-  excludedSeeds: ReadonlySet<number> = new Set(),
-  comfyOutputDir?: string,
-) {
-  const request = normalizeRequest(rawRequest);
-  if (request.videoEditEngine !== "bernini") {
-    throw new Error("Motore Bernini non richiesto");
-  }
-  const baseSeed = request.seed ?? randomSeed();
-  const randomSeeds = new Set<number>();
-  const candidates: PreparedCandidate[] = [];
-  for (let index = 1; index <= request.candidateCount; index += 1) {
-    let seed: number;
-    if (request.seedMode === "fixed") seed = baseSeed;
-    else if (request.seedMode === "base") seed = (baseSeed + index - 1) % MAX_SEED;
-    else {
-      do seed = randomSeed();
-      while (randomSeeds.has(seed) || excludedSeeds.has(seed));
-      randomSeeds.add(seed);
-    }
-    const filenamePrefix = `video/H3_STUDIO/${jobId}/candidate_${index}`;
-    candidates.push({
-      index,
-      seed,
-      filenamePrefix,
-      prompt: buildBerniniPrompt(request, seed, filenamePrefix, comfyOutputDir),
-    });
-  }
-  const engineSettings: ResolvedEngineSettings = {
-    profile: "standard",
-    model: BERNINI_PREVIEW_MODEL,
-    pddFile: null,
-    loras: [],
-    lora: "",
-    loraStrength: 0,
-    steps: BERNINI_PREVIEW_STEPS,
-  };
-  return { jobId, request, candidates, engineSettings };
-}
-
 export function estimateExecutionTime(
   request: StudioJobRequest,
   engineSettings: ResolvedEngineSettings,
@@ -834,13 +777,11 @@ export function publicDryRun(
     audioRoutingRole: audioRoutingFromMediaState(prepared.request.mediaState).role,
     muteDiegetic: prepared.request.muteDiegetic,
     muteNonDiegetic: prepared.request.muteNonDiegetic,
-    continuationOnly: prepared.request.videoEditEngine === "bernini"
-      ? true
-      : prepared.candidates.every(
-          (candidate) =>
-            uniqueNode(candidate.prompt, "H3SaveContinuation").inputs
-              .prepend_source_video === false,
-        ),
+    continuationOnly: prepared.candidates.every(
+      (candidate) =>
+        uniqueNode(candidate.prompt, "H3SaveContinuation").inputs
+          .prepend_source_video === false,
+    ),
     promptLength: prepared.request.prompt.length,
     estimatedExecution,
     candidates: prepared.candidates.map((candidate) => ({
@@ -860,7 +801,6 @@ export class StudioJobService {
     private readonly runtimeSettings: RuntimeSettingsStore,
     private readonly progressTracker: ComfyProgressTracker,
     private readonly jobs: JobRepository,
-    private readonly comfyOutputDir: string,
   ) {}
 
   async prepare(
@@ -868,36 +808,6 @@ export class StudioJobService {
     excludedSeeds: ReadonlySet<number> = new Set(),
     runtimeOverride?: RuntimeSettings,
   ) {
-    const wantsBernini = isRecord(rawRequest) &&
-      rawRequest.generationMode === "VIDEO EDITING" &&
-      rawRequest.videoEditEngine === "bernini";
-    if (wantsBernini) {
-      const [conditioningInfo, modelInfo, clipInfo, vaeInfo] = await Promise.all([
-        this.comfy.objectInfo("BerniniConditioning").catch(() => null),
-        this.comfy.models("diffusion_models"),
-        this.comfy.modelFiles("text_encoders"),
-        this.comfy.modelFiles("vae"),
-      ]);
-      if (!isRecord(conditioningInfo) || !isRecord(conditioningInfo.BerniniConditioning)) {
-        throw new Error("Nodo BerniniConditioning non disponibile: aggiorna e riavvia ComfyUI");
-      }
-      const missing = [
-        !modelInfo.includes(BERNINI_PREVIEW_MODEL) ? BERNINI_PREVIEW_MODEL : null,
-        !clipInfo.includes(BERNINI_TEXT_ENCODER) ? BERNINI_TEXT_ENCODER : null,
-        !vaeInfo.includes(BERNINI_VAE) ? BERNINI_VAE : null,
-      ].filter((item): item is string => item !== null);
-      if (missing.length > 0) {
-        throw new Error(`Dipendenze Bernini mancanti: ${missing.join(", ")}. Riavvia ComfyUI dopo il download.`);
-      }
-      return {
-        prepared: prepareBerniniStudioJob(
-          rawRequest,
-          randomUUID(),
-          excludedSeeds,
-          this.comfyOutputDir,
-        ),
-      };
-    }
     const wantsFast = isRecord(rawRequest) &&
       rawRequest.qualityMode !== "min" &&
       rawRequest.qualityMode !== "med" &&

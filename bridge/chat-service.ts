@@ -101,16 +101,6 @@ const EXACT_AUDIO_VIDEO_PATTERN = /\b(?:audio\s+esatto|traccia\s+esatta|preserva
 const REFERENCE_VIDEO_INTENT_PATTERN = /\b(?:come\s+(?:riferimento|reference)|as\s+(?:a\s+)?reference|reference|riferimento|ispirati\s+(?:a|alla|al))\b/i;
 const KEEP_SOURCE_ASPECT_PATTERN = /\b(?:mantieni|conserva|preserva)\s+(?:il\s+)?(?:formato|aspect\s+ratio|proporzioni)|\bkeep\s+(?:the\s+)?(?:aspect\s+ratio|format)\b/i;
 const KEYFRAME_INTENT_PATTERN = /\b(?:key[\s-]?frames?|fotogramm[io]\s+chiave|(?:primo|iniziale|ultimo|finale|intermedi(?:[oae])?)\s+(?:frame|fotogramm[io])|(?:frame|fotogramm[io])\s+(?:iniziale|finale|intermedi(?:[oae])?))\b/i;
-const BERNINI_EDIT_INTENT_PATTERN = /\b(?:bernini|edit(?:ing)?\s+fedele|modifica\s+fedele|pixel[\s-]?faithful|faithful\s+(?:edit|editing)|mantieni\s+(?:il\s+)?video\s+(?:identic[oa]|invariat[oa])|usa\s+(?:il\s+)?video\s+come\s+canvas)\b/i;
-
-export function resolveChatVideoEditEngine(
-  content: string,
-  generationMode: GenerationMode,
-) {
-  return generationMode === "VIDEO EDITING" && BERNINI_EDIT_INTENT_PATTERN.test(content)
-    ? "bernini" as const
-    : "h3" as const;
-}
 const FIRST_KEYFRAME_PATTERN = /\b(?:(?:primo|iniziale)\s+(?:frame|fotogramma)|(?:frame|fotogramma)\s+iniziale|first\s+(?:frame|keyframe))\b/i;
 const LAST_KEYFRAME_PATTERN = /\b(?:(?:ultimo|finale)\s+(?:frame|fotogramma)|(?:frame|fotogramma)\s+finale|last\s+(?:frame|keyframe)|end\s+frame)\b/i;
 const INTERMEDIATE_KEYFRAME_PATTERN = /\b(?:intermedi(?:[oae])?|intermediate|middle)\s*(?:frame|fotogramm[io]|key[\s-]?frames?)?|\b(?:frame|fotogramm[io]|key[\s-]?frames?)\s+intermedi(?:[oae])?\b/i;
@@ -839,7 +829,6 @@ export class ChatService {
           durationSeconds: timing.durationSeconds,
           megapixels: 0.5,
           generationMode,
-          videoEditEngine: resolveChatVideoEditEngine(requestText, generationMode),
           aspectFormat:
             (generationMode === "I2V" || generationMode === "KEYFRAMES") && KEEP_SOURCE_ASPECT_PATTERN.test(requestText)
               ? "keep source aspect"

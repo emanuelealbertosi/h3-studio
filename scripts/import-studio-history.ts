@@ -126,7 +126,6 @@ try {
             ? (Number(size.inputs.megapixels) as 0.5 | 0.7 | 0.98)
             : 0.5,
       generationMode: "T2V",
-      videoEditEngine: "h3",
       aspectFormat: String(size.inputs.aspect_format ?? "16:9 landscape") as StudioJobRequest["aspectFormat"],
       seedMode: "base",
       qualityMode: "fast",
