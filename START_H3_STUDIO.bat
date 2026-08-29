@@ -72,14 +72,14 @@ if "%H3_BRIDGE_REUSE%"=="0" (
 )
 
 echo [H3 Studio] Avvio interfaccia su http://localhost:3000
-start "H3 Studio - Web" cmd /k "cd /d ""%~dp0"" && node_modules\.bin\vinext.cmd dev"
+start "H3 Studio - Web" cmd /k "cd /d ""%~dp0"" && node_modules\.bin\vinext.cmd dev --hostname 127.0.0.1"
 
 if /i "%H3_ENABLE_TAILSCALE%"=="1" (
   where tailscale.exe >nul 2>nul
   if errorlevel 1 (
     echo [AVVISO] Tailscale richiesto ma tailscale.exe non e nel PATH.
   ) else (
-  tailscale.exe serve --bg --yes --https=443 http://[::1]:3000
+  tailscale.exe serve --bg --yes --https=443 http://127.0.0.1:3000
   tailscale.exe serve --bg --yes --https=%H3_BRIDGE_PORT_RESOLVED% %H3_BRIDGE_URL_RESOLVED%
   )
 )

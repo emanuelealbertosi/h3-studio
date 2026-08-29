@@ -225,6 +225,16 @@ function testLauncherWiring() {
     true,
     "Il launcher avvia sempre un secondo bridge",
   );
+  assert.equal(
+    launcher.includes("vinext.cmd dev --hostname 127.0.0.1"),
+    true,
+    "Il frontend non è vincolato esplicitamente al loopback IPv4",
+  );
+  assert.equal(
+    launcher.includes("tailscale.exe serve --bg --yes --https=443 http://127.0.0.1:3000"),
+    true,
+    "Tailscale inoltra ancora verso il vecchio listener IPv6-only",
+  );
 }
 
 async function testStaleListenerCleanup() {
