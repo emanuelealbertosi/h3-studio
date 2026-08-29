@@ -1839,6 +1839,8 @@ function MontagesPanel({
   );
 }
 
+type MediaLibraryCategory = "all" | "montages" | "assets" | "images" | "external" | "videos";
+
 function MediaLibraryPanel({
   onUseReferences,
   onUseVideo,
@@ -1870,6 +1872,7 @@ function MediaLibraryPanel({
   const [libraryBulkMode, setLibraryBulkMode] = useState(false);
   const [libraryBulkSelected, setLibraryBulkSelected] = useState<string[]>([]);
   const [libraryBulkDeleting, setLibraryBulkDeleting] = useState(false);
+  const [libraryCategory, setLibraryCategory] = useState<MediaLibraryCategory>("all");
 
   useEffect(() => {
     let disposed = false;
@@ -2219,6 +2222,18 @@ function MediaLibraryPanel({
   const videos = jobs.flatMap((job) =>
     job.candidates.filter((candidate) => candidate.output).map((candidate) => ({ job, candidate })),
   );
+  const libraryCategoryOptions: Array<{ value: MediaLibraryCategory; label: string; count: number }> = [
+    {
+      value: "all",
+      label: "Tutto",
+      count: montages.length + assets.length + generatedImages.length + externalAssets.length + videos.length,
+    },
+    { value: "montages", label: "Montaggi", count: montages.length },
+    { value: "assets", label: "Asset", count: assets.length + taggedGeneratedImages.length },
+    { value: "images", label: "Immagini", count: untaggedGeneratedImages.length },
+    { value: "external", label: "Esterni", count: externalAssets.length },
+    { value: "videos", label: "Video", count: videos.length },
+  ];
 
   return (
     <section className="media-library-panel">
@@ -2233,7 +2248,22 @@ function MediaLibraryPanel({
         </div>
       </div>
 
-      <section className="media-library-section">
+      <nav aria-label="Filtra la Libreria per categoria" className="media-library-category-filter">
+        {libraryCategoryOptions.map((option) => (
+          <button
+            aria-pressed={libraryCategory === option.value}
+            className={libraryCategory === option.value ? "active" : ""}
+            key={option.value}
+            onClick={() => setLibraryCategory(option.value)}
+            type="button"
+          >
+            <span>{option.label}</span>
+            <strong>{option.count}</strong>
+          </button>
+        ))}
+      </nav>
+
+      {(libraryCategory === "all" || libraryCategory === "montages") && <section className="media-library-section">
         <div><h3>Montaggi</h3><span>{montages.length} timeline</span></div>
         <div className="media-library-grid">
           {montages.map((timeline) => (
@@ -2250,9 +2280,9 @@ function MediaLibraryPanel({
           ))}
           {!montages.length && <div className="media-library-empty">Nessun montaggio disponibile</div>}
         </div>
-      </section>
+      </section>}
 
-      <section className="media-library-section">
+      {(libraryCategory === "all" || libraryCategory === "assets") && <section className="media-library-section">
         <div><h3>Personaggi, oggetti e luoghi</h3><span>{assets.length + taggedGeneratedImages.length} asset</span></div>
         <div className="media-library-grid">
           {assets.map((asset) => (
@@ -2284,9 +2314,9 @@ function MediaLibraryPanel({
           })}
           {!assets.length && !taggedGeneratedImages.length && <div className="media-library-empty">Nessun personaggio, oggetto o luogo</div>}
         </div>
-      </section>
+      </section>}
 
-      {untaggedGeneratedImages.length > 0 && (
+      {(libraryCategory === "all" || libraryCategory === "images") && (
         <section className="media-library-section">
           <div><h3>Immagini senza tag</h3><span>{untaggedGeneratedImages.length} immagini</span></div>
           <div className="media-library-grid">
@@ -2305,10 +2335,11 @@ function MediaLibraryPanel({
                 </article>
               );
             })}
+            {!untaggedGeneratedImages.length && <div className="media-library-empty">Nessuna immagine senza tag</div>}
           </div>
         </section>
       )}
-      <section className="media-library-section">
+      {(libraryCategory === "all" || libraryCategory === "external") && <section className="media-library-section">
         <div><h3>Esterni</h3><span>{externalAssets.length} media</span></div>
         <div className="media-library-grid">
           {externalAssets.map((asset) => (
@@ -2345,9 +2376,9 @@ function MediaLibraryPanel({
           ))}
           {!externalAssets.length && <div className="media-library-empty">Nessun media esterno caricato</div>}
         </div>
-      </section>
+      </section>}
 
-      <section className="media-library-section">
+      {(libraryCategory === "all" || libraryCategory === "videos") && <section className="media-library-section">
         <div><h3>Video generati</h3><span>{videos.length} video</span></div>
         <div className="media-library-grid">
           {videos.slice(0, 36).map(({ job, candidate }) => (
@@ -2376,7 +2407,7 @@ function MediaLibraryPanel({
           ))}
           {!videos.length && <div className="media-library-empty">Nessun video completato</div>}
         </div>
-      </section>
+      </section>}
     </section>
   );
 }

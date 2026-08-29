@@ -95,6 +95,9 @@ Aggiornamento: 28 agosto 2026
 
 ## Assets e Libreria
 
+- [ ] Filtro Libreria: verificare Tutto, Montaggi, Asset, Immagini, Esterni e Video, inclusi conteggi e stato attivo.
+- [ ] Filtro Libreria: selezionare più elementi, cambiare categoria e verificare che selezione e cancellazione multipla restino coerenti.
+
 - [x] Eliminazione multipla degli asset.
 - [x] Conservazione dei media prodotti da Chat/Studio.
 - [ ] Persistenza dei file esterni con origine `Esterno`.

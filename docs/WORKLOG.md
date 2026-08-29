@@ -1,5 +1,11 @@
 # Worklog
 
+### 29 agosto 2026 — Filtro categorie nella Libreria
+
+- Aggiunto un filtro compatto con conteggi reali per Tutto, Montaggi, Asset, Immagini, Esterni e Video.
+- Il filtro nasconde solo le sezioni non pertinenti: rinomina, invio allo Studio, cancellazione e selezione multipla restano disponibili sugli elementi mostrati.
+- La barra è orizzontalmente scorrevole sugli schermi stretti.
+
 ## 29 agosto 2026 — Multishot 1–12 nello Studio
 
 - Rimosso il vincolo implicito `shot_count=1`: ogni candidato usa ora da 1 a 12 shot concatenati dallo stesso sampler con frame memory.
