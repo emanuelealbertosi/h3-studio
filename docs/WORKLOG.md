@@ -1,5 +1,12 @@
 # Worklog
 
+### 29 agosto 2026 — Routing deterministico immagine Chat → I2V/R2V
+
+- La Chat recupera ora anche “ultima/precedente immagine” e varianti equivalenti, evitando prompt `Picture 1` senza media allegato.
+- “Anima/trasforma/crea un video da questa immagine” forza I2V; “come riferimento/reference” forza R2V e l'audio continua a richiedere Reference.
+- “Mantieni il formato” usa `keep source aspect` per l'I2V avviato dalla Chat.
+- Aggiunte regressioni sulle frasi reali dell'ultimo job, sulla precedenza I2V/R2V e sul voice reference.
+
 ### 29 agosto 2026 — Durata Chat collegata al multishot
 
 - Le richieste video della Chat non ignorano più `durationSeconds`: 30 secondi vengono inviati allo Studio come `3 × 10 s`.

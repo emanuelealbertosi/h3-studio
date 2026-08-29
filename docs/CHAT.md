@@ -22,6 +22,10 @@ di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
 - Con immagini allegate puoi chiedere un'analisi, un edit Flux.2 Klein, un I2V
   o un Reference H3. LLM può osservare fino a quattro immagini per messaggio;
   il router accetta fino a otto media complessivi per un'azione.
+- Espressioni come **anima l'immagine precedente**, **crea un video da questa
+  immagine** o **trasformala in video** forzano I2V e recuperano il media più
+  recente. **Usala come riferimento/reference** forza invece R2V. Scrivendo
+  **mantieni il formato** in I2V viene conservato anche l'aspect ratio sorgente.
 - Sopra il campo di testo scegli **Auto, Video H3, Krea, Anima o Edit**. La
   scelta esplicita prevale sempre sul router del modello LLM, ma non avvia nulla finché
   il testo non contiene una richiesta esplicita di generazione. Se vuoi essere

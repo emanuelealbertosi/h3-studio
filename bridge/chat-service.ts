@@ -60,7 +60,7 @@ function normalizeAttachment(value: unknown): ChatAttachment {
   };
 }
 
-const MEDIA_RECALL_PATTERN = /(?:\b(?:questa|quella|questo|quello)\s+(?:immagine|foto|video|audio)\b|\b(?:l['’]?immagine|la\s+foto|il\s+video|l['’]?audio)\b|\b(?:modifical[ao]|edit(?:ala|alo)|animala|animalo|usala|usalo|continualo|estendilo|trasformala|trasformalo)\b|\bpartendo\s+da\s+(?:questa|quella|questo|quello)\b|\b(?:this|that)\s+(?:image|picture|video|audio)\b|\b(?:edit|animate|use|continue|extend|transform)\s+it\b)/i;
+const MEDIA_RECALL_PATTERN = /(?:\b(?:questa|quella|questo|quello)\s+(?:immagine|foto|video|audio)\b|\b(?:(?:questa|quella|questo|quello)\s+)?(?:ultim[oa]?|precedente)\s+(?:immagine|foto|video|audio)\b|\b(?:l['’]?immagine|la\s+foto|il\s+video|l['’]?audio)\b|\b(?:modifical[ao]|edit(?:ala|alo)|animala|animalo|usala|usalo|continualo|estendilo|trasformala|trasformalo)\b|\bpartendo\s+da\s+(?:questa|quella|questo|quello)\b|\b(?:this|that|last|previous)\s+(?:image|picture|video|audio)\b|\b(?:edit|animate|use|continue|extend|transform)\s+it\b)/i;
 
 export function shouldRecallMedia(content: string) {
   return MEDIA_RECALL_PATTERN.test(content);
@@ -92,6 +92,37 @@ export function resolveChatVideoTiming(requestedDuration?: number) {
     return { shotCount, durationSeconds: 15 as const, totalSeconds: shotCount * 15 };
   }
   throw new Error("La Chat video supporta al massimo 180 secondi (12 shot da 15s)");
+}
+
+const I2V_INTENT_PATTERN = /(?:\b(?:anima(?:re|zione|la|lo)?|animate)\b.{0,100}\b(?:immagine|foto|image|picture)\b|\b(?:trasforma(?:re|la|lo)?|turn)\b.{0,100}\b(?:immagine|foto|image|picture)\b.{0,60}\b(?:video|filmato)\b|\b(?:video|filmato)\b.{0,100}\b(?:da|from|partendo\s+da|starting\s+from)\b.{0,100}\b(?:immagine|foto|image|picture)\b)/i;
+const REFERENCE_VIDEO_INTENT_PATTERN = /\b(?:come\s+(?:riferimento|reference)|as\s+(?:a\s+)?reference|reference|riferimento|ispirati\s+(?:a|alla|al))\b/i;
+const KEEP_SOURCE_ASPECT_PATTERN = /\b(?:mantieni|conserva|preserva)\s+(?:il\s+)?(?:formato|aspect\s+ratio|proporzioni)|\bkeep\s+(?:the\s+)?(?:aspect\s+ratio|format)\b/i;
+
+export function resolveChatVideoMode(
+  content: string,
+  proposed: PlannedAction["videoMode"],
+  pictureCount: number,
+  videoCount: number,
+  audioCount: number,
+) {
+  const requested = proposed ?? "T2V";
+  if ((requested === "VIDEO EXTENSION" || requested === "VIDEO EDITING") && videoCount > 0) {
+    return requested;
+  }
+  if (REFERENCE_VIDEO_INTENT_PATTERN.test(content) && pictureCount + videoCount + audioCount > 0) {
+    return "R2V" as const;
+  }
+  if (audioCount > 0 && (requested === "T2V" || requested === "I2V" || requested === "R2V")) {
+    return "R2V" as const;
+  }
+  if (pictureCount > 0 && I2V_INTENT_PATTERN.test(content)) return "I2V" as const;
+  if (requested === "R2V" && pictureCount + videoCount + audioCount > 0) return "R2V" as const;
+  if (pictureCount > 0 && (requested === "T2V" || requested === "I2V")) return "I2V" as const;
+  if ((requested === "VIDEO EXTENSION" || requested === "VIDEO EDITING") && videoCount === 0) {
+    return pictureCount > 0 ? "I2V" as const : "T2V" as const;
+  }
+  if (requested === "I2V" && pictureCount === 0) return "T2V" as const;
+  return requested;
 }
 
 function extractJson(text: string) {
@@ -646,13 +677,9 @@ export class ChatService {
         const pictures = attachments.filter((item) => item.kind === "picture");
         const videos = attachments.filter((item) => item.kind === "video");
         const audios = attachments.filter((item) => item.kind === "audio");
-        let generationMode = plan.videoMode ?? "T2V";
-        if (audios.length && (generationMode === "T2V" || generationMode === "I2V")) generationMode = "R2V";
-        else if (generationMode === "T2V" && pictures.length) generationMode = "I2V";
-        if ((generationMode === "VIDEO EXTENSION" || generationMode === "VIDEO EDITING") && !videos.length) {
-          generationMode = pictures.length ? "I2V" : "T2V";
-        }
-        if (generationMode === "I2V" && !pictures.length) generationMode = "T2V";
+        const generationMode = resolveChatVideoMode(
+          requestText, plan.videoMode, pictures.length, videos.length, audios.length,
+        );
         const mediaState = generationMode === "T2V" ? [] : attachments;
         const job = await this.studioJobs.submit({
           projectId,
@@ -662,7 +689,14 @@ export class ChatService {
           durationSeconds: timing.durationSeconds,
           megapixels: 0.5,
           generationMode,
-          aspectFormat: plan.aspect === "9:16" ? "9:16 portrait" : plan.aspect === "1:1" ? "1:1 square" : "16:9 landscape",
+          aspectFormat:
+            generationMode === "I2V" && KEEP_SOURCE_ASPECT_PATTERN.test(requestText)
+              ? "keep source aspect"
+              : plan.aspect === "9:16"
+                ? "9:16 portrait"
+                : plan.aspect === "1:1"
+                  ? "1:1 square"
+                  : "16:9 landscape",
           seedMode: "random",
           qualityMode: "fast",
           turboEnabled: true,

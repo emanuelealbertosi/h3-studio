@@ -11,6 +11,7 @@ import {
   musicInstrumentalIntent,
   normalizePlan,
   preserveMusicIntent,
+  resolveChatVideoMode,
   resolveChatVideoTiming,
   routeAction,
   shouldRecallMedia,
@@ -135,6 +136,8 @@ try {
   assert.equal(videoEditAlias.action?.videoMode, "VIDEO EDITING");
   assert.equal(shouldRecallMedia("Ora modificala rendendo il cielo rosso"), true);
   assert.equal(shouldRecallMedia("Crea una animazione partendo da questa immagine"), true);
+  assert.equal(shouldRecallMedia("crea un video da questa ultim immagine"), true);
+  assert.equal(shouldRecallMedia("anima l'immagine precedente"), true);
   assert.equal(shouldRecallMedia("Parliamo di regia cinematografica"), false);
   assert.deepEqual(resolveChatVideoTiming(), {
     shotCount: 1, durationSeconds: 10, totalSeconds: 10,
@@ -153,6 +156,10 @@ try {
   assert.equal(extractRequestedVideoDuration("crea un video di 30 secondi"), 30);
   assert.equal(extractRequestedVideoDuration("crea un video di 2 minuti"), 120);
   assert.equal(extractRequestedVideoDuration("crea un video fantasy"), null);
+  assert.equal(resolveChatVideoMode("anima l'immagine precedente", "R2V", 1, 0, 0), "I2V");
+  assert.equal(resolveChatVideoMode("crea un video da questa ultima immagine", "T2V", 1, 0, 0), "I2V");
+  assert.equal(resolveChatVideoMode("usa questa immagine come riferimento", "I2V", 1, 0, 0), "R2V");
+  assert.equal(resolveChatVideoMode("falla parlare con questa voce", "I2V", 1, 0, 1), "R2V");
 
   const [server, service, audioService, panel, dialog, styles, node, installer, manifest, page, imagePanel, audioPanel] = await Promise.all([
     readFile("bridge/server.ts", "utf8"),
@@ -193,7 +200,8 @@ try {
   assert.match(service, /VOICE_COVER_PATTERN/);
   assert.match(service, /kind: voiceCover \? "voice_cover" : "music"/);
   assert.match(service, /natural lip synchronization/);
-  assert.match(service, /if \(audios.length && \(generationMode === "T2V" \|\| generationMode === "I2V"\)\) generationMode = "R2V"/);
+  assert.match(service, /resolveChatVideoMode\(/);
+  assert.match(service, /KEEP_SOURCE_ASPECT_PATTERN\.test\(requestText\)/);
   assert.match(service, /audioStudio\.planMusic/);
   assert.match(service, /preserveMusicIntent/);
   assert.match(service, /lyrics: plan\.lyrics/);
