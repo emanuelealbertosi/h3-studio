@@ -19,6 +19,7 @@ function Get-BridgeListener {
     Get-NetTCPConnection -State Listen -ErrorAction Stop |
       Where-Object {
         $_.LocalPort -eq $Port -and
+          -not (Test-TailscaleProxyListener $_) -and
           (Test-ListenerAddressConflict $_.LocalAddress)
       }
   )
@@ -48,6 +49,50 @@ function Test-IpAddressEquals(
     $Right = $Right.MapToIPv4()
   }
   return $Left.Equals($Right)
+}
+
+function Test-TailscaleProxyListener($Listener) {
+  # `tailscale serve` owns the tailnet IPv4/IPv6 addresses on the same port,
+  # while the local bridge can still bind its wildcard/LAN socket. Treat only
+  # listeners owned by tailscaled.exe *and* bound to the Tailscale adapter as
+  # transparent proxies; every other process remains fail-closed.
+  $parsedListener = $null
+  if (-not [System.Net.IPAddress]::TryParse(
+    [string]$Listener.LocalAddress,
+    [ref]$parsedListener
+  )) {
+    return $false
+  }
+  if (Test-WildcardAddress $parsedListener) {
+    return $false
+  }
+
+  try {
+    $owner = Get-CimInstance Win32_Process -Filter (
+      "ProcessId = {0}" -f [int]$Listener.OwningProcess
+    )
+    if ($null -eq $owner -or $owner.Name -ine "tailscaled.exe") {
+      return $false
+    }
+    $adapterAddresses = @(
+      Get-NetIPAddress -ErrorAction Stop |
+        Where-Object { $_.InterfaceAlias -eq "Tailscale" } |
+        Select-Object -ExpandProperty IPAddress
+    )
+    foreach ($adapterAddress in $adapterAddresses) {
+      $withoutScope = ([string]$adapterAddress).Split('%')[0]
+      $parsedAdapter = $null
+      if (
+        [System.Net.IPAddress]::TryParse($withoutScope, [ref]$parsedAdapter) -and
+        (Test-IpAddressEquals $parsedListener $parsedAdapter)
+      ) {
+        return $true
+      }
+    }
+  } catch {
+    return $false
+  }
+  return $false
 }
 
 function Resolve-H3HostAddresses([string]$Address) {
