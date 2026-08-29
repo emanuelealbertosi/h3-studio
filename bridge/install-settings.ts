@@ -40,7 +40,7 @@ export const WORKFLOW_CATALOG = [
   {
     id: "minimax-h3-image-aio",
     role: "image_minimax" as const,
-    name: "MiniMax H3 Image AIO T2I / I2I / Reference",
+    name: "Image H3 AIO T2I / I2I / Reference",
     description: "Workflow H3 single-frame con T2I, I2I e reference edit fino a nove immagini.",
     file: "studio-minimax-h3-image.api.json",
   },

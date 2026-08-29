@@ -12,6 +12,8 @@ import {
   normalizePlan,
   preserveMiniMaxImageIntent,
   preserveMusicIntent,
+  resolveChatImageAspect,
+  resolveChatImageH3Settings,
   resolveChatKeyframePositions,
   resolveChatTtsText,
   resolveChatVideoAudioRole,
@@ -119,6 +121,12 @@ try {
   assert.equal(preserveMiniMaxImageIntent(proposedImage, "usa MiniMax per questa immagine")?.type, "generate_minimax_image");
   assert.equal(preserveMiniMaxImageIntent(proposedImage, "crea una foto generica")?.type, "generate_image");
   assert.equal(preserveMiniMaxImageIntent(proposedImage, "crea una foto generica", "minimax")?.type, "generate_minimax_image");
+  assert.deepEqual(
+    resolveChatImageH3Settings("usa Image H3 a 30 step e 2 MP", 8, 0.5),
+    { steps: 30, megapixels: 2 },
+  );
+  assert.deepEqual(resolveChatImageH3Settings("crea con Image H3"), { steps: 20, megapixels: 0.98 });
+  assert.equal(resolveChatImageAspect("Image H3 formato 4:3", "16:9"), "4:3");
   assert.equal(routeAction(null, "anima"), null);
   const vocalRequest = 'crea una canzone jazz di 10s cantata da una donna che dice "Buongiornissimo caffè, Buongiornissimo caffeee" in italiano';
   assert.equal(musicInstrumentalIntent(vocalRequest), false);

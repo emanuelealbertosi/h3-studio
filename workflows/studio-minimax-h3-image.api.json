@@ -7,19 +7,10 @@
     },
     "_meta": { "title": "MiniMax H3 shared image/video model" }
   },
-  "2": {
-    "class_type": "LoraLoaderModelOnly",
-    "inputs": {
-      "model": ["1", 0],
-      "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
-      "strength_model": 0.75
-    },
-    "_meta": { "title": "MiniMax H3 image Turbo" }
-  },
   "3": {
     "class_type": "LoraLoaderModelOnly",
     "inputs": {
-      "model": ["2", 0],
+      "model": ["1", 0],
       "lora_name": "MaxiMin-HHH-R2V-ThisIsFine_LoRA_V0_1.safetensors",
       "strength_model": 0.5
     },
@@ -59,8 +50,8 @@
   "11": {
     "class_type": "H3ImageSamplingPreset",
     "inputs": {
-      "model": ["2", 0],
-      "sampling_profile": "hybrid single image | ER-SDE 8 steps"
+      "model": ["1", 0],
+      "sampling_profile": "base quality | RES 20 steps"
     },
     "_meta": { "title": "MiniMax H3 single-image recipe" }
   },

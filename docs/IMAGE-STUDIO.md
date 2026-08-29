@@ -9,7 +9,7 @@ separata.
 - **Genera** usa Krea 2 per impostazione predefinita.
 - **Edit** usa Flux.2 Klein per impostazione predefinita e richiede da una a
   quattro reference.
-- Il selettore discreto **Motore → MiniMax H3** sostituisce il motore della
+- Il selettore discreto **Motore → Image H3** sostituisce il motore della
   modalità corrente: senza immagini esegue T2I, con una immagine I2I e con
   due-nove immagini Reference. In Reference si possono inserire nel prompt i
   token `<Picture 1>`…`<Picture 9>` direttamente dalle miniature.
@@ -59,12 +59,20 @@ Un candidato completato può essere:
 La condivisione è per singolo candidato: condividere una immagine di un batch
 non espone le altre.
 
-## MiniMax H3 Image
+## Image H3
 
-MiniMax riusa il checkpoint H3 scelto nella sezione Video dell’Admin, ma carica
-un VAE T=1 dedicato esclusivamente alle immagini. Il workflow applica il preset
-single-image ER-SDE a 8 step, la LoRA Turbo al ramo T2I e la LoRA ThisIsFine al
-ramo I2I/Reference. Il VAE immagini non sostituisce mai il VAE video.
+Image H3 riusa il checkpoint H3 scelto nella sezione Video dell’Admin, ma carica
+un VAE T=1 dedicato esclusivamente alle immagini. Lo Studio espone gli stessi
+livelli qualitativi del video: 8, 12, 20 o 30 step. Otto step abilita la LoRA
+Turbo e il relativo preset Euler; 12/20/30 usano il modello base senza Turbo e
+la ricetta RES. Il default è 20 step. Le risoluzioni selezionabili sono 0,5,
+0,7, 0,98 e 2 MP, sempre nel formato scelto. La LoRA ThisIsFine resta limitata
+al ramo I2I/Reference. Il VAE immagini non sostituisce mai il VAE video.
+
+Gli stessi parametri sono disponibili dalla Chat: una richiesta come “usa
+Image H3, 20 step, 2 MP, formato 16:9” viene tradotta in valori strutturati e
+validata dal bridge; valori non supportati ricadono sui default 20 step e
+0,98 MP.
 
 La modalità è sperimentale e utile soprattutto quando H3 riconosce meglio un
 soggetto o un IP. Krea resta il default generale e Flux Klein resta il default

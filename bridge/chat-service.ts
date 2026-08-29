@@ -13,8 +13,10 @@ type PlannedAction = {
   type: "generate_video" | "generate_image" | "generate_minimax_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
   prompt: string;
   videoMode?: "T2V" | "I2V" | "R2V" | "KEYFRAMES" | "VIDEO EXTENSION" | "VIDEO EDITING";
-  aspect?: "16:9" | "9:16" | "1:1";
+  aspect?: "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
   durationSeconds?: number;
+  imageSteps?: 8 | 12 | 20 | 30;
+  imageMegapixels?: 0.5 | 0.7 | 0.98 | 2;
   instrumental?: boolean;
   lyrics?: string;
   maskTarget?: string;
@@ -276,8 +278,8 @@ export function normalizePlan(text: string): { reply: string; title: string | nu
   const videoMode = ["T2V", "I2V", "R2V", "KEYFRAMES", "VIDEO EXTENSION", "VIDEO EDITING"].includes(String(parsed.action.videoMode))
     ? parsed.action.videoMode as PlannedAction["videoMode"]
     : normalizedType.videoMode;
-  const aspect = parsed.action.aspect === "9:16" || parsed.action.aspect === "1:1"
-    ? parsed.action.aspect
+  const aspect = ["16:9", "9:16", "1:1", "4:3", "3:4"].includes(String(parsed.action.aspect))
+    ? parsed.action.aspect as PlannedAction["aspect"]
     : "16:9";
   const requestedDuration = Number(parsed.action.durationSeconds);
   const durationSeconds = Number.isFinite(requestedDuration)
@@ -286,6 +288,15 @@ export function normalizePlan(text: string): { reply: string; title: string | nu
   const instrumental = parsed.action.instrumental !== false;
   const lyrics = typeof parsed.action.lyrics === "string"
     ? parsed.action.lyrics.trim().slice(0, 30_000)
+    : undefined;
+  const requestedImageSteps = Number(parsed.action.imageSteps);
+  const imageSteps = [8, 12, 20, 30].includes(requestedImageSteps)
+    ? requestedImageSteps as PlannedAction["imageSteps"]
+    : undefined;
+  const rawImageMegapixels = Number(parsed.action.imageMegapixels);
+  const requestedImageMegapixels = rawImageMegapixels === 1 ? 0.98 : rawImageMegapixels;
+  const imageMegapixels = [0.5, 0.7, 0.98, 2].includes(requestedImageMegapixels)
+    ? requestedImageMegapixels as PlannedAction["imageMegapixels"]
     : undefined;
   const maskTarget = typeof parsed.action.maskTarget === "string"
     ? parsed.action.maskTarget.replace(/\s+/g, " ").trim().slice(0, 240)
@@ -296,7 +307,30 @@ export function normalizePlan(text: string): { reply: string; title: string | nu
   const maskEndSeconds = Number.isFinite(Number(parsed.action.maskEndSeconds))
     ? Math.max(0, Number(parsed.action.maskEndSeconds))
     : undefined;
-  return { reply, title, action: { type: normalizedType.type, prompt, videoMode, aspect, durationSeconds, instrumental, lyrics, maskTarget, maskStartSeconds, maskEndSeconds } };
+  return { reply, title, action: { type: normalizedType.type, prompt, videoMode, aspect, durationSeconds, imageSteps, imageMegapixels, instrumental, lyrics, maskTarget, maskStartSeconds, maskEndSeconds } };
+}
+
+export function resolveChatImageH3Settings(
+  request: string,
+  plannedSteps?: number,
+  plannedMegapixels?: number,
+) {
+  const explicitSteps = String(request).match(/\b(8|12|20|30)\s*(?:step|steps|passi)\b/i);
+  const explicitMegapixels = String(request).match(/\b(0[.,]5|0[.,]7|0[.,]98|1(?:[.,]0)?|2(?:[.,]0)?)\s*(?:mp|megapixel)\b/i);
+  const stepNumber = explicitSteps ? Number(explicitSteps[1]) : Number(plannedSteps);
+  const mpNumber = explicitMegapixels
+    ? Number(explicitMegapixels[1].replace(",", "."))
+    : Number(plannedMegapixels);
+  const normalizedMp = mpNumber === 1 ? 0.98 : mpNumber;
+  return {
+    steps: ([8, 12, 20, 30].includes(stepNumber) ? stepNumber : 20) as 8 | 12 | 20 | 30,
+    megapixels: ([0.5, 0.7, 0.98, 2].includes(normalizedMp) ? normalizedMp : 0.98) as 0.5 | 0.7 | 0.98 | 2,
+  };
+}
+
+export function resolveChatImageAspect(request: string, planned?: PlannedAction["aspect"]) {
+  const explicit = String(request).match(/\b(16\s*:\s*9|9\s*:\s*16|1\s*:\s*1|4\s*:\s*3|3\s*:\s*4)\b/);
+  return (explicit?.[1]?.replace(/\s+/g, "") as PlannedAction["aspect"] | undefined) ?? planned ?? "16:9";
 }
 
 export function inferVideoInpaintTarget(request: string) {
@@ -446,12 +480,12 @@ const CHAT_SYSTEM_PROMPT = `You are H3 Studio, a concise Italian-speaking creati
 Always return exactly one JSON object and no markdown:
 {"reply":"natural Italian reply","title":"concise 3-7 word Italian conversation title","action":null}
 or
-{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|generate_minimax_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|KEYFRAMES|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1","durationSeconds":10,"instrumental":true,"lyrics":"exact requested words to sing or empty string","maskTarget":"short noun phrase to track for VIDEO EDITING","maskStartSeconds":0,"maskEndSeconds":0}}
+{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|generate_minimax_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|KEYFRAMES|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1|4:3|3:4","durationSeconds":10,"imageSteps":20,"imageMegapixels":0.98,"instrumental":true,"lyrics":"exact requested words to sing or empty string","maskTarget":"short noun phrase to track for VIDEO EDITING","maskStartSeconds":0,"maskEndSeconds":0}}
 
 Only create an action when the user explicitly asks to generate, animate, continue or edit media. Questions and ordinary conversation use action:null.
 The title describes the main topic, never starts with "Chat" and never contains quotation marks.
 For video default to 10 seconds, one candidate, 0.5 MP and the FAST 8-step engine. When the user explicitly requests a total video duration, preserve it in durationSeconds; the server converts it into up to 12 H3 shots. Do not invent a duration that the user did not request.
-Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures and Flux Klein as the default editor. Use generate_minimax_image only when the user explicitly requests MiniMax or H3 for a still image: no attached pictures means T2I, one picture means I2I, and two to nine pictures mean Reference. Use I2V when one attached picture is the start frame, R2V for broader video references, KEYFRAMES when attached pictures are requested as first, intermediate, final or timed video frames, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for inpainting one attached video. For VIDEO EDITING always set maskTarget to the shortest concrete noun phrase SAM3 must track, for example "vestito della donna", while prompt must retain the requested temporal event such as "when she snaps her fingers". Use maskStartSeconds/maskEndSeconds only when the user gives explicit times; zero means the whole clip. Preserve Picture attachment order for KEYFRAMES; the server calculates percentages from explicit times or distributes them automatically. Video editing and extension still use action type generate_video; never invent video_editing, edit_video or continue_video action types.
+Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures and Flux Klein as the default editor. Use generate_minimax_image only when the user explicitly requests Image H3, MiniMax or H3 for a still image: no attached pictures means T2I, one picture means I2I, and two to nine pictures mean Reference. For Image H3 preserve an explicitly requested aspect, imageSteps (8, 12, 20 or 30) and imageMegapixels (0.5, 0.7, 0.98 or 2); defaults are 20 steps and 0.98 MP. Use I2V when one attached picture is the start frame, R2V for broader video references, KEYFRAMES when attached pictures are requested as first, intermediate, final or timed video frames, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for inpainting one attached video. For VIDEO EDITING always set maskTarget to the shortest concrete noun phrase SAM3 must track, for example "vestito della donna", while prompt must retain the requested temporal event such as "when she snaps her fingers". Use maskStartSeconds/maskEndSeconds only when the user gives explicit times; zero means the whole clip. Preserve Picture attachment order for KEYFRAMES; the server calculates percentages from explicit times or distributes them automatically. Video editing and extension still use action type generate_video; never invent video_editing, edit_video or continue_video action types.
 Use generate_tts when the user asks for speech, narration, dubbing, reading or voice cloning. For TTS, prompt is the exact text to speak in the requested language, not an English description. An attached Audio 1 is the voice reference and is transcribed automatically.
 For a video in which a visible subject must speak or sing to an attached audio track, use I2V when Picture 1 must be the exact opening frame. The server preserves Audio 1 as the authoritative soundtrack and injects synchronized slices while H3 animates the mouth and performance. Use R2V only when the picture is a broader identity/style reference rather than the opening frame, or when a reference video is required. Do not reinterpret the attached track as a mere voice-timbre reference. State that the visible subject physically performs the audible track with natural lip synchronization and stops mouth motion when speech or singing ends; never invent or transcribe words that were not provided as text.
 Use generate_music when the user asks for a song, soundtrack, instrumental or music. Put the musical request in prompt, set durationSeconds when requested (default 30), and set instrumental:false whenever singing, a singer, a voice, vocals, lyrics or words to sing are requested. For a vocal song, copy every user-supplied lyric verbatim into lyrics, preserving its language and wording; never translate, summarize or omit quoted words. Use lyrics:"" only for instrumental music or when the user did not supply exact words.
@@ -863,7 +897,11 @@ export class ChatService {
                 ? "9:16 portrait"
                 : plan.aspect === "1:1"
                   ? "1:1 square"
-                  : "16:9 landscape",
+                  : plan.aspect === "4:3"
+                    ? "4:3 landscape"
+                    : plan.aspect === "3:4"
+                      ? "3:4 portrait"
+                      : "16:9 landscape",
           seedMode: "random",
           qualityMode: "fast",
           // Chat is deliberately predictable: it always uses the configured
@@ -891,10 +929,30 @@ export class ChatService {
       const imageMode = plan.type === "edit_image" || (minimaxImage && availablePictures.length > 0) ? "edit" : plan.type === "generate_anima" ? "anima" : "generate";
       const imageReferences = availablePictures.slice(0, minimaxImage ? 9 : 4);
       if (imageMode === "edit" && !imageReferences.length) throw new Error("L'edit richiede almeno una immagine allegata");
-      const vertical = plan.aspect === "9:16";
-      const square = plan.aspect === "1:1";
-      const width = square ? 1024 : vertical ? 768 : 1344;
-      const height = square ? 1024 : vertical ? 1344 : 768;
+      const imageRequestText = originalRequest ?? "";
+      const aspect = resolveChatImageAspect(imageRequestText, plan.aspect);
+      const h3Settings = resolveChatImageH3Settings(
+        imageRequestText,
+        plan.imageSteps,
+        plan.imageMegapixels,
+      );
+      const [ratioWidth, ratioHeight] = aspect === "9:16"
+        ? [9, 16]
+        : aspect === "1:1"
+          ? [1, 1]
+          : aspect === "4:3"
+            ? [4, 3]
+            : aspect === "3:4"
+              ? [3, 4]
+              : [16, 9];
+      const ratio = ratioWidth / ratioHeight;
+      const h3Area = h3Settings.megapixels * 1024 * 1024;
+      const width = minimaxImage
+        ? Math.max(64, Math.round(Math.sqrt(h3Area * ratio) / 32) * 32)
+        : aspect === "1:1" ? 1024 : aspect === "9:16" || aspect === "3:4" ? 768 : 1344;
+      const height = minimaxImage
+        ? Math.max(64, Math.round(Math.sqrt(h3Area / ratio) / 32) * 32)
+        : aspect === "1:1" ? 1024 : aspect === "9:16" || aspect === "3:4" ? 1344 : 768;
       const job = await this.imageStudio.submit({
         projectId,
         mode: imageMode,
@@ -902,9 +960,11 @@ export class ChatService {
         prompt: plan.prompt,
         compositionPreset: "free",
         candidateCount: 1,
-        aspectFormat: plan.aspect ?? "16:9",
+        aspectFormat: aspect,
         width,
         height,
+        h3Steps: minimaxImage ? h3Settings.steps : undefined,
+        h3Megapixels: minimaxImage ? h3Settings.megapixels : undefined,
         seedMode: "random",
         references: imageMode === "edit" ? imageReferences.map((item, index) => ({
           file: item.file,

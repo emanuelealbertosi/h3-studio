@@ -8,8 +8,12 @@ import type {
 
 export const IMAGE_EDIT_MAX_REFERENCES = 4;
 export const MINIMAX_H3_IMAGE_MAX_REFERENCES = 9;
+export const MINIMAX_H3_IMAGE_STEPS = [8, 12, 20, 30] as const;
+export const MINIMAX_H3_IMAGE_MEGAPIXELS = [0.5, 0.7, 0.98, 2] as const;
 export const IMAGE_API_MAX_PIXELS = 4_000_000;
 export const IMAGE_UI_TARGET_MAX_PIXELS = 2_000_000;
+export type MiniMaxH3ImageStepCount = (typeof MINIMAX_H3_IMAGE_STEPS)[number];
+export type MiniMaxH3ImageMegapixels = (typeof MINIMAX_H3_IMAGE_MEGAPIXELS)[number];
 export type MiniMaxH3ImageSettings = {
   model: string;
   encoder: string;
@@ -19,6 +23,7 @@ export type MiniMaxH3ImageSettings = {
   detailLora: string;
   detailStrength: number;
   preserveStrength: number;
+  steps: MiniMaxH3ImageStepCount;
 };
 export const DEFAULT_MINIMAX_H3_IMAGE_SETTINGS: Omit<MiniMaxH3ImageSettings, "model"> = {
   encoder: "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
@@ -28,6 +33,7 @@ export const DEFAULT_MINIMAX_H3_IMAGE_SETTINGS: Omit<MiniMaxH3ImageSettings, "mo
   detailLora: "MaxiMin-HHH-R2V-ThisIsFine_LoRA_V0_1.safetensors",
   detailStrength: 0.5,
   preserveStrength: 0.6,
+  steps: 20,
 };
 const KREA_REBALANCE_WEIGHTS =
   "1.0,1.0,1.0,1.0,1.0,1.0,1.0,2.5,5.0,1.1,4.0,1.0";
@@ -276,7 +282,7 @@ export function buildMiniMaxH3ImagePrompt(input: {
 }): ComfyApiPrompt {
   assertImageDimensions(input.width, input.height);
   if (input.references.length > MINIMAX_H3_IMAGE_MAX_REFERENCES) {
-    throw new Error("MiniMax H3 Image supporta al massimo 9 reference");
+    throw new Error("Image H3 supporta al massimo 9 reference");
   }
   const apiPrompt: ComfyApiPrompt = cloneTemplate(input.template);
   for (const id of Object.keys(apiPrompt)) delete apiPrompt[id];
@@ -287,7 +293,8 @@ export function buildMiniMaxH3ImagePrompt(input: {
     "MiniMax H3 shared image/video model",
   );
   let textModel: [string, number] = ["1", 0];
-  if (input.settings.turboLora) {
+  const turboEnabled = input.settings.steps === 8 && Boolean(input.settings.turboLora);
+  if (turboEnabled) {
     apiPrompt["2"] = node(
       "LoraLoaderModelOnly",
       {
@@ -339,6 +346,13 @@ export function buildMiniMaxH3ImagePrompt(input: {
       ? "image_to_image (FL2VA)"
       : "reference_edit (REF2VA)";
   const selectedModel = input.references.length === 0 ? textModel : editModel;
+  const samplingProfile = input.settings.steps === 8
+    ? "Turbo v1.0 | 8 steps"
+    : input.settings.steps === 12
+      ? "base speed | RES 12 steps"
+      : input.settings.steps === 20
+        ? "base quality | RES 20 steps"
+        : "custom | use controls below";
   apiPrompt["10"] = node(
     "H3ImagePrepare",
     {
@@ -361,7 +375,17 @@ export function buildMiniMaxH3ImagePrompt(input: {
     "H3ImageSamplingPreset",
     {
       model: selectedModel,
-      sampling_profile: "hybrid single image | ER-SDE 8 steps",
+      sampling_profile: samplingProfile,
+      ...(input.settings.steps === 30
+        ? {
+            custom_sampler: "res_multistep",
+            custom_scheduler: "simple",
+            custom_steps: 30,
+            custom_denoise: 1,
+            custom_shift_video: 12,
+            custom_shift_audio: 3,
+          }
+        : {}),
     },
     "MiniMax H3 single-image recipe",
   );

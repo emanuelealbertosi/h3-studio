@@ -134,7 +134,7 @@
     },
     {
       "id": "minimax-h3-image-studio",
-      "label": "MiniMax H3 Image Studio",
+      "label": "Image H3 Studio",
       "kind": "custom_node",
       "requiredClasses": [
         "H3ImagePrepare",

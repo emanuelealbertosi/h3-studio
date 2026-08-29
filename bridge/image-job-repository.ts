@@ -52,6 +52,7 @@ export type ImageEngineSnapshot = {
   effectivePrompt?: string;
   loras?: Array<{ name: string; strength: number }>;
   imageMode?: "t2i" | "i2i" | "reference";
+  megapixels?: number;
   turboLora?: string;
   turboStrength?: number;
   detailLora?: string;

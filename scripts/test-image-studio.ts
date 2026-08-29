@@ -260,6 +260,17 @@ try {
   });
   assert.equal(normalizedMiniMaxReference.imageEngine, "minimax");
   assert.equal(normalizedMiniMaxReference.references.length, 9);
+  assert.equal(normalizedMiniMaxReference.h3Steps, 20);
+  assert.equal(normalizedMiniMaxReference.h3Megapixels, 0.98);
+  const normalizedH3HighRes = normalizeImageRequest({
+    ...normalizedMiniMaxReference,
+    engine: "minimax",
+    h3Steps: 30,
+    h3Megapixels: 2,
+  });
+  assert.equal(normalizedH3HighRes.h3Steps, 30);
+  assert.equal(normalizedH3HighRes.h3Megapixels, 2);
+  assert.ok(normalizedH3HighRes.width * normalizedH3HighRes.height > 1_900_000);
   assert.throws(() => normalizeImageRequest({
     ...normalizedMiniMaxReference,
     engine: "minimax",
@@ -464,8 +475,20 @@ try {
     references: [],
   });
   assert.equal(miniMaxT2iGraph["10"].inputs.mode, "text_to_image (FL2VA)");
-  assert.deepEqual(miniMaxT2iGraph["11"].inputs.model, ["2", 0]);
+  assert.deepEqual(miniMaxT2iGraph["11"].inputs.model, ["1", 0]);
+  assert.equal(miniMaxT2iGraph["11"].inputs.sampling_profile, "base quality | RES 20 steps");
   assert.equal(Object.values(miniMaxT2iGraph).filter((node) => node.class_type === "LoadImage").length, 0);
+  const miniMaxFastGraph = buildMiniMaxH3ImagePrompt({
+    prompt: "A fast H3 preview",
+    seed: 100,
+    width: 1024,
+    height: 1024,
+    filenamePrefix: "tests/minimax-fast",
+    settings: { ...miniMaxSettings, steps: 8 },
+    references: [],
+  });
+  assert.deepEqual(miniMaxFastGraph["11"].inputs.model, ["2", 0]);
+  assert.equal(miniMaxFastGraph["11"].inputs.sampling_profile, "Turbo v1.0 | 8 steps");
   const miniMaxI2iGraph = buildMiniMaxH3ImagePrompt({
     prompt: "Turn <Picture 1> into a bright fantasy portrait",
     seed: 102,
@@ -492,6 +515,17 @@ try {
   assert.deepEqual(miniMaxReferenceGraph["10"].inputs.reference_image_2, ["21", 0]);
   assert.deepEqual(miniMaxReferenceGraph["10"].inputs.reference_image_3, ["22", 0]);
   assert.equal(Object.values(miniMaxReferenceGraph).filter((node) => node.class_type === "LoadImage").length, 3);
+  const miniMaxThirtyGraph = buildMiniMaxH3ImagePrompt({
+    prompt: "Maximum quality H3 still",
+    seed: 104,
+    width: 1792,
+    height: 1024,
+    filenamePrefix: "tests/minimax-30",
+    settings: { ...miniMaxSettings, steps: 30 },
+    references: [],
+  });
+  assert.equal(miniMaxThirtyGraph["11"].inputs.sampling_profile, "custom | use controls below");
+  assert.equal(miniMaxThirtyGraph["11"].inputs.custom_steps, 30);
   const oneReferenceGraph = buildFlux2KleinEditPrompt({
     prompt: "Change the coat to blue",
     seed: 1,

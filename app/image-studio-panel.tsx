@@ -15,6 +15,8 @@ import {
 type SeedMode = "random" | "base" | "fixed";
 type ImageMode = "generate" | "edit" | "anima";
 type ImageEngineChoice = "default" | "minimax";
+type H3ImageSteps = 8 | 12 | 20 | 30;
+type H3ImageMegapixels = 0.5 | 0.7 | 0.98 | 2;
 type ImageTag = "untagged" | "character" | "object" | "background";
 type ReferenceRole = "base" | "subject" | "style" | "pose" | "background" | "other";
 type ProjectOption = { id: string; name: string };
@@ -74,7 +76,7 @@ type ImageJob = {
   requestedSeed?: number | null;
   selectedCandidateIndex: number | null;
   status: string;
-  engine: string | { kind?: string; model?: string; workflow?: string };
+  engine: string | { kind?: string; model?: string; workflow?: string; steps?: number; megapixels?: number };
   references: Array<Omit<ImageReference, "uid">>;
   candidates: ImageCandidate[];
   projectLinks: ImageProjectLink[];
@@ -145,6 +147,14 @@ const formats = [
   { value: "3:4", label: "3:4 · Verticale", width: 1152, height: 1536 },
 ] as const;
 
+const h3ImageStepOptions: H3ImageSteps[] = [8, 12, 20, 30];
+const h3ImageResolutionOptions: Array<{ value: H3ImageMegapixels; label: string; detail: string }> = [
+  { value: 0.5, label: "MIN", detail: "0.5 MP" },
+  { value: 0.7, label: "MID", detail: "0.7 MP" },
+  { value: 0.98, label: "MAX", detail: "0.98 MP" },
+  { value: 2, label: "2K", detail: "2.0 MP" },
+];
+
 const TURNAROUND_FORMAT = "16:9" as const;
 type ImageFormatValue = (typeof formats)[number]["value"] | typeof IMAGE_EDIT_KEEP_ASPECT_FORMAT;
 
@@ -191,6 +201,24 @@ function engineLabel(engine: ImageJob["engine"]) {
   return typeof engine === "string" ? engine : engine.model ?? engine.workflow ?? "Motore immagini";
 }
 
+function h3StepsFromEngine(engine: ImageJob["engine"]): H3ImageSteps {
+  if (typeof engine !== "object") return 20;
+  return h3ImageStepOptions.includes(engine.steps as H3ImageSteps)
+    ? engine.steps as H3ImageSteps
+    : 20;
+}
+
+function h3MegapixelsFromJob(job: ImageJob): H3ImageMegapixels {
+  const snapshot = typeof job.engine === "object" ? Number(job.engine.megapixels) : Number.NaN;
+  const actual = Number.isFinite(snapshot)
+    ? snapshot
+    : (job.width * job.height) / (1024 * 1024);
+  return h3ImageResolutionOptions.reduce(
+    (best, option) => Math.abs(option.value - actual) < Math.abs(best - actual) ? option.value : best,
+    0.98 as H3ImageMegapixels,
+  );
+}
+
 function statusLabel(candidate: ImageCandidate) {
   if (candidate.phaseLabel) return candidate.phaseLabel;
   if (candidate.status === "idle") return "Pronto a generare";
@@ -231,6 +259,15 @@ function referenceMediaPath(file: string) {
   return "/api/media?" + query.toString();
 }
 
+function fitH3ImageArea(width: number, height: number, megapixels: H3ImageMegapixels) {
+  const ratio = Math.max(1 / 32, Math.min(32, width / height));
+  const area = megapixels * 1024 * 1024;
+  return {
+    width: Math.max(64, Math.round(Math.sqrt(area * ratio) / 32) * 32),
+    height: Math.max(64, Math.round(Math.sqrt(area / ratio) / 32) * 32),
+  };
+}
+
 export default function ImageStudioPanel({
   bridgeUrl,
   projects,
@@ -244,6 +281,8 @@ export default function ImageStudioPanel({
     incomingReferences.length ? "edit" : "generate",
   );
   const [engineChoice, setEngineChoice] = useState<ImageEngineChoice>("default");
+  const [h3Steps, setH3Steps] = useState<H3ImageSteps>(20);
+  const [h3Megapixels, setH3Megapixels] = useState<H3ImageMegapixels>(0.98);
   const [prompt, setPrompt] = useState("");
   const [plannerEnabled, setPlannerEnabled] = useState(true);
   const [plannerIdea, setPlannerIdea] = useState("");
@@ -288,13 +327,14 @@ export default function ImageStudioPanel({
   const composerRef = useRef<HTMLElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const loadGenerationRef = useRef(0);
+  const usingMiniMax = engineChoice === "minimax" && mode !== "anima";
   const keepAspectDimensions = imageEditKeepAspectDimensions(
     references[0]?.width,
     references[0]?.height,
   );
   const keepAspectUnavailable =
     mode === "edit" && format === IMAGE_EDIT_KEEP_ASPECT_FORMAT && !keepAspectDimensions;
-  const selectedFormat = format === IMAGE_EDIT_KEEP_ASPECT_FORMAT && keepAspectDimensions
+  const baseSelectedFormat = format === IMAGE_EDIT_KEEP_ASPECT_FORMAT && keepAspectDimensions
     ? {
         value: IMAGE_EDIT_KEEP_ASPECT_FORMAT,
         label: "Mantieni proporzioni",
@@ -302,6 +342,14 @@ export default function ImageStudioPanel({
         height: keepAspectDimensions.height,
       }
     : formats.find((item) => item.value === format) ?? formats[0];
+  const h3Dimensions = fitH3ImageArea(
+    baseSelectedFormat.width,
+    baseSelectedFormat.height,
+    h3Megapixels,
+  );
+  const selectedFormat = usingMiniMax
+    ? { ...baseSelectedFormat, ...h3Dimensions }
+    : baseSelectedFormat;
   const selectedComposition = imageCompositionPreset(compositionPreset);
   const turnaroundFormatMismatch =
     compositionPreset === "character-turnaround" && format !== TURNAROUND_FORMAT;
@@ -322,7 +370,6 @@ export default function ImageStudioPanel({
         return candidateLinks.some((link) => link.projectId === projectId);
       })
     : Array.from({ length: candidateCount }, (_, index): ImageCandidate => ({ index: index + 1, seed: 0, status: "idle", output: null }));
-  const usingMiniMax = engineChoice === "minimax" && mode !== "anima";
   const referenceLimit = usingMiniMax ? 9 : 4;
   const miniMaxReferenceCount = mode === "edit" ? references.length : 0;
   const miniMaxImageMode = miniMaxReferenceCount === 0 ? "T2I" : miniMaxReferenceCount === 1 ? "I2I" : "REFERENCE";
@@ -444,7 +491,7 @@ export default function ImageStudioPanel({
         return current;
       }
       if (current.length >= referenceLimit) {
-        setMessage(`${usingMiniMax ? "MiniMax H3" : "Flux Klein"} accetta al massimo ${referenceLimit} reference`);
+        setMessage(`${usingMiniMax ? "Image H3" : "Flux Klein"} accetta al massimo ${referenceLimit} reference`);
         return current;
       }
       const next = [...current, {
@@ -456,7 +503,7 @@ export default function ImageStudioPanel({
         role: (current.length === 0 ? "base" : "other") as ReferenceRole,
         uid: crypto.randomUUID(),
       }];
-      setMessage(`${image.name} allegata a ${usingMiniMax ? "MiniMax H3" : "Flux Klein Edit"}`);
+      setMessage(`${image.name} allegata a ${usingMiniMax ? "Image H3" : "Flux Klein Edit"}`);
       return next;
     });
     setMode("edit");
@@ -504,6 +551,10 @@ export default function ImageStudioPanel({
       setCompositionPreset(selected.compositionPreset ?? "free");
       setCandidateCount(selected.candidateCount);
       setFormat((selected.aspectFormat === IMAGE_EDIT_KEEP_ASPECT_FORMAT || formats.some((item) => item.value === selected.aspectFormat) ? selected.aspectFormat : "1:1") as ImageFormatValue);
+      if (typeof selected.engine === "object" && selected.engine.kind === "minimax-h3-image") {
+        setH3Steps(h3StepsFromEngine(selected.engine));
+        setH3Megapixels(h3MegapixelsFromJob(selected));
+      }
       setReferences(selected.mode === "edit" ? selected.references.map((reference) => ({ ...reference, mediaPath: referenceMediaPath(reference.file), uid: crypto.randomUUID() })) : []);
     }
   }
@@ -672,7 +723,7 @@ export default function ImageStudioPanel({
       const engineEffectivePrompt = composeImagePrompt(enginePrompt, compositionPreset);
       const response = await fetch(`${bridgeUrl}/api/image-jobs`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId, mode, engine: engineChoice, prompt: enginePrompt, effectivePrompt: engineEffectivePrompt, compositionPreset, candidateCount, aspectFormat: selectedFormat.value, width: selectedFormat.width, height: selectedFormat.height, seedMode, seed: seedMode === "random" ? undefined : numericSeed, references: mode === "edit" ? references.map((reference) => ({ file: reference.file, name: reference.name, width: reference.width, height: reference.height, role: reference.role })) : [], tag }),
+        body: JSON.stringify({ projectId, mode, engine: engineChoice, prompt: enginePrompt, effectivePrompt: engineEffectivePrompt, compositionPreset, candidateCount, aspectFormat: selectedFormat.value, width: selectedFormat.width, height: selectedFormat.height, h3Steps, h3Megapixels, seedMode, seed: seedMode === "random" ? undefined : numericSeed, references: mode === "edit" ? references.map((reference) => ({ file: reference.file, name: reference.name, width: reference.width, height: reference.height, role: reference.role })) : [], tag }),
       });
       const payload = (await response.json()) as { job?: ImageJob; error?: string };
       if (!response.ok || !payload.job) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
@@ -829,7 +880,7 @@ export default function ImageStudioPanel({
                   className={item.id === job?.id ? "active" : ""}
                   key={item.id}
                   onClick={() => {
-                    setJob(item); setActiveJobId(active(item) ? item.id : null); setMode(item.mode); setEngineChoice(typeof item.engine === "object" && item.engine.kind === "minimax-h3-image" ? "minimax" : "default"); setPrompt(item.prompt); setPlannerIdea(item.prompt); setPlannerReady(true); setPlannerSummary("Prompt gia preparato per questo batch."); setCompositionPreset(item.compositionPreset ?? "free"); setCandidateCount(item.candidateCount);
+                    setJob(item); setActiveJobId(active(item) ? item.id : null); setMode(item.mode); setEngineChoice(typeof item.engine === "object" && item.engine.kind === "minimax-h3-image" ? "minimax" : "default"); setPrompt(item.prompt); setPlannerIdea(item.prompt); setPlannerReady(true); setPlannerSummary("Prompt gia preparato per questo batch."); setCompositionPreset(item.compositionPreset ?? "free"); setCandidateCount(item.candidateCount); if (typeof item.engine === "object" && item.engine.kind === "minimax-h3-image") { setH3Steps(h3StepsFromEngine(item.engine)); setH3Megapixels(h3MegapixelsFromJob(item)); }
                     setFormat((item.aspectFormat === IMAGE_EDIT_KEEP_ASPECT_FORMAT || formats.some((candidate) => candidate.value === item.aspectFormat) ? item.aspectFormat : "1:1") as ImageFormatValue);
                     setSeedMode(item.seedMode);
                     setSeedValue(item.requestedSeed === null || item.requestedSeed === undefined ? "1024" : String(item.requestedSeed));
@@ -1010,7 +1061,7 @@ export default function ImageStudioPanel({
 
           <div className="image-control-grid">
             <fieldset className="segmented-control"><legend>Modalità</legend><div><button className={mode === "generate" ? "selected" : ""} onClick={() => { setMode("generate"); setEngineChoice("default"); setPlannerReady(false); if (format === IMAGE_EDIT_KEEP_ASPECT_FORMAT) setFormat("1:1"); }} type="button">Genera</button><button className={mode === "edit" ? "selected" : ""} onClick={() => { setMode("edit"); setEngineChoice("default"); setPlannerReady(false); if (!references.length) void openImageLibrary(); }} type="button">Edit</button><button className={mode === "anima" ? "selected" : ""} onClick={() => { setMode("anima"); setEngineChoice("default"); setPlannerReady(false); if (format === IMAGE_EDIT_KEEP_ASPECT_FORMAT) setFormat("1:1"); }} type="button">Anima</button></div></fieldset>
-            {mode !== "anima" && <fieldset className="segmented-control image-engine-switch"><legend>Motore</legend><div><button className={engineChoice === "default" ? "selected" : ""} onClick={() => { setEngineChoice("default"); setReferences((current) => current.slice(0, 4)); setMessage(mode === "edit" ? "Flux Klein selezionato per Edit" : "Krea selezionato per la generazione"); }} type="button">{mode === "edit" ? "Flux Klein" : "Krea"}</button><button className={engineChoice === "minimax" ? "selected" : ""} onClick={() => { setEngineChoice("minimax"); setMessage(`MiniMax H3 selezionato · ${mode === "edit" ? references.length === 1 ? "I2I" : references.length > 1 ? "Reference" : "allega almeno una immagine" : "T2I"}`); }} type="button">MiniMax H3</button></div></fieldset>}
+            {mode !== "anima" && <fieldset className="segmented-control image-engine-switch"><legend>Motore</legend><div><button className={engineChoice === "default" ? "selected" : ""} onClick={() => { setEngineChoice("default"); setReferences((current) => current.slice(0, 4)); setMessage(mode === "edit" ? "Flux Klein selezionato per Edit" : "Krea selezionato per la generazione"); }} type="button">{mode === "edit" ? "Flux Klein" : "Krea"}</button><button className={engineChoice === "minimax" ? "selected" : ""} onClick={() => { setEngineChoice("minimax"); setMessage(`Image H3 selezionato · ${mode === "edit" ? references.length === 1 ? "I2I" : references.length > 1 ? "Reference" : "allega almeno una immagine" : "T2I"}`); }} type="button">Image H3</button></div></fieldset>}
             <label className="select-control">
               <span>Formato</span>
               <select
@@ -1023,6 +1074,8 @@ export default function ImageStudioPanel({
                 {formats.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
             </label>
+            {usingMiniMax && <fieldset className="segmented-control"><legend>Step Image H3</legend><div>{h3ImageStepOptions.map((value) => <button className={h3Steps === value ? "selected" : ""} key={value} onClick={() => setH3Steps(value)} type="button">{value}</button>)}</div></fieldset>}
+            {usingMiniMax && <fieldset className="segmented-control"><legend>Risoluzione Image H3</legend><div>{h3ImageResolutionOptions.map((item) => <button className={h3Megapixels === item.value ? "selected" : ""} key={item.value} onClick={() => setH3Megapixels(item.value)} title={item.detail} type="button">{item.label}</button>)}</div></fieldset>}
             <fieldset className="segmented-control"><legend>Generazioni</legend><div>{[1, 2, 3, 4].map((value) => <button className={candidateCount === value ? "selected" : ""} key={value} onClick={() => setCandidateCount(value)} type="button">{value}</button>)}</div></fieldset>
             <fieldset className="segmented-control"><legend>Seed</legend><div>{(["random", "base", "fixed"] as SeedMode[]).map((value) => <button className={seedMode === value ? "selected" : ""} key={value} onClick={() => setSeedMode(value)} type="button">{value === "random" ? "Random" : value === "base" ? "Base +1" : "Bloccato"}</button>)}</div></fieldset>
             <label className="seed-input"><span>Valore seed</span><input disabled={seedMode === "random"} min="0" onChange={(event) => setSeedValue(event.target.value)} type="number" value={seedValue} /></label>
@@ -1032,7 +1085,7 @@ export default function ImageStudioPanel({
 
           {mode === "edit" && (
             <div className="asset-panel image-reference-panel">
-              <div className="asset-panel-heading"><div><strong>{usingMiniMax ? "Reference MiniMax H3" : "Reference Flux Klein"}</strong><span>{usingMiniMax ? "1 immagine = I2I · 2–9 immagini = Reference" : "Da 1 a 4 immagini · ordine e ruolo modificabili"}</span></div><div className="asset-source-actions"><button onClick={() => void openImageLibrary()} type="button">▧ Scegli dalla libreria</button><label className="asset-upload">{uploading ? "Caricamento…" : `+ Carica (${references.length}/${referenceLimit})`}<input accept="image/*" disabled={uploading || references.length >= referenceLimit} multiple onChange={(event) => { void upload(event.currentTarget.files); event.currentTarget.value = ""; }} type="file" /></label></div></div>
+              <div className="asset-panel-heading"><div><strong>{usingMiniMax ? "Reference Image H3" : "Reference Flux Klein"}</strong><span>{usingMiniMax ? "1 immagine = I2I · 2–9 immagini = Reference" : "Da 1 a 4 immagini · ordine e ruolo modificabili"}</span></div><div className="asset-source-actions"><button onClick={() => void openImageLibrary()} type="button">▧ Scegli dalla libreria</button><label className="asset-upload">{uploading ? "Caricamento…" : `+ Carica (${references.length}/${referenceLimit})`}<input accept="image/*" disabled={uploading || references.length >= referenceLimit} multiple onChange={(event) => { void upload(event.currentTarget.files); event.currentTarget.value = ""; }} type="file" /></label></div></div>
               <div className="image-reference-list">
                 {!references.length ? <span className="asset-empty">Carica una base e, se servono, soggetto, stile, posa o sfondo.</span> : references.map((reference, index) => (
                   <article key={reference.uid}>
@@ -1105,7 +1158,7 @@ export default function ImageStudioPanel({
           <div className={selectedEngineReady ? "image-engine-state ready" : "image-engine-state blocked"}>
             {selectedEngineReady ? "Motore immagini pronto" : engineStatusError ?? "Dipendenze motore mancanti"}
           </div>
-          <div className="preset-note"><span className="fast-badge">{usingMiniMax ? `MINIMAX H3 · ${miniMaxImageMode}` : mode === "edit" ? "FLUX KLEIN EDIT" : mode === "anima" ? "ANIMA" : "KREA"}</span>{keepAspectUnavailable ? "Reference 1 senza dimensioni" : `${selectedFormat.width} × ${selectedFormat.height} · ${(selectedFormat.width * selectedFormat.height / 1_000_000).toFixed(1)} MP`} · {selectedComposition.shortLabel}</div>
+          <div className="preset-note"><span className="fast-badge">{usingMiniMax ? `IMAGE H3 · ${miniMaxImageMode} · ${h3Steps} STEP` : mode === "edit" ? "FLUX KLEIN EDIT" : mode === "anima" ? "ANIMA" : "KREA"}</span>{keepAspectUnavailable ? "Reference 1 senza dimensioni" : `${selectedFormat.width} × ${selectedFormat.height} · ${(selectedFormat.width * selectedFormat.height / (1024 * 1024)).toFixed(2)} MP`} · {selectedComposition.shortLabel}</div>
           <div className="generation-cta"><div><span>Output</span><strong>{candidateCount} immagin{candidateCount === 1 ? "e" : "i"} · {tag === "untagged" ? "senza tag" : tags.find((item) => item.value === tag)?.label}</strong></div><button disabled={busy === "run" || busy === "planner" || active(job) || !projectId || !selectedEngineReady || turnaroundFormatMismatch || keepAspectUnavailable || (plannerEnabled && (!plannerStatus?.ready || !plannerIdea.trim()))} onClick={() => void run()} type="button">{busy === "planner" ? "LLM prepara..." : busy === "run" || active(job) ? "Generazione in corso" : turnaroundFormatMismatch ? "Formato 16:9 richiesto" : keepAspectUnavailable ? "Dimensioni reference mancanti" : !selectedEngineReady ? "Motore non pronto" : mode === "edit" ? "Crea " + candidateCount + " edit" : mode === "anima" ? "Genera " + candidateCount + " anime" : "Genera " + candidateCount + " immagini"}</button></div>
         </div>
         {message && <div className="run-message">{message}</div>}

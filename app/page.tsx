@@ -3470,7 +3470,7 @@ function SetupWizard({ status }: { status: SetupStatus }) {
 
   const workflowSelect = (role: WorkflowCatalogItem["role"], key: keyof InstallSettings) => (
     <label>
-      <span>Workflow {role === "video" ? "Video" : role === "fast" ? "FAST" : role === "image_edit" ? "Flux Klein Edit" : role === "image_anima" ? "Anima" : role === "image_minimax" ? "MiniMax H3 Image" : "Krea"}</span>
+      <span>Workflow {role === "video" ? "Video" : role === "fast" ? "FAST" : role === "image_edit" ? "Flux Klein Edit" : role === "image_anima" ? "Anima" : role === "image_minimax" ? "Image H3" : "Krea"}</span>
       <select
         value={String(settings[key])}
         onChange={(event) => setSettings({ ...settings, [key]: event.target.value })}
@@ -4078,7 +4078,7 @@ function AdminPanel() {
                   ["image", "imageWorkflowId", "Workflow Krea"],
                   ["image_edit", "imageEditWorkflowId", "Workflow Flux Klein Edit"],
                   ["image_anima", "imageAnimaWorkflowId", "Workflow Anima"],
-                  ["image_minimax", "imageMinimaxWorkflowId", "Workflow MiniMax H3 Image"],
+                  ["image_minimax", "imageMinimaxWorkflowId", "Workflow Image H3"],
                 ] as const).map(([role, key, label]) => (
                   <label key={key}>
                     <span>{label}</span>
@@ -4141,7 +4141,7 @@ function AdminPanel() {
               <small>Image edit multi-reference, fino a quattro input</small>
             </div>
             <div className="workflow-card">
-              <span>Workflow MiniMax H3 Image</span>
+              <span>Workflow Image H3</span>
               <strong>{data.minimaxImageWorkflow.source.split("\\").at(-1)}</strong>
               <code>{data.minimaxImageWorkflow.source}</code>
               <small>T2I, I2I e Reference fino a nove immagini</small>

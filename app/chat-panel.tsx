@@ -101,7 +101,7 @@ function annotated(output: { filename: string; subfolder: string; type: string }
 function actionLabel(type: NonNullable<ChatMessage["action"]>["type"]) {
   if (type === "generate_video") return "Video H3";
   if (type === "generate_anima") return "Immagine Anima";
-  if (type === "generate_minimax_image") return "Immagine MiniMax H3";
+  if (type === "generate_minimax_image") return "Image H3";
   if (type === "edit_image") return "Edit Flux.2 Klein";
   if (type === "generate_tts") return "Voce / TTS Higgs";
   if (type === "generate_music") return "Musica H3";

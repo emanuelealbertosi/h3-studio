@@ -50,12 +50,12 @@
     {
       "id": "minimax-h3-image-aio",
       "role": "image_minimax",
-      "name": "MiniMax H3 Image AIO T2I / I2I / Reference",
+      "name": "Image H3 AIO T2I / I2I / Reference",
       "api": "studio-minimax-h3-image.api.json",
       "referenceLimit": 9,
       "defaults": {
         "steps": 8,
-        "samplingProfile": "hybrid single image | ER-SDE 8 steps",
+        "samplingProfile": "selectable 8 Turbo / 12 / 20 / 30 RES",
         "preserveStrength": 0.6
       }
     }

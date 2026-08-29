@@ -30,7 +30,11 @@ import {
   IMAGE_API_MAX_PIXELS,
   IMAGE_EDIT_MAX_REFERENCES,
   IMAGE_UI_TARGET_MAX_PIXELS,
+  MINIMAX_H3_IMAGE_MEGAPIXELS,
   MINIMAX_H3_IMAGE_MAX_REFERENCES,
+  MINIMAX_H3_IMAGE_STEPS,
+  type MiniMaxH3ImageMegapixels,
+  type MiniMaxH3ImageStepCount,
 } from "./image-workflow-builder.js";
 import type { RuntimeSettings, RuntimeSettingsStore } from "./runtime-settings.js";
 import type { ComfyProgressTracker } from "./comfy-progress.js";
@@ -57,6 +61,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function randomSeed() {
   return Math.floor(Math.random() * MAX_SEED);
+}
+
+function fitH3ImageArea(
+  sourceWidth: number,
+  sourceHeight: number,
+  megapixels: MiniMaxH3ImageMegapixels,
+) {
+  const ratio = Math.max(1 / 32, Math.min(32, sourceWidth / sourceHeight));
+  const area = megapixels * 1024 * 1024;
+  const width = Math.max(64, Math.round(Math.sqrt(area * ratio) / 32) * 32);
+  const height = Math.max(64, Math.round(Math.sqrt(area / ratio) / 32) * 32);
+  return { width, height };
 }
 
 function normalizeFile(value: unknown) {
@@ -158,12 +174,34 @@ export function normalizeImageRequest(value: unknown) {
   // The bridge is authoritative for the turnaround canvas. Older browser
   // bundles can still submit their previous square dimensions and prompt;
   // normalize both before graph construction and persistence.
-  const width = isCharacterTurnaround
+  const requestedWidth = isCharacterTurnaround
     ? CHARACTER_TURNAROUND_FORMAT.width
     : Number(value.width);
-  const height = isCharacterTurnaround
+  const requestedHeight = isCharacterTurnaround
     ? CHARACTER_TURNAROUND_FORMAT.height
     : Number(value.height);
+  const requestedH3Steps = Number(value.h3Steps ?? 20);
+  const h3Steps = MINIMAX_H3_IMAGE_STEPS.includes(requestedH3Steps as MiniMaxH3ImageStepCount)
+    ? requestedH3Steps as MiniMaxH3ImageStepCount
+    : null;
+  if (imageEngine === "minimax" && h3Steps === null) {
+    throw new Error("Image H3 supporta 8, 12, 20 oppure 30 step");
+  }
+  const requestedH3Megapixels = Number(value.h3Megapixels ?? 0.98);
+  const normalizedH3Megapixels = requestedH3Megapixels === 1 ? 0.98 : requestedH3Megapixels;
+  const h3Megapixels = MINIMAX_H3_IMAGE_MEGAPIXELS.includes(
+    normalizedH3Megapixels as MiniMaxH3ImageMegapixels,
+  )
+    ? normalizedH3Megapixels as MiniMaxH3ImageMegapixels
+    : null;
+  if (imageEngine === "minimax" && h3Megapixels === null) {
+    throw new Error("Image H3 supporta 0.5, 0.7, 0.98 oppure 2 megapixel");
+  }
+  const h3Dimensions = imageEngine === "minimax" && h3Megapixels !== null
+    ? fitH3ImageArea(requestedWidth, requestedHeight, h3Megapixels)
+    : null;
+  const width = h3Dimensions?.width ?? requestedWidth;
+  const height = h3Dimensions?.height ?? requestedHeight;
   assertImageDimensions(width, height);
   const aspectFormat = isCharacterTurnaround
     ? CHARACTER_TURNAROUND_FORMAT.aspectFormat
@@ -196,7 +234,7 @@ export function normalizeImageRequest(value: unknown) {
     : IMAGE_EDIT_MAX_REFERENCES;
   if (rawReferences.length > referenceLimit) {
     throw new Error(imageEngine === "minimax"
-      ? "MiniMax H3 Image supporta al massimo 9 reference"
+      ? "Image H3 supporta al massimo 9 reference"
       : "Flux.2 Klein Edit supporta al massimo 4 reference");
   }
   if (imageMode === "edit" && rawReferences.length === 0) {
@@ -215,6 +253,8 @@ export function normalizeImageRequest(value: unknown) {
     mode,
     imageMode,
     imageEngine,
+    h3Steps: h3Steps ?? 20,
+    h3Megapixels: h3Megapixels ?? 0.98,
     prompt,
     effectivePrompt,
     compositionPreset,
@@ -327,6 +367,7 @@ export class ImageStudioService {
     const minimaxSettings = {
       model: settings.h3.model,
       ...DEFAULT_MINIMAX_H3_IMAGE_SETTINGS,
+      steps: request.h3Steps,
     };
     const engine = request.imageEngine === "minimax"
       ? {
@@ -334,10 +375,11 @@ export class ImageStudioService {
           model: minimaxSettings.model,
           encoder: minimaxSettings.encoder,
           vae: minimaxSettings.vae,
-          steps: 8,
+          steps: minimaxSettings.steps,
           cfg: 1,
-          sampler: "er_sde",
-          scheduler: "sgm_uniform",
+          sampler: minimaxSettings.steps === 8 ? "euler" : "res_multistep",
+          scheduler: "simple",
+          megapixels: request.h3Megapixels,
           compositionPreset: request.compositionPreset,
           effectivePrompt: request.effectivePrompt,
           imageMode: request.references.length === 0
@@ -351,8 +393,12 @@ export class ImageStudioService {
           detailStrength: minimaxSettings.detailStrength,
           preserveStrength: minimaxSettings.preserveStrength,
           loras: [
-            { name: minimaxSettings.turboLora, strength: minimaxSettings.turboStrength },
-            { name: minimaxSettings.detailLora, strength: minimaxSettings.detailStrength },
+            ...(minimaxSettings.steps === 8 && minimaxSettings.turboLora
+              ? [{ name: minimaxSettings.turboLora, strength: minimaxSettings.turboStrength }]
+              : []),
+            ...(request.references.length > 0 && minimaxSettings.detailLora
+              ? [{ name: minimaxSettings.detailLora, strength: minimaxSettings.detailStrength }]
+              : []),
           ],
         }
       : request.imageMode === "edit"
@@ -566,6 +612,10 @@ export class ImageStudioService {
         aspectFormat: original.aspectFormat,
         width: original.width,
         height: original.height,
+        h3Steps: original.engine.kind === "minimax-h3-image" ? original.engine.steps : undefined,
+        h3Megapixels: original.engine.kind === "minimax-h3-image"
+          ? original.engine.megapixels ?? 0.98
+          : undefined,
         seedMode: "random",
         references: mode === "edit" ? original.references : [],
         tag: originLink?.tag ?? "untagged",
