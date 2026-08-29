@@ -20,10 +20,10 @@ try {
     .prepare(
       `INSERT INTO jobs(
         id, status, created_at, updated_at, prompt, candidate_count,
-        duration_seconds, megapixels, generation_mode, aspect_format,
+        shot_count, duration_seconds, megapixels, generation_mode, aspect_format,
         requested_seed, seed_mode, model, lora, lora_strength, steps,
         selected_candidate_index
-      ) VALUES (?, 'completed', ?, ?, ?, 1, 5, 0.5, 'T2V',
+      ) VALUES (?, 'completed', ?, ?, ?, 1, 3, 5, 0.5, 'T2V',
                 '16:9 landscape', '123', 'base', 'test-model', 'test-lora',
                 1, 8, 1)`,
     )
@@ -103,6 +103,7 @@ try {
     const withClip = projects.addClip(first.id, "test-job", 1, "Apertura");
     assert.equal(withClip?.clips.length, 1);
     assert.equal(withClip?.clips[0].position, 0);
+    assert.equal(withClip?.clips[0].sourceDuration, 15);
     assert.equal(withClip?.clips[0].processingSeconds, 63.25);
     assert.equal(first.timelines.length, 1);
 

@@ -537,7 +537,7 @@ export class ChatService {
               file: outputFile(candidate.output),
               name: `Video ${job.id.slice(0, 8)} · candidato ${candidate.index}`,
               mediaPath: candidate.output.mediaPath,
-              duration: job.request.durationSeconds,
+              duration: job.request.durationSeconds * job.request.shotCount,
               hasAudio: true,
               remembered: true,
             }];

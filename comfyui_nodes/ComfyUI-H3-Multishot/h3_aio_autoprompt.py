@@ -353,7 +353,8 @@ class H3AIOAutopromptRequest:
                       '"task_types":["reference generation"],"summary":"...",'
                       '"retention_analysis":"...","style":"...","shots":'
                       '[{"description":"...","soundscape":"...",'
-                      '"music":"N/A","active_ref_images":[1]}]}' % mode)
+                      '"music":"N/A","active_ref_images":[1],'
+                      '"active_ref_videos":[1],"active_ref_audios":[1]}]}' % mode)
 
         operation_rules = {
             "T2V": (
@@ -419,7 +420,7 @@ Rules:
 - End each generated clip on a stable composition suitable for the next clip. Never restart later clips from the original input image.
 - T2V/I2V descriptions contain visuals, action, camera and timing; soundscape is diegetic audio; music is non-diegetic music or N/A.
 - Write soundscape as 1-3 complete sentences. Use music=N/A only when no audience-only score is wanted or when the audio routing rule requires it; otherwise describe instruments, tempo, dynamics and continuity across clips.
-- Full-reference modes use stable <Subject N>, <Picture N>, <Video N> and <Audio N> labels. active_ref_images lists only ordinary reference pictures needed in that generated clip.
+- Full-reference modes use stable <Subject N>, <Picture N>, <Video N> and <Audio N> labels. active_ref_images, active_ref_videos and active_ref_audios list only the references physically needed in that generated clip. Obey every explicit generated-clip schedule in REFERENCE ROLE MAP exactly; AUTO entries are assigned to the smallest useful set of clips, while REQUIRED entries stay active in every clip.
 - task_types may only be keyframe completion, reference generation, video editing, video continuation, audio reuse, audio reference.
 - KEYFRAMES must use keyframe completion. VIDEO EXTENSION must use video continuation. VIDEO EDITING must use video editing. The validator enforces these choices.
 - Audio metadata is not transcription and must never be treated as heard lyrics or speech.
@@ -568,6 +569,19 @@ class H3AIOPlanParser:
                     if 1 <= number <= int(available_pictures):
                         valid.add(number)
                 item["active_ref_images"] = sorted(valid)
+                for field in ("active_ref_videos", "active_ref_audios"):
+                    active_media = shot.get(field)
+                    if not isinstance(active_media, list):
+                        active_media = [1, 2, 3]
+                    valid_media = set()
+                    for value in active_media:
+                        try:
+                            number = int(value)
+                        except (TypeError, ValueError):
+                            continue
+                        if 1 <= number <= 3:
+                            valid_media.add(number)
+                    item[field] = sorted(valid_media)
             cleaned.append(item)
 
         if mode in ("T2V", "I2V"):

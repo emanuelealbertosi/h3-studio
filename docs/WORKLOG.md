@@ -1,5 +1,13 @@
 # Worklog
 
+## 29 agosto 2026 — Multishot 1–12 nello Studio
+
+- Rimosso il vincolo implicito `shot_count=1`: ogni candidato usa ora da 1 a 12 shot concatenati dallo stesso sampler con frame memory.
+- Aggiunti durata totale indicativa, crediti/ETA corretti, persistenza SQLite v23, rigenerazione e durata timeline moltiplicata.
+- Ogni Picture, Video e Audio può essere pianificato su Auto, Tutti o shot espliciti; planner e prompt builder emettono schedule separati.
+- Il reference bank filtra fisicamente i blocchi inattivi per shot e ricompatta i marker, inclusi i gruppi Video+Audio accoppiati.
+- Aggiunti `test:multishot`, copertura FAST 12-shot e regressione della durata timeline; CI Windows aggiornata.
+
 ## 27 agosto 2026 — Chat LLM Vision per progetto
 
 - Aggiunta la voce Chat sopra lo Studio con conversazioni SQLite indipendenti per progetto, cronologia, pulizia e composer responsive.

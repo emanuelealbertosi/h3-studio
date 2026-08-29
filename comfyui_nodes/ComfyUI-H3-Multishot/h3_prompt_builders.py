@@ -22,8 +22,13 @@ _TASK_TYPES = (
     "audio reference",
 )
 
-_REF_DIRECTIVE = "__H3_ACTIVE_PICTURES__:"
+_REF_DIRECTIVES = {
+    "active_ref_images": "__H3_ACTIVE_PICTURES__:",
+    "active_ref_videos": "__H3_ACTIVE_VIDEOS__:",
+    "active_ref_audios": "__H3_ACTIVE_AUDIOS__:",
+}
 _MAX_REF_IMAGES = 9
+_MAX_REF_MEDIA = 3
 
 _IT2V_DEFAULT = json.dumps({
     "version": 1,
@@ -53,6 +58,8 @@ _R2V_DEFAULT = json.dumps({
         "soundscape": "",
         "music": "N/A",
         "active_ref_images": list(range(1, _MAX_REF_IMAGES + 1)),
+        "active_ref_videos": list(range(1, _MAX_REF_MEDIA + 1)),
+        "active_ref_audios": list(range(1, _MAX_REF_MEDIA + 1)),
     }],
 }, ensure_ascii=False, separators=(",", ":"))
 
@@ -91,6 +98,19 @@ def _normalise_shots(raw_shots):
                 int(item) for item in selected
                 if str(item).isdigit()
                 and 1 <= int(item) <= _MAX_REF_IMAGES
+            })
+        for field in ("active_ref_videos", "active_ref_audios"):
+            if field not in raw:
+                continue
+            selected = raw.get(field)
+            if selected is None:
+                selected = list(range(1, _MAX_REF_MEDIA + 1))
+            elif not isinstance(selected, list):
+                selected = []
+            shot[field] = sorted({
+                int(item) for item in selected
+                if str(item).isdigit()
+                and 1 <= int(item) <= _MAX_REF_MEDIA
             })
         shots.append(shot)
     if not shots:
@@ -273,7 +293,7 @@ def _scheduled_sections(state, shot, selected):
 
 def _r2v_block(state, shot):
     selected = shot.get("active_ref_images")
-    directive = ""
+    directive_lines = []
     if isinstance(selected, list):
         selected = sorted({
             int(value) for value in selected
@@ -285,10 +305,9 @@ def _r2v_block(state, shot):
     if scheduled:
         subjects, retention, raw_description, summary = _scheduled_sections(
             state, shot, selected)
-        directive = (
-            _REF_DIRECTIVE
-            + (",".join(str(value) for value in selected) or "none")
-            + "\n")
+        directive_lines.append(
+            _REF_DIRECTIVES["active_ref_images"]
+            + (",".join(str(value) for value in selected) or "none"))
     else:
         subjects = _strip_heading(
             state.get("subject_definitions"), "subject_definitions")
@@ -297,6 +316,18 @@ def _r2v_block(state, shot):
         raw_description = shot.get("description")
         summary = None
 
+    for field in ("active_ref_videos", "active_ref_audios"):
+        media_selected = shot.get(field)
+        if not isinstance(media_selected, list):
+            continue
+        media_selected = sorted({
+            int(value) for value in media_selected
+            if 1 <= int(value) <= _MAX_REF_MEDIA
+        })
+        directive_lines.append(
+            _REF_DIRECTIVES[field]
+            + (",".join(str(value) for value in media_selected) or "none"))
+
     style = str(state.get("style") or "").strip()
     description = _local_shot_description(raw_description)
     detail = "\n".join(part for part in (style, description) if part)
@@ -304,6 +335,9 @@ def _r2v_block(state, shot):
         shot.get("soundscape"), "overall_soundscape")
     music = _strip_heading(
         shot.get("music"), "non_diegetic_music") or "N/A"
+    directive = "\n".join(directive_lines)
+    if directive:
+        directive += "\n"
     return directive + (
         f"subject_definitions:\n{subjects}\n\n"
         f"summary:\n{_summary_line(state, summary)}\n\n"

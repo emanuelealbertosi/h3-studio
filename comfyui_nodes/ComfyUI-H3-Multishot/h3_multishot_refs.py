@@ -138,9 +138,16 @@ class RefBank:
         return "\n".join(lines)
 
 
-_ACTIVE_PICTURES_RE = re.compile(
-    r"(?m)^\s*__H3_ACTIVE_PICTURES__\s*:\s*([^\r\n]+)\s*$")
-_PICTURE_MARKER_RE = re.compile(r"<Picture\s+(\d+)>", re.IGNORECASE)
+_ACTIVE_REFERENCE_RES = {
+    "Picture": re.compile(
+        r"(?m)^\s*__H3_ACTIVE_PICTURES__\s*:\s*([^\r\n]+)\s*$"),
+    "Video": re.compile(
+        r"(?m)^\s*__H3_ACTIVE_VIDEOS__\s*:\s*([^\r\n]+)\s*$"),
+    "Audio": re.compile(
+        r"(?m)^\s*__H3_ACTIVE_AUDIOS__\s*:\s*([^\r\n]+)\s*$"),
+}
+_REFERENCE_MARKER_RE = re.compile(
+    r"<(Picture|Video|Audio)\s+(\d+)>", re.IGNORECASE)
 
 
 def _recount_rows(bank):
@@ -160,81 +167,103 @@ def _recount_rows(bank):
 
 
 def prepare_shot_bank(bank, prompt):
-    """Apply a hidden per-shot Picture schedule and strip it before Qwen.
+    """Apply hidden per-shot Picture/Video/Audio schedules before Qwen.
 
-    Legacy prompts contain no directive and therefore return the original bank
-    byte-for-byte. Scheduled prompts select original one-based Picture slots,
-    compact the physical reference bank, and renumber markers locally so
-    positional MiniMax bindings remain correct.
+    Legacy prompts contain no directive and return the original bank exactly.
+    Reference-video soundtracks are one physical ``video_audio`` block, so the
+    paired Video/Audio labels are selected together when either side is active.
     """
     text = str(prompt or "")
-    match = _ACTIVE_PICTURES_RE.search(text)
-    if match is None:
-        return bank, text, None
-
-    raw = match.group(1).strip().lower()
-    text = _ACTIVE_PICTURES_RE.sub("", text, count=1).lstrip()
-    if raw in ("", "none", "off"):
-        requested = []
-    else:
-        requested = sorted({
+    requested = {}
+    for category, pattern in _ACTIVE_REFERENCE_RES.items():
+        match = pattern.search(text)
+        if match is None:
+            continue
+        raw = match.group(1).strip().lower()
+        text = pattern.sub("", text, count=1).lstrip()
+        requested[category] = [] if raw in ("", "none", "off") else sorted({
             int(value) for value in re.findall(r"\d+", raw)
             if int(value) > 0
         })
-
-    if not bank or bank.n_images == 0:
-        if requested:
-            print(
-                "[H3Refs] shot requested Picture slots %s but no explicit "
-                "reference images are active." % requested, flush=True)
+    if not requested:
+        return bank, text, None
+    if not bank:
         return bank, text, requested
 
-    selected = [value for value in requested if value <= bank.n_images]
-    ignored = [value for value in requested if value > bank.n_images]
-    if ignored:
+    groups = []
+    item_offset = 0
+    label_offset = 0
+    for block in bank.blocks:
+        item_count = 2 if block.get("kind") == "video_audio" else 1
+        groups.append((
+            list(bank.items[item_offset:item_offset + item_count]),
+            block,
+            list(bank.labels[label_offset:label_offset + item_count]),
+        ))
+        item_offset += item_count
+        label_offset += item_count
+    if item_offset != len(bank.items) or label_offset != len(bank.labels):
         print(
-            "[H3Refs] ignoring unavailable Picture slot(s): %s; loaded "
-            "Picture range is 1..%d." % (ignored, bank.n_images), flush=True)
+            "[H3Refs] reference schedule skipped: bank layout is not "
+            "recognized (%d items, %d blocks, %d labels)."
+            % (len(bank.items), len(bank.blocks), len(bank.labels)),
+            flush=True)
+        return bank, text, requested
+
+    selected_groups = []
+    for items, block, labels in groups:
+        votes = []
+        for marker, _source in labels:
+            match = _REFERENCE_MARKER_RE.fullmatch(marker.strip())
+            if match is None:
+                votes.append(True)
+                continue
+            category = match.group(1).title()
+            ordinal = int(match.group(2))
+            votes.append(
+                True if category not in requested
+                else ordinal in requested[category])
+        if any(votes):
+            selected_groups.append((items, block, labels))
 
     shot_bank = RefBank()
-    image_offsets = [value - 1 for value in selected]
-    shot_bank.items = (
-        [bank.items[index] for index in image_offsets]
-        + list(bank.items[bank.n_images:]))
-    shot_bank.blocks = (
-        [bank.blocks[index] for index in image_offsets]
-        + list(bank.blocks[bank.n_images:]))
-    shot_bank.n_images = len(selected)
     shot_bank.legacy_voice_only = bank.legacy_voice_only
-
-    for new_index, old_index in enumerate(selected, start=1):
-        source = bank.labels[old_index - 1][1]
-        shot_bank.labels.append((
-            "<Picture %d>" % new_index,
-            "%s [source Picture %d]" % (source, old_index)))
-    shot_bank.labels.extend(bank.labels[bank.n_images:])
+    counters = {"Picture": 0, "Video": 0, "Audio": 0}
+    mapping = {}
+    for items, block, labels in selected_groups:
+        shot_bank.items.extend(items)
+        shot_bank.blocks.append(block)
+        for marker, source in labels:
+            match = _REFERENCE_MARKER_RE.fullmatch(marker.strip())
+            if match is None:
+                shot_bank.labels.append((marker, source))
+                continue
+            category = match.group(1).title()
+            old_ordinal = int(match.group(2))
+            counters[category] += 1
+            new_ordinal = counters[category]
+            mapping[(category, old_ordinal)] = new_ordinal
+            shot_bank.labels.append((
+                "<%s %d>" % (category, new_ordinal),
+                "%s [source %s %d]" % (
+                    source, category, old_ordinal)))
+    shot_bank.n_images = counters["Picture"]
     _recount_rows(shot_bank)
 
-    mapping = {
-        old_index: new_index
-        for new_index, old_index in enumerate(selected, start=1)
-    }
+    def replace_reference(match_obj):
+        category = match_obj.group(1).title()
+        old_ordinal = int(match_obj.group(2))
+        new_ordinal = mapping.get((category, old_ordinal))
+        if new_ordinal is not None:
+            return "<%s %d>" % (category, new_ordinal)
+        return "the omitted inactive %s reference" % category.lower()
 
-    def replace_picture(match_obj):
-        old_index = int(match_obj.group(1))
-        if old_index in mapping:
-            return "<Picture %d>" % mapping[old_index]
-        return "the omitted inactive picture reference"
-
-    text = _PICTURE_MARKER_RE.sub(replace_picture, text)
+    text = _REFERENCE_MARKER_RE.sub(replace_reference, text)
     print(
-        "[H3Refs] per-shot Picture filter: source %s -> local %s%s"
-        % (
-            selected or "none",
-            list(range(1, len(selected) + 1)) or "none",
-            " (non-image references unchanged)"
-            if len(shot_bank.blocks) > len(selected) else "",
-        ),
+        "[H3Refs] per-shot reference filter: %s -> %d block(s), "
+        "%d Picture / %d Video / %d Audio marker(s)."
+        % (requested, len(shot_bank.blocks), counters["Picture"],
+           counters["Video"], counters["Audio"]),
         flush=True)
     return shot_bank, text, requested
 

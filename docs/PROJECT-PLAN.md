@@ -442,6 +442,18 @@ Legenda: `[x]` completato e verificato; `[~]` parziale o presente solo a livello
 - [ ] Collaudare la conversione timbrica completa sulla GPU reale dopo il download dei modelli audio.cpp.
 - [ ] Collaudare voice clone italiano e una generazione Music lunga su GPU reale.
 
+### Milestone 11 — Multishot nello Studio
+
+- [x] Contatore esplicito da 1 a 12 shot per candidato sul workflow H3 standard/FAST esistente.
+- [x] Durata per-shot, durata totale indicativa, crediti ed ETA moltiplicati per shot e candidati.
+- [x] Persistenza SQLite v23, cronologia, rigenerazione e durata timeline multishot.
+- [x] Scheduling UI `Auto` / `Tutti` / shot selezionati per Picture, Video e Audio.
+- [x] Planner con campi distinti `active_ref_images`, `active_ref_videos` e `active_ref_audios`.
+- [x] Filtro fisico del reference bank e ricompattazione marker per ogni shot.
+- [x] Test non-GPU per limite 12, wiring workflow, ETA, timeline e filtro reference.
+- [ ] Smoke test GPU 2 shot T2V, quindi 3 shot Reference con asset che entra soltanto nello shot 2.
+- [ ] Misurare memoria, tempo e affidabilità su 6 e 12 shot prima di consigliarli come preset ordinari.
+
 ### Funzioni mancanti nel piano originario, ora esplicitate
 
 - Varianti derivate immutabili per evitare che Face Refine o Upscale sovrascrivano l'originale.

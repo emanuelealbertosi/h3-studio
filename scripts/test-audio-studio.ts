@@ -149,7 +149,7 @@ try {
 
   const database = new DatabaseSync(jobs.databasePath);
   const migration = database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number };
-  assert.equal(migration.version, 22);
+  assert.equal(migration.version, 23);
   database.close();
   console.log("Audio Studio persistence, output and migration: OK");
 } finally {

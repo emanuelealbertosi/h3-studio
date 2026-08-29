@@ -27,6 +27,7 @@ jobs:
       - run: npm run test:chat
       - run: npm run test:audio
       - run: npm run test:fast
+      - run: npm run test:multishot
       - run: npm run test:cancel
       - run: npm run test:restart
       - run: npm run test:preview-layout

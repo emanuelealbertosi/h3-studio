@@ -678,7 +678,7 @@ a:focus-visible {
 .control-grid {
   padding: 12px 18px 14px;
   display: grid;
-  grid-template-columns: minmax(170px, 1fr) minmax(180px, 1fr) minmax(170px, 0.8fr) minmax(140px, 0.7fr) minmax(260px, 1.4fr);
+  grid-template-columns: repeat(6, minmax(140px, 1fr));
   gap: 14px;
 }
 
@@ -705,6 +705,13 @@ a:focus-visible {
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
   font-size: 12px;
+}
+
+.select-control > small {
+  margin-top: -4px;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.35;
 }
 
 .segmented-control > div {
@@ -3573,6 +3580,35 @@ a:focus-visible {
   background: #0b0c0e;
   color: var(--ink);
   font-size: 9px;
+}
+.media-asset-body .shot-schedule {
+  display: grid;
+  gap: 5px;
+}
+.media-asset-body .shot-schedule > span {
+  color: var(--muted);
+  font-size: 8px;
+}
+.media-asset-body .shot-schedule > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.media-asset-body .shot-schedule button {
+  min-width: 23px;
+  min-height: 23px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 6px;
+  background: #0b0c0e;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+}
+.media-asset-body .shot-schedule button.selected {
+  border-color: rgba(215, 255, 82, .48);
+  background: rgba(215, 255, 82, .1);
+  color: var(--accent);
 }
 .media-asset-actions {
   position: absolute;

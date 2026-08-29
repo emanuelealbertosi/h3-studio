@@ -81,7 +81,7 @@ type ImageJob = {
   } | null }>;
 };
 type VideoJob = {
-  id: string; request: { prompt: string; durationSeconds: number };
+  id: string; request: { prompt: string; durationSeconds: number; shotCount?: number };
   candidates: Array<{ index: number; status: string; output?: {
     filename: string; subfolder: string; type: "input" | "output" | "temp";
     mediaPath: string;
@@ -349,7 +349,8 @@ export default function ChatPanel({
         items.push({
           id: `video:${job.id}:${candidate.index}`, kind: "video",
           file: annotated(candidate.output), name: `Video ${job.id.slice(0, 8)} · ${candidate.index}`,
-          mediaPath: candidate.output.mediaPath, duration: job.request.durationSeconds,
+          mediaPath: candidate.output.mediaPath,
+          duration: job.request.durationSeconds * (job.request.shotCount ?? 1),
         });
       }
       const seen = new Set<string>();

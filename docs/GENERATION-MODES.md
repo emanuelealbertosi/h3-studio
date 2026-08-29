@@ -11,8 +11,28 @@ Questo documento descrive il mapping verificato tra H3 Studio e il workflow
 | Image to video | `I2V` | Picture 1 | Picture 1 diventa il frame iniziale. |
 | Reference | `R2V` | Almeno un'immagine, video o audio | Gli asset seguono l'ordine del Media Loader e i ruoli dichiarati. |
 | Keyframes | `KEYFRAMES` | Almeno Picture 1 | Picture 1..N diventano anchor sulla timeline globale; posizioni `AUTO` o percentuali esplicite. |
-| Continue video | `VIDEO EXTENSION` | Video 1, massimo 10 secondi nello Studio | Il router continua dall'ultimo frame decodificato. |
-| Edit video | `VIDEO EDITING` | Video 1, massimo 10 secondi nello Studio | Video 1 è la sorgente diretta; il numero di clip interne viene determinato automaticamente. |
+| Continue video | `VIDEO EXTENSION` | Video 1, massimo 15 secondi nello Studio | Il router continua dall'ultimo frame decodificato. |
+| Edit video | `VIDEO EDITING` | Video 1, massimo 15 secondi nello Studio | Video 1 è la sorgente diretta. |
+
+## Multishot 1–12
+
+Il controllo **Shot** sceglie esattamente da 1 a 12 clip generate nello stesso
+job. **Durata** resta la durata di ogni singolo shot; ad esempio `6 × 10 s`
+produce circa un minuto. I candidati restano seriali e ogni candidato contiene
+l'intera sequenza. Il planner deve restituire esattamente il numero scelto e il
+sampler usa la frame memory già presente nel workflow fra una clip e la successiva.
+
+In modalità Reference ogni asset espone tre criteri:
+
+- `Auto`: il planner sceglie il più piccolo insieme utile di shot;
+- `Tutti`: la reference è obbligatoria in ogni shot;
+- numeri `1..12`: la reference è consentita solo negli shot selezionati.
+
+Il piano conserva separatamente `active_ref_images`, `active_ref_videos` e
+`active_ref_audios`. Prima del text encoding, il reference bank elimina i blocchi
+inattivi e ricompatta localmente i marker `<Picture N>`, `<Video N>` e `<Audio N>`.
+Un video con soundtrack accoppiata rimane un unico blocco fisico, quindi video e
+audio abbinati vengono attivati insieme.
 
 ## Invarianti dello Studio
 
@@ -22,6 +42,7 @@ Questo documento descrive il mapping verificato tra H3 Studio e il workflow
 - Il montaggio concatena virtualmente le clip durante il playback; non modifica i file originali.
 - Copy e Move fra progetti cambiano soltanto i riferimenti della timeline.
 - Prompt, asset, ruoli, keyframe, seed e impostazioni FAST sono persistiti con il job.
+- Numero di shot, schedule reference e durata totale sono ripristinati in cronologia, rigenerazione e timeline.
 - Gli upload usano la route ufficiale `/minimax_h3/upload` del Media Loader installato.
 
 ## Media state
@@ -40,5 +61,5 @@ i limiti reali H3: 9 immagini, 3 video e 3 audio.
 
 La route `POST /api/jobs/dry-run` costruisce il prompt API completo senza
 accodarlo. I sei modi sono verificati con asset reali già presenti in ComfyUI;
-il dry-run espone anche `mediaAssetCount`, seed candidati e
+il dry-run espone anche `shotCount`, `mediaAssetCount`, seed candidati e
 `continuationOnly`.

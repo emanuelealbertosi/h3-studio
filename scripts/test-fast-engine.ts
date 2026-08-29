@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ComfyApiPrompt } from "../bridge/comfy-client.js";
 import {
@@ -9,6 +11,7 @@ import {
 } from "../bridge/pdd-compatibility.js";
 import { DEFAULT_RUNTIME_SETTINGS } from "../bridge/runtime-settings.js";
 import { prepareStudioJob, publicDryRun } from "../bridge/studio-job.js";
+import { JobRepository } from "../bridge/job-repository.js";
 
 function uniqueNode(prompt: ComfyApiPrompt, classType: string) {
   const nodes = Object.values(prompt).filter((node) => node.class_type === classType);
@@ -125,6 +128,43 @@ assert.equal(
 );
 assert.equal(fastSampler.inputs.studio_context_clip_index, 1);
 assert.equal(publicDryRun(fast).fastPdd, true);
+
+const twelveShot = prepareStudioJob(
+  source,
+  { ...baseRequest, shotCount: 12, durationSeconds: 10, qualityMode: "fast", turboEnabled: false },
+  structuredClone(DEFAULT_RUNTIME_SETTINGS),
+  "00000000-0000-4000-8000-000000000012",
+);
+const twelveShotRequest = uniqueNode(
+  twelveShot.candidates[0].prompt,
+  "H3AIOAutopromptRequest",
+);
+assert.equal(twelveShot.request.shotCount, 12);
+assert.equal(twelveShotRequest.inputs.shot_count, 12);
+assert.equal(twelveShotRequest.inputs.max_auto_shots, 12);
+assert.equal(publicDryRun(twelveShot).shotCount, 12);
+assert.ok(
+  publicDryRun(twelveShot).estimatedExecution.centralSeconds >
+    publicDryRun(fast).estimatedExecution.centralSeconds * 20,
+);
+assert.throws(
+  () => prepareStudioJob(
+    source,
+    { ...baseRequest, shotCount: 13, qualityMode: "fast", turboEnabled: false },
+    structuredClone(DEFAULT_RUNTIME_SETTINGS),
+  ),
+  /shotCount deve essere un intero da 1 a 12/i,
+);
+const multishotData = mkdtempSync(path.join(tmpdir(), "h3-studio-multishot-"));
+let multishotRepository: JobRepository | null = null;
+try {
+  multishotRepository = new JobRepository(multishotData);
+  multishotRepository.createPrepared(twelveShot, twelveShot.engineSettings);
+  assert.equal(multishotRepository.get(twelveShot.jobId)?.request.shotCount, 12);
+} finally {
+  multishotRepository?.close();
+  rmSync(multishotData, { recursive: true, force: true });
+}
 
 const fl2vaSettings = structuredClone(DEFAULT_RUNTIME_SETTINGS);
 fl2vaSettings.fast.model = fl2vaPair.model;

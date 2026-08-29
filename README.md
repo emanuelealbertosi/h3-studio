@@ -39,6 +39,13 @@ keyframe e ruoli Reference; nessun render parte senza il pulsante Genera. La
 timeline può essere esportata in un MP4 unico con FFmpeg: prima tenta il concat
 senza ricodifica e, se i segmenti non sono compatibili, usa una ricodifica H.264/AAC.
 
+Ogni candidato video può contenere da **1 a 12 shot H3 concatenati con frame
+memory**. La durata scelta è per shot e la UI mostra durata totale indicativa,
+costo ed ETA moltiplicati. In Reference, ogni Picture, Video o Audio può essere
+lasciato su Auto, obbligato in tutti gli shot oppure assegnato a shot precisi;
+il planner produce lo schedule e il reference bank filtra fisicamente i media
+inattivi prima del conditioning.
+
 I controlli creativi Camera, Obiettivo ed Effetti aggiungono direttive leggibili
 al prompt senza nascondere o sostituire il testo dell’utente.
 
@@ -154,7 +161,8 @@ video corrispondenti dall'output ComfyUI.
 - `docs/WORKLOG.md`: cronologia sintetica del lavoro.
 
 Test locali principali: `npm run test:projects`, `npm run test:export`,
-`npm run test:library`, `npm run test:external`, `npm run test:krea-contract` e `npm run test:fast`.
+`npm run test:library`, `npm run test:external`, `npm run test:krea-contract`,
+`npm run test:fast` e `npm run test:multishot`.
 Il bootstrap e l'autenticazione locale si verificano con `npm run test:setup`.
 Il contratto completo Image Studio si verifica con `npm run test:images`.
 Il contratto della Chat locale si verifica con `npm run test:chat`.

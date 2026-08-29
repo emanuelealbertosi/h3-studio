@@ -162,7 +162,7 @@ export class ProjectRepository {
        COALESCE(candidate_variants.output_subfolder, candidates.output_subfolder) AS output_subfolder,
        COALESCE(candidate_variants.output_type, candidates.output_type) AS output_type,
        COALESCE(candidate_variants.output_format, candidates.output_format) AS output_format,
-       jobs.duration_seconds AS source_duration
+       (jobs.duration_seconds * jobs.shot_count) AS source_duration
        FROM project_clips JOIN candidates ON candidates.job_id = project_clips.source_job_id
        AND candidates.candidate_index = project_clips.source_candidate_index
        LEFT JOIN candidate_variants ON candidate_variants.id = project_clips.source_variant_id
@@ -246,9 +246,11 @@ export class ProjectRepository {
   updateClip(clipId: string, value: { trimStart?: unknown; trimEnd?: unknown; volume?: unknown; variantId?: unknown }) {
     const clip = this.clip(clipId);
     if (!clip) throw new Error("Clip non trovata");
-    const durationRow = this.database.prepare("SELECT duration_seconds FROM jobs WHERE id = ?").get(clip.source_job_id) as { duration_seconds: number } | undefined;
+    const durationRow = this.database.prepare(
+      "SELECT duration_seconds * shot_count AS source_duration FROM jobs WHERE id = ?",
+    ).get(clip.source_job_id) as { source_duration: number } | undefined;
     if (!durationRow) throw new Error("Sorgente della clip non trovata");
-    const sourceDuration = durationRow.duration_seconds;
+    const sourceDuration = durationRow.source_duration;
     const trimStart = value.trimStart === undefined ? clip.trim_start : numberBetween(value.trimStart, 0, sourceDuration - 0.05, "Inizio trim");
     const trimEnd = value.trimEnd === undefined || value.trimEnd === null || value.trimEnd === "" ? clip.trim_end ?? sourceDuration : numberBetween(value.trimEnd, 0.05, sourceDuration, "Fine trim");
     if (trimEnd - trimStart < 0.05) throw new Error("La clip deve durare almeno 0,05 secondi");

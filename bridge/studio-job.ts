@@ -45,6 +45,7 @@ export type QualityMode = "fast" | "min" | "med" | "max";
 export type StudioJobRequest = {
   prompt: string;
   candidateCount: 1 | 2 | 3 | 4;
+  shotCount: number;
   durationSeconds: 5 | 10 | 15;
   megapixels: 0.5 | 0.7 | 0.98;
   generationMode: GenerationMode;
@@ -192,6 +193,11 @@ function normalizeRequest(value: unknown): StudioJobRequest {
     throw new Error("candidateCount deve essere 1, 2, 3 o 4");
   }
 
+  const shotCount = value.shotCount === undefined ? 1 : Number(value.shotCount);
+  if (!Number.isInteger(shotCount) || shotCount < 1 || shotCount > 12) {
+    throw new Error("shotCount deve essere un intero da 1 a 12");
+  }
+
   const durationSeconds = Number(value.durationSeconds);
   if (durationSeconds !== 5 && durationSeconds !== 10 && durationSeconds !== 15) {
     throw new Error("durationSeconds deve essere 5, 10 oppure 15");
@@ -310,6 +316,7 @@ function normalizeRequest(value: unknown): StudioJobRequest {
   return {
     prompt,
     candidateCount: candidateCount as 1 | 2 | 3 | 4,
+    shotCount,
     durationSeconds: durationSeconds as 5 | 10 | 15,
     megapixels: megapixels as 0.5 | 0.7 | 0.98,
     generationMode: generationMode as GenerationMode,
@@ -534,10 +541,8 @@ export function prepareStudioJob(
     requestNode.inputs.generation_mode = request.generationMode;
     requestNode.inputs.natural_prompt = audioPolicyPrompt(request);
     requestNode.inputs.reference_roles = request.referenceRoles;
-    requestNode.inputs.shot_count =
-      request.generationMode === "VIDEO EDITING" ? 0 : 1;
-    requestNode.inputs.max_auto_shots =
-      request.generationMode === "VIDEO EDITING" ? 2 : 1;
+    requestNode.inputs.shot_count = request.shotCount;
+    requestNode.inputs.max_auto_shots = request.shotCount;
     requestNode.inputs.shot_seconds = request.durationSeconds;
     requestNode.inputs.keyframe_positions = request.keyframePositions;
     requestNode.inputs.source_video_audio = request.sourceVideoAudio;
@@ -599,6 +604,7 @@ export function estimateExecutionTime(
     PLANNER_COLD_SECONDS +
       BASE_SECONDS_5S_05MP *
         (request.durationSeconds / 5) *
+        request.shotCount *
         (request.megapixels / 0.5) *
         (engineSettings.steps / 8) *
         request.candidateCount,
@@ -626,6 +632,7 @@ export function publicDryRun(
     preset: prepared.request.qualityMode.toUpperCase(),
     generationMode: prepared.request.generationMode,
     durationSeconds: prepared.request.durationSeconds,
+    shotCount: prepared.request.shotCount,
     megapixels: prepared.request.megapixels,
     steps: settings.steps,
     profile: settings.profile,

@@ -34,6 +34,7 @@ type JobRow = {
   created_at: string;
   prompt: string;
   candidate_count: number;
+  shot_count: number;
   duration_seconds: number;
   megapixels: number;
   generation_mode: GenerationMode;
@@ -219,6 +220,7 @@ export class JobRepository {
         updated_at TEXT NOT NULL,
         prompt TEXT NOT NULL,
         candidate_count INTEGER NOT NULL CHECK (candidate_count BETWEEN 1 AND 4),
+        shot_count INTEGER NOT NULL DEFAULT 1 CHECK (shot_count BETWEEN 1 AND 12),
         duration_seconds INTEGER NOT NULL CHECK (duration_seconds IN (5, 10, 15)),
         megapixels REAL NOT NULL CHECK (megapixels IN (0.5, 0.7, 1.0)),
         generation_mode TEXT NOT NULL,
@@ -248,7 +250,7 @@ export class JobRepository {
       ) STRICT`);
       this.database.exec(`INSERT INTO jobs_duration_upgrade(
         id, status, created_at, updated_at, prompt, candidate_count,
-        duration_seconds, megapixels, generation_mode, aspect_format,
+        shot_count, duration_seconds, megapixels, generation_mode, aspect_format,
         requested_seed, model, lora, lora_strength, steps,
         selected_candidate_index, seed_mode, media_state, reference_roles,
         keyframe_positions, source_video_audio, project_id, source_job_id,
@@ -256,7 +258,7 @@ export class JobRepository {
         engine_profile, pdd_file
       ) SELECT
         id, status, created_at, updated_at, prompt, candidate_count,
-        duration_seconds, megapixels, generation_mode, aspect_format,
+        shot_count, duration_seconds, megapixels, generation_mode, aspect_format,
         requested_seed, model, lora, lora_strength, steps,
         selected_candidate_index, seed_mode, media_state, reference_roles,
         keyframe_positions, source_video_audio, project_id, source_job_id,
@@ -287,13 +289,13 @@ export class JobRepository {
         .prepare(
           `INSERT INTO jobs(
             id, status, created_at, updated_at, prompt, candidate_count,
-            duration_seconds, megapixels, generation_mode, aspect_format,
+            shot_count, duration_seconds, megapixels, generation_mode, aspect_format,
             requested_seed, seed_mode, media_state, reference_roles,
             keyframe_positions, source_video_audio,
             project_id, source_job_id, mute_diegetic, mute_non_diegetic,
             quality_mode, turbo_enabled, engine_profile, pdd_file,
             model, lora, lora_strength, steps
-          ) VALUES (?, 'prepared', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, 'prepared', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           prepared.jobId,
@@ -301,6 +303,7 @@ export class JobRepository {
           now,
           prepared.request.prompt,
           prepared.request.candidateCount,
+          prepared.request.shotCount,
           prepared.request.durationSeconds,
           prepared.request.megapixels === 0.98 ? 1 : prepared.request.megapixels,
           prepared.request.generationMode,
@@ -474,6 +477,7 @@ export class JobRepository {
         prompt: job.prompt,
         promptLength: job.prompt.length,
         candidateCount: job.candidate_count as 1 | 2 | 3 | 4,
+        shotCount: job.shot_count,
         durationSeconds: job.duration_seconds as 5 | 10 | 15,
         megapixels: (job.megapixels === 1 ? 0.98 : job.megapixels) as
           | 0.5

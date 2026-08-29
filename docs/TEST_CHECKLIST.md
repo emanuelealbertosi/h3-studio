@@ -48,6 +48,11 @@ Aggiornamento: 28 agosto 2026
 - [ ] FAST, 8, 12, 20 e 30 step verificati dal log ComfyUI.
 - [ ] Turbo realmente opzionale e nessuna patch residua quando è spento.
 - [ ] Durate 5, 10 e 15 secondi.
+- [x] Contratto statico 1–12 shot, wiring esatto, persistenza e durata timeline.
+- [ ] GPU: 2 shot T2V con raccordo fluido e output unico.
+- [ ] GPU: 3 shot Reference con una Picture attiva soltanto nello shot 2.
+- [ ] GPU: schedule Video/Audio per-shot verificato dal log `[H3Refs]`.
+- [ ] Stress test 6 e 12 shot con recupero dopo riavvio e misurazione VRAM/tempo.
 - [ ] A 15 secondi, 1 MP disabilitato e massimo 0,7 MP.
 - [ ] Seed random, base+1, bloccato e batch 1–4.
 - [ ] Tempo stimato coerente con caricamento, sampling e finalizzazione.

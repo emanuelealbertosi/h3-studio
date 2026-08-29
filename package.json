@@ -29,6 +29,7 @@
     "test:chat": "tsx scripts/test-chat.ts",
     "test:audio": "tsx scripts/test-audio-studio.ts",
     "test:fast": "tsx scripts/test-fast-engine.ts",
+    "test:multishot": "python scripts/test-multishot-scheduling.py",
     "test:continuation": "node scripts/test-continuation-boundary.mjs",
     "test:composer": "python scripts/test-composer-json-repair.py",
     "test:cancel": "tsx scripts/test-comfy-cancel.ts",

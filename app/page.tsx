@@ -141,6 +141,7 @@ type MediaAsset = {
   externalMediaId?: string;
   origin?: "external";
   referenceRole?: string;
+  shotUsage?: "auto" | "all" | number[];
   duration?: number | null;
   width?: number | null;
   height?: number | null;
@@ -335,7 +336,12 @@ function buildReferenceRoles(assets: MediaAsset[], fallback: string) {
     .map((asset, index) => {
       const caption = asset.caption?.trim() || asset.name;
       const role = asset.referenceRole ? `, ${asset.referenceRole.replace("_", " ")}` : "";
-      return `${mediaToken(assets, index)} = ${caption}${role}`;
+      const schedule = asset.shotUsage === "all"
+        ? ", REQUIRED in every generated clip"
+        : Array.isArray(asset.shotUsage) && asset.shotUsage.length
+          ? `, use ONLY in generated clips ${asset.shotUsage.join(", ")}`
+          : ", shot schedule AUTO: choose only the clips that need it";
+      return `${mediaToken(assets, index)} = ${caption}${role}${schedule}`;
     })
     .join("; ");
 }
@@ -658,6 +664,7 @@ type RemoteJob = {
     prompt: string;
     promptLength: number;
     candidateCount: 1 | 2 | 3 | 4;
+    shotCount?: number;
     durationSeconds: 5 | 10 | 15;
     megapixels: Megapixels;
     generationMode: GenerationMode;
@@ -1312,7 +1319,7 @@ function HistoryPanel({
                 </div>
                 <p>{job.request.prompt}</p>
                 <div className="history-specs">
-                  <span>{job.request.durationSeconds}s</span>
+                  <span>{job.request.shotCount && job.request.shotCount > 1 ? `${job.request.shotCount} shot × ${job.request.durationSeconds}s` : `${job.request.durationSeconds}s`}</span>
                   <span>{formatMegapixels(job.request.megapixels)} MP</span>
                   <span>{job.request.aspectFormat.split(" ")[0]}</span>
                   <span>{job.engine.steps} step</span>
@@ -4597,6 +4604,7 @@ function StudioApp() {
   const [qualityMode, setQualityMode] = useState<QualityMode>("fast");
   const [turboEnabled, setTurboEnabled] = useState(true);
   const [candidateCount, setCandidateCount] = useState(4);
+  const [shotCount, setShotCount] = useState(1);
   const [duration, setDuration] = useState<5 | 10 | 15>(10);
   const [megapixels, setMegapixels] = useState<Megapixels>(0.5);
   const [mode, setMode] = useState<StudioMode>("t2v");
@@ -4761,7 +4769,7 @@ function StudioApp() {
         .map((candidate) => ({
           kind: "video" as const,
           label: mentionBase(`video_${job.id.slice(0, 8)}_${candidate.index}`),
-          detail: `${job.projectName ?? "Senza progetto"} · ${job.request.durationSeconds}s`,
+          detail: `${job.projectName ?? "Senza progetto"} · ${job.request.durationSeconds * (job.request.shotCount ?? 1)}s`,
           previewKind: "video" as const,
           previewPath: candidate.output!.mediaPath,
           job,
@@ -4807,11 +4815,12 @@ function StudioApp() {
         10 *
           (effectiveSteps / 4) *
           (duration / 5) *
+          shotCount *
           (megapixels / 0.5) *
           candidateCount *
           modeConfig.factor,
       ),
-    [candidateCount, duration, effectiveSteps, megapixels, modeConfig.factor],
+    [candidateCount, duration, effectiveSteps, megapixels, modeConfig.factor, shotCount],
   );
   const estimatedSeconds = useMemo(
     () =>
@@ -4819,11 +4828,12 @@ function StudioApp() {
         28 +
           172 *
             (duration / 5) *
+            shotCount *
             (megapixels / 0.5) *
             (effectiveSteps / 8) *
             candidateCount,
       ),
-    [candidateCount, duration, effectiveSteps, megapixels],
+    [candidateCount, duration, effectiveSteps, megapixels, shotCount],
   );
   const estimatedTimeLabel = useMemo(() => {
     const minimumMinutes = Math.max(1, Math.round((estimatedSeconds * 0.85) / 60));
@@ -4917,6 +4927,7 @@ function StudioApp() {
     setCurrentJobId(job.id);
     setPrompt(job.request.prompt);
     setCandidateCount(job.request.candidateCount);
+    setShotCount(job.request.shotCount ?? 1);
     setDuration(job.request.durationSeconds);
     setMegapixels(job.request.megapixels);
     setCurrentJobMegapixels(job.request.megapixels);
@@ -5259,6 +5270,7 @@ function StudioApp() {
         body: JSON.stringify({
           prompt: resolvePromptMentions(prompt, mediaAssets),
           candidateCount,
+          shotCount,
           durationSeconds: duration,
           megapixels,
           generationMode,
@@ -6436,8 +6448,23 @@ function StudioApp() {
                 </div>
               </fieldset>
 
+              <label className="select-control">
+                <span>Shot (clip concatenate)</span>
+                <select
+                  onChange={(event) => setShotCount(Number(event.target.value))}
+                  value={shotCount}
+                >
+                  {Array.from({ length: 12 }, (_, index) => index + 1).map((value) => (
+                    <option key={value} value={value}>
+                      {value} shot
+                    </option>
+                  ))}
+                </select>
+                <small>{shotCount > 1 ? `Durata totale indicativa: ${shotCount * duration}s` : "Il workflow standard genera un solo shot."}</small>
+              </label>
+
               <fieldset className="segmented-control">
-                <legend>Durata</legend>
+                <legend>Durata per shot</legend>
                 <div>
                   {[5, 10, 15].map((value) => (
                     <button
@@ -6641,6 +6668,42 @@ function StudioApp() {
                               value={asset.caption ?? ""}
                             />
                           </label>
+                          {shotCount > 1 && (
+                            <div className="shot-schedule">
+                              <span>Presenza negli shot</span>
+                              <div>
+                                <button
+                                  className={!asset.shotUsage || asset.shotUsage === "auto" ? "selected" : ""}
+                                  onClick={() => setMediaAssets((current) => current.map((item) =>
+                                    item.uid === asset.uid ? { ...item, shotUsage: "auto" } : item
+                                  ))}
+                                  type="button"
+                                >Auto</button>
+                                <button
+                                  className={asset.shotUsage === "all" ? "selected" : ""}
+                                  onClick={() => setMediaAssets((current) => current.map((item) =>
+                                    item.uid === asset.uid ? { ...item, shotUsage: "all" } : item
+                                  ))}
+                                  type="button"
+                                >Tutti</button>
+                                {Array.from({ length: shotCount }, (_, shotIndex) => shotIndex + 1).map((shot) => (
+                                  <button
+                                    className={Array.isArray(asset.shotUsage) && asset.shotUsage.includes(shot) ? "selected" : ""}
+                                    key={shot}
+                                    onClick={() => setMediaAssets((current) => current.map((item) => {
+                                      if (item.uid !== asset.uid) return item;
+                                      const selected = Array.isArray(item.shotUsage) ? item.shotUsage : [];
+                                      const next = selected.includes(shot)
+                                        ? selected.filter((value) => value !== shot)
+                                        : [...selected, shot].sort((a, b) => a - b);
+                                      return { ...item, shotUsage: next.length ? next : "auto" };
+                                    }))}
+                                    type="button"
+                                  >{shot}</button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                         <div className="media-asset-actions">
                           <button
@@ -6792,7 +6855,7 @@ function StudioApp() {
             <div className="composer-footer">
               <div className="preset-note">
                 <span className="fast-badge">{generationPreset === "fast" ? "FAST" : `${effectiveSteps} STEP`}</span>
-                {generationPreset === "fast" ? "Alibaba PDD-Acc · 8 step" : `H3 standard · ${effectiveSteps} step`} · {duration}s · {formatMegapixels(megapixels)} MP
+                {generationPreset === "fast" ? "Alibaba PDD-Acc · 8 step" : `H3 standard · ${effectiveSteps} step`} · {shotCount > 1 ? `${shotCount} shot × ${duration}s ≈ ${shotCount * duration}s` : `${duration}s`} · {formatMegapixels(megapixels)} MP
               </div>
               <div className="generation-cta">
                 <div>

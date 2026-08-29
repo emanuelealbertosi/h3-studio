@@ -9,7 +9,7 @@ _SPLIT_DESCRIPTION = re.compile(
     r'(?P<prefix>"description"\s*:\s*)'
     r'(?P<first>%s)\s*,\s*'
     r'(?P<orphan>%s)\s*,'
-    r'(?=\s*"(?:soundscape|music|active_ref_images)"\s*:)' % (
+    r'(?=\s*"(?:soundscape|music|active_ref_images|active_ref_videos|active_ref_audios)"\s*:)' % (
         _JSON_STRING, _JSON_STRING),
     flags=re.DOTALL)
 _SHOT_START = re.compile(r"^\s*\[\s*Shot\s+\d+\s*\]", re.IGNORECASE)

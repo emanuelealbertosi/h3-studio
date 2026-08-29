@@ -583,4 +583,12 @@ export const JOB_DATABASE_MIGRATIONS = [
       `ALTER TABLE image_candidates ADD COLUMN display_name TEXT`,
     ],
   },
+  {
+    version: 23,
+    statements: [
+      `ALTER TABLE jobs
+       ADD COLUMN shot_count INTEGER NOT NULL DEFAULT 1
+       CHECK (shot_count BETWEEN 1 AND 12)`,
+    ],
+  },
 ] as const;

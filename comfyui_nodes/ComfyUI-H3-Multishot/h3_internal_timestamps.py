@@ -117,15 +117,18 @@ def collapse_planned_clips(shots, duration_seconds):
                 values.append(value)
         merged[field] = " Then: ".join(values) if values else "N/A"
 
-    if any("active_ref_images" in shot for shot in valid):
+    for reference_field in (
+            "active_ref_images", "active_ref_videos", "active_ref_audios"):
+        if not any(reference_field in shot for shot in valid):
+            continue
         references = set()
         for shot in valid:
-            for value in shot.get("active_ref_images") or []:
+            for value in shot.get(reference_field) or []:
                 try:
                     references.add(int(value))
                 except (TypeError, ValueError):
                     continue
-        merged["active_ref_images"] = sorted(references)
+        merged[reference_field] = sorted(references)
 
     return [merged], (
         "collapsed %d top-level clips into 1 clip with %d timed internal shots"
