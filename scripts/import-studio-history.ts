@@ -139,6 +139,10 @@ try {
       sourceJobId: null,
       muteDiegetic: false,
       muteNonDiegetic: false,
+      inpaintTarget: "",
+      inpaintMaskGrow: 8,
+      inpaintStartSeconds: 0,
+      inpaintEndSeconds: 0,
     };
     const settings = {
       profile: "standard" as const,

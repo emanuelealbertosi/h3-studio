@@ -28,7 +28,7 @@ Principio guida: **ComfyUI è il motore, H3 Studio è lo studio di produzione**.
 - Output selezionabile: **5 oppure 10 secondi**.
 - Nessuna durata superiore nel generatore singolo.
 - `Continue video`: accetta una sorgente fino a 10 secondi e aggiunge 5 o 10 secondi.
-- `Edit video`: accetta una sorgente fino a 10 secondi e mantiene di default la stessa durata.
+- `Inpaint video`: accetta una sorgente fino a 180 secondi, traccia a parole la regione con SAM3 e usa H3 Hybrid per modificarla conservando il resto.
 - Video lunghi: costruiti come sequenze di chunk collegati nella timeline.
 
 ### Risoluzione

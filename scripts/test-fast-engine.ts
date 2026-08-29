@@ -19,6 +19,12 @@ function uniqueNode(prompt: ComfyApiPrompt, classType: string) {
   return nodes[0];
 }
 
+function uniqueNodeId(prompt: ComfyApiPrompt, classType: string) {
+  const entries = Object.entries(prompt).filter(([, node]) => node.class_type === classType);
+  assert.equal(entries.length, 1, `Atteso un solo nodo ${classType}`);
+  return entries[0][0];
+}
+
 const source = JSON.parse(
   await readFile(path.resolve("workflows", "studio-backend.api.json"), "utf8"),
 ) as ComfyApiPrompt;
@@ -123,6 +129,7 @@ const editWithStaleFastFlags = prepareStudioJob(
   {
     ...baseRequest,
     generationMode: "VIDEO EDITING",
+    inpaintTarget: "vestito della donna",
     mediaState: JSON.stringify([
       { kind: "video", file: "edit-source.mp4 [input]", duration: 5 },
     ]),
@@ -136,6 +143,10 @@ const editWithStaleFastSampler = uniqueNode(
   editWithStaleFastFlags.candidates[0].prompt,
   "H3ReferenceMemorySampler",
 );
+const editSam3Segment = uniqueNode(
+  editWithStaleFastFlags.candidates[0].prompt,
+  "SAM3VideoSegmentation",
+);
 assert.equal(editWithStaleFastFlags.engineSettings.profile, "standard");
 assert.equal(
   editWithStaleFastFlags.engineSettings.model,
@@ -144,6 +155,11 @@ assert.equal(
 assert.equal(editWithStaleFastFlags.engineSettings.pddFile, null);
 assert.equal(editWithStaleFastFlags.engineSettings.steps, 8);
 assert.equal(editWithStaleFastSampler.inputs.pdd_acc_file, undefined);
+assert.equal(editSam3Segment.inputs.text_prompt, "vestito della donna");
+assert.deepEqual(
+  editWithStaleFastSampler.inputs.studio_inpaint_mask,
+  [uniqueNodeId(editWithStaleFastFlags.candidates[0].prompt, "SAM3VideoOutput"), 0],
+);
 assert.equal(
   fast.engineSettings.model,
   "minimax_h3_ref2va_int8_convrot.safetensors",
@@ -473,6 +489,9 @@ for (const [generationMode, jobId] of [
     {
       ...baseRequest,
       generationMode,
+      ...(generationMode === "VIDEO EDITING"
+        ? { inpaintTarget: "vestito della donna" }
+        : {}),
       aspectFormat: "keep source aspect",
       mediaState: JSON.stringify([{ kind: "video", file: "source.mp4 [input]" }]),
       qualityMode: "fast",
@@ -611,6 +630,7 @@ const longEdit = prepareStudioJob(
     ...baseRequest,
     durationSeconds: 10,
     generationMode: "VIDEO EDITING",
+    inpaintTarget: "vestito della donna",
     mediaState: JSON.stringify([{ kind: "video", file: "long.mp4 [input]", duration: 60 }]),
     qualityMode: "fast",
     turboEnabled: false,
@@ -628,6 +648,7 @@ assert.throws(
       ...baseRequest,
       durationSeconds: 10,
       generationMode: "VIDEO EDITING",
+      inpaintTarget: "vestito della donna",
       mediaState: JSON.stringify([{ kind: "video", file: "too-long.mp4 [input]", duration: 130 }]),
       qualityMode: "fast",
       turboEnabled: false,

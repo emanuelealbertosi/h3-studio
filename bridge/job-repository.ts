@@ -59,6 +59,10 @@ type JobRow = {
   source_job_id: string | null;
   mute_diegetic: number;
   mute_non_diegetic: number;
+  inpaint_target: string;
+  inpaint_mask_grow: number;
+  inpaint_start_seconds: number;
+  inpaint_end_seconds: number;
 };
 
 type CandidateRow = {
@@ -247,6 +251,13 @@ export class JobRepository {
         engine_profile TEXT NOT NULL DEFAULT 'standard'
           CHECK (engine_profile IN ('standard', 'fast')),
         pdd_file TEXT
+        ,inpaint_target TEXT NOT NULL DEFAULT ''
+        ,inpaint_mask_grow INTEGER NOT NULL DEFAULT 8
+          CHECK (inpaint_mask_grow BETWEEN 0 AND 96)
+        ,inpaint_start_seconds REAL NOT NULL DEFAULT 0
+          CHECK (inpaint_start_seconds BETWEEN 0 AND 180)
+        ,inpaint_end_seconds REAL NOT NULL DEFAULT 0
+          CHECK (inpaint_end_seconds BETWEEN 0 AND 180)
       ) STRICT`);
       this.database.exec(`INSERT INTO jobs_duration_upgrade(
         id, status, created_at, updated_at, prompt, candidate_count,
@@ -255,7 +266,8 @@ export class JobRepository {
         selected_candidate_index, seed_mode, media_state, reference_roles,
         keyframe_positions, source_video_audio, project_id, source_job_id,
         mute_diegetic, mute_non_diegetic, quality_mode, turbo_enabled,
-        engine_profile, pdd_file
+        engine_profile, pdd_file, inpaint_target, inpaint_mask_grow,
+        inpaint_start_seconds, inpaint_end_seconds
       ) SELECT
         id, status, created_at, updated_at, prompt, candidate_count,
         shot_count, duration_seconds, megapixels, generation_mode, aspect_format,
@@ -263,7 +275,8 @@ export class JobRepository {
         selected_candidate_index, seed_mode, media_state, reference_roles,
         keyframe_positions, source_video_audio, project_id, source_job_id,
         mute_diegetic, mute_non_diegetic, quality_mode, turbo_enabled,
-        engine_profile, pdd_file
+        engine_profile, pdd_file, inpaint_target, inpaint_mask_grow,
+        inpaint_start_seconds, inpaint_end_seconds
       FROM jobs`);
       this.database.exec("DROP TABLE jobs");
       this.database.exec("ALTER TABLE jobs_duration_upgrade RENAME TO jobs");
@@ -293,9 +306,11 @@ export class JobRepository {
             requested_seed, seed_mode, media_state, reference_roles,
             keyframe_positions, source_video_audio,
             project_id, source_job_id, mute_diegetic, mute_non_diegetic,
+            inpaint_target, inpaint_mask_grow,
+            inpaint_start_seconds, inpaint_end_seconds,
             quality_mode, turbo_enabled, engine_profile, pdd_file,
             model, lora, lora_strength, steps
-          ) VALUES (?, 'prepared', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, 'prepared', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           prepared.jobId,
@@ -318,6 +333,10 @@ export class JobRepository {
           prepared.request.sourceJobId,
           prepared.request.muteDiegetic ? 1 : 0,
           prepared.request.muteNonDiegetic ? 1 : 0,
+          prepared.request.inpaintTarget,
+          prepared.request.inpaintMaskGrow,
+          prepared.request.inpaintStartSeconds,
+          prepared.request.inpaintEndSeconds,
           prepared.request.qualityMode,
           prepared.request.turboEnabled ? 1 : 0,
           settings.profile,
@@ -497,6 +516,10 @@ export class JobRepository {
         sourceJobId: job.source_job_id,
         muteDiegetic: job.mute_diegetic === 1,
         muteNonDiegetic: job.mute_non_diegetic === 1,
+        inpaintTarget: job.inpaint_target,
+        inpaintMaskGrow: job.inpaint_mask_grow,
+        inpaintStartSeconds: job.inpaint_start_seconds,
+        inpaintEndSeconds: job.inpaint_end_seconds,
       },
       candidates: candidates.map((candidate) => ({
         index: candidate.candidate_index,

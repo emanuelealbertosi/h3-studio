@@ -82,6 +82,10 @@ export type StudioJobRequest = {
   sourceJobId: string | null;
   muteDiegetic: boolean;
   muteNonDiegetic: boolean;
+  inpaintTarget: string;
+  inpaintMaskGrow: number;
+  inpaintStartSeconds: number;
+  inpaintEndSeconds: number;
 };
 
 export type PreparedCandidate = {
@@ -396,6 +400,28 @@ function normalizeRequest(value: unknown): StudioJobRequest {
     value.sourceVideoAudio === "REUSE"
       ? value.sourceVideoAudio
       : "AUTO";
+  const inpaintTarget = typeof value.inpaintTarget === "string"
+    ? value.inpaintTarget.replace(/\s+/g, " ").trim().slice(0, 240)
+    : "";
+  const inpaintMaskGrow = Math.min(
+    96,
+    Math.max(0, Math.round(Number(value.inpaintMaskGrow ?? 8) / 4) * 4),
+  );
+  const inpaintStartSeconds = Math.min(
+    MAX_SOURCE_VIDEO_SECONDS,
+    Math.max(0, Number(value.inpaintStartSeconds ?? 0) || 0),
+  );
+  const inpaintEndSeconds = Math.min(
+    MAX_SOURCE_VIDEO_SECONDS,
+    Math.max(0, Number(value.inpaintEndSeconds ?? 0) || 0),
+  );
+  if (
+    generationMode === "VIDEO EDITING" &&
+    inpaintEndSeconds > 0 &&
+    inpaintEndSeconds <= inpaintStartSeconds
+  ) {
+    throw new Error("La fine dell'inpaint deve essere successiva all'inizio");
+  }
   const normalizeOptionalId = (input: unknown) => {
     if (input === undefined || input === null || input === "") return null;
     if (typeof input !== "string" || input.trim().length > 80) {
@@ -424,7 +450,77 @@ function normalizeRequest(value: unknown): StudioJobRequest {
     sourceJobId: normalizeOptionalId(value.sourceJobId),
     muteDiegetic: value.muteDiegetic === true,
     muteNonDiegetic: value.muteNonDiegetic === true,
+    inpaintTarget,
+    inpaintMaskGrow,
+    inpaintStartSeconds,
+    inpaintEndSeconds,
   };
+}
+
+function attachH3Inpaint(
+  prompt: ComfyApiPrompt,
+  sampler: ComfyApiNode,
+  routerId: string,
+  request: StudioJobRequest,
+) {
+  if (request.generationMode !== "VIDEO EDITING") return;
+  if (!request.inpaintTarget) {
+    throw new Error(
+      "Indica l'elemento da modificare, per esempio: vestito, automobile o cielo",
+    );
+  }
+  const highest = Math.max(
+    0,
+    ...Object.keys(prompt)
+      .map((value) => Number(value))
+      .filter(Number.isFinite),
+  );
+  const loaderId = String(highest + 1);
+  const segmentId = String(highest + 2);
+  const propagateId = String(highest + 3);
+  const outputId = String(highest + 4);
+  prompt[loaderId] = {
+    class_type: "LoadSAM3Model",
+    inputs: { precision: "auto", compile: false },
+    _meta: { title: "H3 Studio — SAM3 model" },
+  };
+  prompt[segmentId] = {
+    class_type: "SAM3VideoSegmentation",
+    inputs: {
+      prompt_mode: "text",
+      video_frames: [routerId, 7],
+      text_prompt: request.inpaintTarget,
+      frame_idx: 0,
+      score_threshold: 0.3,
+    },
+    _meta: { title: "H3 Studio — trova soggetto con parole" },
+  };
+  prompt[propagateId] = {
+    class_type: "SAM3Propagate",
+    inputs: {
+      sam3_model_config: [loaderId, 0],
+      video_state: [segmentId, 0],
+      start_frame: 0,
+      end_frame: -1,
+      direction: "forward",
+    },
+    _meta: { title: "H3 Studio — traccia maschera video" },
+  };
+  prompt[outputId] = {
+    class_type: "SAM3VideoOutput",
+    inputs: {
+      masks: [propagateId, 0],
+      video_state: [propagateId, 2],
+      scores: [propagateId, 1],
+      obj_id: -1,
+      plot_all_masks: true,
+    },
+    _meta: { title: "H3 Studio — maschera tracciata" },
+  };
+  sampler.inputs.studio_inpaint_mask = [outputId, 0];
+  sampler.inputs.studio_inpaint_grow = request.inpaintMaskGrow;
+  sampler.inputs.studio_inpaint_start_seconds = request.inpaintStartSeconds;
+  sampler.inputs.studio_inpaint_end_seconds = request.inpaintEndSeconds;
 }
 
 function audioPolicyPrompt(request: StudioJobRequest) {
@@ -668,6 +764,7 @@ export function prepareStudioJob(
     sampler.inputs.studio_source_context_prefix = sourceContext?.prefix ?? "";
     sampler.inputs.studio_source_context_clip_index =
       sourceContext?.candidateIndex ?? 0;
+    attachH3Inpaint(prompt, sampler, routerId, request);
     const keepSourceAspect = request.aspectFormat === "keep source aspect";
     size.inputs.size_mode = keepSourceAspect
       ? "source aspect + megapixels"
@@ -808,6 +905,60 @@ export class StudioJobService {
     excludedSeeds: ReadonlySet<number> = new Set(),
     runtimeOverride?: RuntimeSettings,
   ) {
+    const wantsInpaint = isRecord(rawRequest) &&
+      rawRequest.generationMode === "VIDEO EDITING";
+    if (wantsInpaint) {
+      const requiredClasses = [
+        "LoadSAM3Model",
+        "SAM3VideoSegmentation",
+        "SAM3Propagate",
+        "SAM3VideoOutput",
+        "MVEx_MaskToLatentSpace",
+      ] as const;
+      const [nodeInfo, samplerInfo] = await Promise.all([
+        Promise.all(requiredClasses.map(async (className) => {
+          const info = await this.comfy.objectInfo(className).catch(() => null);
+          return [className, isRecord(info) && isRecord(info[className])] as const;
+        })),
+        this.comfy.objectInfo("H3ReferenceMemorySampler").catch(() => null),
+      ]);
+      const missing: string[] = nodeInfo
+        .filter(([, available]) => !available)
+        .map(([className]) => className);
+      const sampler = samplerInfo?.H3ReferenceMemorySampler;
+      const input = isRecord(sampler) && isRecord(sampler.input)
+        ? sampler.input
+        : null;
+      const optional = input && isRecord(input.optional) ? input.optional : null;
+      if (!optional || !("studio_inpaint_mask" in optional)) {
+        missing.push("H3ReferenceMemorySampler (aggiornato per inpaint)");
+      }
+      if (missing.length) {
+        throw new Error(
+          `Inpaint video non pronto: mancano ${missing.join(", ")}. Installa le dipendenze dalla pagina Admin e riavvia ComfyUI.`,
+        );
+      }
+      const statusInfo = await this.comfy
+        .objectInfo("H3StudioInpaintStatus")
+        .catch(() => null);
+      const statusNode = statusInfo?.H3StudioInpaintStatus;
+      const statusInput = isRecord(statusNode) && isRecord(statusNode.input)
+        ? statusNode.input
+        : null;
+      const required = statusInput && isRecord(statusInput.required)
+        ? statusInput.required
+        : null;
+      const stateDefinition = required?.state;
+      const stateChoices = Array.isArray(stateDefinition) &&
+          Array.isArray(stateDefinition[0])
+        ? stateDefinition[0]
+        : [];
+      if (!stateChoices.includes("ready")) {
+        throw new Error(
+          "Modello SAM3 mancante (circa 3,45 GB): installa models/sam3/sam3.safetensors dalla pagina Admin prima di avviare Inpaint video. Il download non viene avviato di nascosto.",
+        );
+      }
+    }
     const wantsFast = isRecord(rawRequest) &&
       rawRequest.qualityMode !== "min" &&
       rawRequest.qualityMode !== "med" &&

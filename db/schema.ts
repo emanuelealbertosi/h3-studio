@@ -588,7 +588,19 @@ export const JOB_DATABASE_MIGRATIONS = [
     statements: [
       `ALTER TABLE jobs
        ADD COLUMN shot_count INTEGER NOT NULL DEFAULT 1
-       CHECK (shot_count BETWEEN 1 AND 12)`,
+      CHECK (shot_count BETWEEN 1 AND 12)`,
+    ],
+  },
+  {
+    version: 24,
+    statements: [
+      `ALTER TABLE jobs ADD COLUMN inpaint_target TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE jobs ADD COLUMN inpaint_mask_grow INTEGER NOT NULL DEFAULT 8
+       CHECK (inpaint_mask_grow BETWEEN 0 AND 96)`,
+      `ALTER TABLE jobs ADD COLUMN inpaint_start_seconds REAL NOT NULL DEFAULT 0
+       CHECK (inpaint_start_seconds BETWEEN 0 AND 180)`,
+      `ALTER TABLE jobs ADD COLUMN inpaint_end_seconds REAL NOT NULL DEFAULT 0
+       CHECK (inpaint_end_seconds BETWEEN 0 AND 180)`,
     ],
   },
 ] as const;

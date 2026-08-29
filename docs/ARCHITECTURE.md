@@ -44,7 +44,11 @@
 
 ## Flusso Edit
 
-`Edit` usa il video scelto come sorgente VIDEO EDITING, massimo 10 secondi, e conserva l'originale come genitore immutabile.
+`Inpaint video` usa il video scelto come sorgente VIDEO EDITING, fino a 180 secondi,
+e conserva l'originale come genitore immutabile. Il bridge aggiunge dinamicamente
+SAM3 per il tracking testuale; il sampler parte dal latent del video sorgente e
+applica il denoise H3 Hybrid soltanto alla maschera convertita da
+MaskVidExperiments. Non è un flusso Reference e non usa PDD FAST.
 
 ## Clip e montaggio
 

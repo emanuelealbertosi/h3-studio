@@ -17,6 +17,9 @@ type PlannedAction = {
   durationSeconds?: number;
   instrumental?: boolean;
   lyrics?: string;
+  maskTarget?: string;
+  maskStartSeconds?: number;
+  maskEndSeconds?: number;
 };
 
 type ChatRoute = "auto" | "video" | "krea" | "minimax" | "anima" | "edit" | "tts" | "music";
@@ -284,7 +287,31 @@ export function normalizePlan(text: string): { reply: string; title: string | nu
   const lyrics = typeof parsed.action.lyrics === "string"
     ? parsed.action.lyrics.trim().slice(0, 30_000)
     : undefined;
-  return { reply, title, action: { type: normalizedType.type, prompt, videoMode, aspect, durationSeconds, instrumental, lyrics } };
+  const maskTarget = typeof parsed.action.maskTarget === "string"
+    ? parsed.action.maskTarget.replace(/\s+/g, " ").trim().slice(0, 240)
+    : undefined;
+  const maskStartSeconds = Number.isFinite(Number(parsed.action.maskStartSeconds))
+    ? Math.max(0, Number(parsed.action.maskStartSeconds))
+    : undefined;
+  const maskEndSeconds = Number.isFinite(Number(parsed.action.maskEndSeconds))
+    ? Math.max(0, Number(parsed.action.maskEndSeconds))
+    : undefined;
+  return { reply, title, action: { type: normalizedType.type, prompt, videoMode, aspect, durationSeconds, instrumental, lyrics, maskTarget, maskStartSeconds, maskEndSeconds } };
+}
+
+export function inferVideoInpaintTarget(request: string) {
+  const text = String(request ?? "");
+  const direct = text.match(
+    /\b(?:cambia|modifica|sostituisci|rimuovi|trasforma|colora|change|modify|replace|remove|transform|recolor)\s+(?:soltanto\s+|solo\s+|only\s+)?(?:il\s+|la\s+|lo\s+|l['’]\s*|the\s+)?([^,.;!?]{2,100})/i,
+  )?.[1];
+  if (direct) {
+    return direct
+      .replace(/\b(?:in|con|into|with)\b[\s\S]*$/i, "")
+      .replace(/\b(?:quando|after|before|dopo|prima)\b[\s\S]*$/i, "")
+      .trim()
+      .slice(0, 240);
+  }
+  return "soggetto principale";
 }
 
 const EXPLICIT_INSTRUMENTAL_PATTERN = /\b(?:strumentale|instrumental|senza\s+(?:voce|voci|cantato)|no\s+vocals?|without\s+vocals?)\b/i;
@@ -419,12 +446,12 @@ const CHAT_SYSTEM_PROMPT = `You are H3 Studio, a concise Italian-speaking creati
 Always return exactly one JSON object and no markdown:
 {"reply":"natural Italian reply","title":"concise 3-7 word Italian conversation title","action":null}
 or
-{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|generate_minimax_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|KEYFRAMES|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1","durationSeconds":10,"instrumental":true,"lyrics":"exact requested words to sing or empty string"}}
+{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|generate_minimax_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|KEYFRAMES|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1","durationSeconds":10,"instrumental":true,"lyrics":"exact requested words to sing or empty string","maskTarget":"short noun phrase to track for VIDEO EDITING","maskStartSeconds":0,"maskEndSeconds":0}}
 
 Only create an action when the user explicitly asks to generate, animate, continue or edit media. Questions and ordinary conversation use action:null.
 The title describes the main topic, never starts with "Chat" and never contains quotation marks.
 For video default to 10 seconds, one candidate, 0.5 MP and the FAST 8-step engine. When the user explicitly requests a total video duration, preserve it in durationSeconds; the server converts it into up to 12 H3 shots. Do not invent a duration that the user did not request.
-Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures and Flux Klein as the default editor. Use generate_minimax_image only when the user explicitly requests MiniMax or H3 for a still image: no attached pictures means T2I, one picture means I2I, and two to nine pictures mean Reference. Use I2V when one attached picture is the start frame, R2V for broader video references, KEYFRAMES when attached pictures are requested as first, intermediate, final or timed video frames, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for editing one. Preserve Picture attachment order for KEYFRAMES; the server calculates percentages from explicit times or distributes them automatically. Video editing and extension still use action type generate_video; never invent video_editing, edit_video or continue_video action types.
+Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures and Flux Klein as the default editor. Use generate_minimax_image only when the user explicitly requests MiniMax or H3 for a still image: no attached pictures means T2I, one picture means I2I, and two to nine pictures mean Reference. Use I2V when one attached picture is the start frame, R2V for broader video references, KEYFRAMES when attached pictures are requested as first, intermediate, final or timed video frames, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for inpainting one attached video. For VIDEO EDITING always set maskTarget to the shortest concrete noun phrase SAM3 must track, for example "vestito della donna", while prompt must retain the requested temporal event such as "when she snaps her fingers". Use maskStartSeconds/maskEndSeconds only when the user gives explicit times; zero means the whole clip. Preserve Picture attachment order for KEYFRAMES; the server calculates percentages from explicit times or distributes them automatically. Video editing and extension still use action type generate_video; never invent video_editing, edit_video or continue_video action types.
 Use generate_tts when the user asks for speech, narration, dubbing, reading or voice cloning. For TTS, prompt is the exact text to speak in the requested language, not an English description. An attached Audio 1 is the voice reference and is transcribed automatically.
 For a video in which a visible subject must speak or sing to an attached audio track, use I2V when Picture 1 must be the exact opening frame. The server preserves Audio 1 as the authoritative soundtrack and injects synchronized slices while H3 animates the mouth and performance. Use R2V only when the picture is a broader identity/style reference rather than the opening frame, or when a reference video is required. Do not reinterpret the attached track as a mere voice-timbre reference. State that the visible subject physically performs the audible track with natural lip synchronization and stops mouth motion when speech or singing ends; never invent or transcribe words that were not provided as text.
 Use generate_music when the user asks for a song, soundtrack, instrumental or music. Put the musical request in prompt, set durationSeconds when requested (default 30), and set instrumental:false whenever singing, a singer, a voice, vocals, lyrics or words to sing are requested. For a vocal song, copy every user-supplied lyric verbatim into lyrics, preserving its language and wording; never translate, summarize or omit quoted words. Use lyrics:"" only for instrumental music or when the user did not supply exact words.
@@ -849,6 +876,13 @@ export class ChatService {
           sourceVideoAudio: "AUTO",
           muteDiegetic: false,
           muteNonDiegetic: false,
+          inpaintTarget:
+            generationMode === "VIDEO EDITING"
+              ? plan.maskTarget || inferVideoInpaintTarget(requestText)
+              : "",
+          inpaintMaskGrow: 8,
+          inpaintStartSeconds: plan.maskStartSeconds ?? 0,
+          inpaintEndSeconds: plan.maskEndSeconds ?? 0,
         });
         return { type: plan.type, prompt: plan.prompt, jobId: job?.id, status: "started" };
       }

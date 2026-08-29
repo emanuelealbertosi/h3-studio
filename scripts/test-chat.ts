@@ -146,10 +146,12 @@ try {
       type: "video_editing",
       prompt: "In Video 1, change Goku's primary colors to blue.",
       videoMode: "VIDEO EDITING",
+      maskTarget: "Goku",
     },
   }));
   assert.equal(videoEditAlias.action?.type, "generate_video");
   assert.equal(videoEditAlias.action?.videoMode, "VIDEO EDITING");
+  assert.equal(videoEditAlias.action?.maskTarget, "Goku");
   assert.equal(shouldRecallMedia("Ora modificala rendendo il cielo rosso"), true);
   assert.equal(shouldRecallMedia("Crea una animazione partendo da questa immagine"), true);
   assert.equal(shouldRecallMedia("crea un video da questa ultim immagine"), true);

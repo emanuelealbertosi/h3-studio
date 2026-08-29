@@ -20,6 +20,27 @@ from .h3_multishot_utils import (
 )
 
 
+class H3StudioInpaintStatus:
+    """Expose SAM3 checkpoint readiness through ComfyUI object_info."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        import os
+        import folder_paths
+        checkpoint = os.path.join(
+            folder_paths.base_path, "models", "sam3", "sam3.safetensors")
+        state = "ready" if os.path.isfile(checkpoint) else "missing"
+        return {"required": {"state": ([state], {"default": state})}}
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("state",)
+    FUNCTION = "report"
+    CATEGORY = "MiniMax H3/Studio"
+
+    def report(self, state):
+        return (str(state),)
+
+
 def _build_global_keyframe_plan(plan, shot_count, frames_per_shot):
     """Map global master-timeline anchors to local per-shot positions."""
     if not plan:
@@ -157,6 +178,21 @@ class H3ReferenceMemorySampler(H3MultishotSampler):
                        "being continued."})
         optional["studio_source_context_clip_index"] = ("INT", {
             "default": 0, "min": 0, "max": 9999, "step": 1})
+        optional["studio_inpaint_mask"] = ("MASK", {
+            "tooltip": "Tracked pixel-space mask for conservative H3 video "
+                       "inpainting. H3 Studio supplies this from SAM3."})
+        optional["studio_inpaint_grow"] = ("INT", {
+            "default": 8, "min": 0, "max": 96, "step": 4,
+            "tooltip": "Grow the tracked mask in source pixels before H3 "
+                       "latent reduction. 8 is a conservative default."})
+        optional["studio_inpaint_start_seconds"] = ("FLOAT", {
+            "default": 0.0, "min": 0.0, "max": 180.0, "step": 0.1,
+            "tooltip": "Optional first second to repaint. 0 starts at the "
+                       "beginning."})
+        optional["studio_inpaint_end_seconds"] = ("FLOAT", {
+            "default": 0.0, "min": 0.0, "max": 180.0, "step": 0.1,
+            "tooltip": "Optional final second to repaint. 0 uses the end "
+                       "of the source clip."})
         return {
             "required": required,
             "optional": optional,
@@ -201,7 +237,10 @@ class H3ReferenceMemorySampler(H3MultishotSampler):
             pdd_acc_file="", external_motion_context_length="22",
             studio_context_prefix="", studio_context_clip_index=0,
             studio_source_context_prefix="",
-            studio_source_context_clip_index=0):
+            studio_source_context_clip_index=0,
+            studio_inpaint_mask=None, studio_inpaint_grow=8,
+            studio_inpaint_start_seconds=0.0,
+            studio_inpaint_end_seconds=0.0):
         import torch
         import node_helpers
         from comfy_extras import nodes_custom_sampler as ncs
@@ -227,6 +266,9 @@ class H3ReferenceMemorySampler(H3MultishotSampler):
 
         operation_mode = str(
             (keyframe_plan or {}).get("mode") or "").upper()
+        inpaint_enabled = (
+            operation_mode == "VIDEO EDITING"
+            and studio_inpaint_mask is not None)
         ref_images = (
             ref_image_0, ref_image_1, ref_image_2, ref_image_3,
             ref_image_4, ref_image_5, ref_image_6, ref_image_7,
@@ -275,6 +317,48 @@ class H3ReferenceMemorySampler(H3MultishotSampler):
                 flush=True)
             return segment, segment_audio
 
+        def operation_mask_segment(shot_index):
+            """Slice the SAM3 mask on the exact same source timeline."""
+            if not inpaint_enabled:
+                return None
+            mask = studio_inpaint_mask
+            total = int(mask.shape[0])
+            requested = int(frames_per_shot)
+            if requested > 360:
+                source_stride = 360
+                segment_frames = 360
+            else:
+                source_stride = requested - 1
+                segment_frames = requested
+            start = int(shot_index) * source_stride
+            end = min(total, start + segment_frames)
+            if start >= total:
+                raise ValueError(
+                    "H3 Studio inpaint mask ends before clip %d." %
+                    (shot_index + 1))
+            segment = mask[start:end].clone()
+            if int(segment.shape[0]) < 5:
+                segment = torch.cat((
+                    segment,
+                    segment[-1:].repeat(
+                        5 - int(segment.shape[0]), 1, 1)), dim=0)
+
+            active_start = max(
+                0, int(round(float(studio_inpaint_start_seconds) * 24.0)))
+            requested_end = float(studio_inpaint_end_seconds)
+            active_end = (
+                max(active_start, int(round(requested_end * 24.0)))
+                if requested_end > 0 else total)
+            local_start = max(0, active_start - start)
+            local_end = min(int(segment.shape[0]), active_end - start)
+            if local_start > 0:
+                segment[:local_start] = 0
+            if local_end < int(segment.shape[0]):
+                segment[max(0, local_end):] = 0
+            if local_end <= 0 or local_start >= int(segment.shape[0]):
+                segment.zero_()
+            return segment
+
         initial_video, initial_video_audio = operation_video_segment(0)
         # VIDEO EXTENSION is a continuation boundary, not a reference-video
         # generation task. Feeding the complete source clip back through
@@ -292,9 +376,10 @@ class H3ReferenceMemorySampler(H3MultishotSampler):
             if operation_mode == "VIDEO EXTENSION"
             and not external_motion_enabled else None)
         bank_video = (
-            None if operation_mode == "VIDEO EXTENSION" else initial_video)
+            None if operation_mode == "VIDEO EXTENSION" or inpaint_enabled
+            else initial_video)
         bank_video_audio = (
-            None if operation_mode == "VIDEO EXTENSION"
+            None if operation_mode == "VIDEO EXTENSION" or inpaint_enabled
             else initial_video_audio)
         bank = h3_refs.build_ref_bank(
             video_vae, audio_vae, width, height, frames_per_shot,
@@ -492,6 +577,72 @@ class H3ReferenceMemorySampler(H3MultishotSampler):
 
             latent, frame_count = mmh3._empty_av_latent(
                 width, height, frames_per_shot)
+            if inpaint_enabled:
+                edit_video, edit_audio = operation_video_segment(shot_index)
+                source_frames = mmh3._resize(
+                    edit_video, width, height, "disabled")
+                source_video_latent = video_vae.encode(source_frames)
+                streams = list(latent["samples"].unbind())
+
+                def fit_stream(value, target, temporal_dim):
+                    """Crop/pad an encoded source without resampling content."""
+                    value = value.to(device=target.device, dtype=target.dtype)
+                    for dim in range(2, value.ndim):
+                        wanted = int(target.shape[dim])
+                        current = int(value.shape[dim])
+                        if current > wanted:
+                            value = value.narrow(dim, 0, wanted)
+                        elif current < wanted:
+                            edge = value.select(dim, max(0, current - 1)).unsqueeze(dim)
+                            repeats = [1] * value.ndim
+                            repeats[dim] = wanted - current
+                            value = torch.cat((value, edge.repeat(*repeats)), dim=dim)
+                    return value
+
+                streams[0] = fit_stream(source_video_latent, streams[0], 2)
+                if edit_audio is not None:
+                    source_audio_latent, _ = mmh3._encode_ref_audio(
+                        audio_vae, edit_audio)
+                    streams[1] = fit_stream(source_audio_latent, streams[1], 3)
+                latent["samples"] = comfy.nested_tensor.NestedTensor(
+                    tuple(streams))
+
+                pixel_mask = operation_mask_segment(shot_index)
+                mask_cls = comfy_nodes.NODE_CLASS_MAPPINGS.get(
+                    "MVEx_MaskToLatentSpace")
+                if mask_cls is None:
+                    raise RuntimeError(
+                        "MVEx_MaskToLatentSpace non disponibile. Installa "
+                        "MaskVidExperiments e riavvia ComfyUI.")
+                reduced = mask_cls.execute(
+                    masks=pixel_mask,
+                    compression={"compression": "auto"},
+                    spatial_method="max",
+                    temporal_method="max",
+                    grow_spatial=max(0, int(studio_inpaint_grow)),
+                    grow_temporal=0,
+                    vae=video_vae,
+                )[0]
+                mask = reduced[None, None].to(
+                    device=streams[0].device, dtype=streams[0].dtype)
+                mask = torch.nn.functional.interpolate(
+                    mask,
+                    size=tuple(int(v) for v in streams[0].shape[-3:]),
+                    mode="nearest")
+                mask = mask.expand_as(streams[0])
+                latent["noise_mask"] = comfy.nested_tensor.NestedTensor((
+                    mask,
+                    torch.zeros_like(streams[1]),
+                ))
+                print(
+                    "[H3ReferenceMemory] VIDEO INPAINT clip %d/%d: "
+                    "source latent + SAM3 mask, grow=%d px, active %.1f..%s s."
+                    % (
+                        shot_index + 1, n, int(studio_inpaint_grow),
+                        float(studio_inpaint_start_seconds),
+                        ("end" if float(studio_inpaint_end_seconds) <= 0
+                         else "%.1f" % float(studio_inpaint_end_seconds))),
+                    flush=True)
             keyframe_map = {}
             guide_context = []
             if continuation is not None:
@@ -786,8 +937,10 @@ class H3ReferenceMemorySampler(H3MultishotSampler):
 
 NODE_CLASS_MAPPINGS = {
     "H3ReferenceMemorySampler": H3ReferenceMemorySampler,
+    "H3StudioInpaintStatus": H3StudioInpaintStatus,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "H3ReferenceMemorySampler": "H3 Reference + Memory (one node)",
+    "H3StudioInpaintStatus": "H3 Studio Inpaint Status",
 }
