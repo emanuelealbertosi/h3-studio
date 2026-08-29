@@ -323,3 +323,8 @@
 - Aggiunti configurazione Admin, stato runtime, progressione esplicita nel pannello Audio e installer riprendibile `INSTALL_AUDIO_VOICE.bat` per binari ufficiali v0.7 e modelli esterni.
 - La Chat riconosce richieste di canzone «con la mia voce / col mio timbro» e usa automaticamente la reference allegata.
 - Per i video con reference vocale il router forza H3 Reference, lega `<Audio 1>` al soggetto parlante, preserva il dialogo e richiede sincronizzazione labiale naturale.
+
+### 29 agosto 2026 — Avvio idempotente dopo il riavvio Admin
+- Corretto il riconoscimento del bridge rilanciato dall'Admin, il cui runtime `tsx` usa il percorso fisico pnpm anziché il collegamento diretto in `node_modules`.
+- Se il bridge della stessa installazione risponde a `/api/health`, `START_H3_STUDIO.bat` lo conserva e avvia soltanto il frontend; un bridge riconosciuto ma non responsivo viene invece sostituito.
+- Restano fail-closed i listener estranei, ambigui o cambiati durante il controllo; aggiunta una regressione Windows che verifica riuso sano, cleanup stale e rifiuto del processo estraneo.

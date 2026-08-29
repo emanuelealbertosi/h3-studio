@@ -179,7 +179,8 @@ Il launcher installa automaticamente le dipendenze npm quando mancano e avvia
 bridge e interfaccia in due console separate. I workflow pronti, il manifest
 delle dipendenze e il nodo H3 Studio esteso sono inclusi; modelli e media
 rimangono esterni al repository. Prima dell'avvio controlla l'endpoint bridge
-configurato (predefinito `127.0.0.1:8787`): termina soltanto un bridge H3 Studio
+configurato (predefinito `127.0.0.1:8787`): riusa un bridge H3 Studio sano
+della stessa installazione e sostituisce soltanto un'istanza non responsiva
 appartenente alla stessa cartella del progetto e interrompe l'avvio se il
 listener è estraneo o non verificabile.
 

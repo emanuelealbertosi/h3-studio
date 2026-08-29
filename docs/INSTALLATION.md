@@ -46,8 +46,11 @@ Prima di avviare il bridge, `START_H3_STUDIO.bat` legge anche
 `H3_BRIDGE_HOST` e `H3_BRIDGE_PORT` da `.env`, quindi verifica il listener
 dell'endpoint configurato (predefinito `127.0.0.1:8787`). Se trova un processo
 Node la cui command line punta esattamente a `bridge/server.ts` nella stessa
-`ProjectRoot`, termina soltanto quel bridge precedente e attende che la porta
-si liberi. Se il listener appartiene a un altro programma, non è verificabile
+`ProjectRoot`, interroga `/api/health`: se il bridge è sano lo riusa e avvia
+soltanto il frontend; se non risponde lo termina e attende che la porta si
+liberi prima di sostituirlo. Il riconoscimento comprende sia il collegamento
+`node_modules/tsx` sia il percorso fisico pnpm usato dopo un riavvio Admin.
+Se il listener appartiene a un altro programma, non è verificabile
 oppure cambia durante il controllo, il launcher interrompe l'avvio senza
 terminare processi estranei.
 
