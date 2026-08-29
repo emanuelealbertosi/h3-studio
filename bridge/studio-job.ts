@@ -49,6 +49,12 @@ const EFFECTIVE_SHOT_SECONDS: Record<5 | 10 | 15, number> = {
   10: 242 / 24,
   15: 362 / 24,
 };
+const EDIT_SOURCE_STRIDE_SECONDS: Record<5 | 10 | 15, number> = {
+  5: 122 / 24,
+  10: 242 / 24,
+  15: 360 / 24,
+};
+const MAX_SOURCE_VIDEO_SECONDS = 180;
 
 type AspectFormat = (typeof ASPECT_FORMATS)[number];
 export type GenerationMode = (typeof GENERATION_MODES)[number];
@@ -297,6 +303,7 @@ function normalizeRequest(value: unknown): StudioJobRequest {
   }
 
   const media = normalizeMediaState(value.mediaState);
+  const mediaItems = JSON.parse(media.json) as Array<Record<string, unknown>>;
   const audioRouting = audioRoutingFromMediaState(media.json);
   if (
     aspectFormat === "keep source aspect" &&
@@ -320,14 +327,36 @@ function normalizeRequest(value: unknown): StudioJobRequest {
   if (
     (generationMode === "VIDEO EXTENSION" ||
       generationMode === "VIDEO EDITING") &&
-    (JSON.parse(media.json) as Array<Record<string, unknown>>).some(
+    mediaItems.some(
       (item) =>
         item.kind === "video" &&
         typeof item.duration === "number" &&
-        item.duration > 15.5,
+        item.duration > MAX_SOURCE_VIDEO_SECONDS + 0.5,
     )
   ) {
-    throw new Error("Continue/Edit nello Studio accetta video fino a 15 secondi");
+    throw new Error(
+      `Continue/Edit nello Studio accetta video fino a ${MAX_SOURCE_VIDEO_SECONDS} secondi`,
+    );
+  }
+  if (generationMode === "VIDEO EDITING") {
+    const sourceDuration = mediaItems.find(
+      (item) => item.kind === "video" && typeof item.duration === "number",
+    )?.duration;
+    if (typeof sourceDuration === "number" && sourceDuration > 0) {
+      const requiredShots = Math.max(
+        1,
+        Math.ceil(sourceDuration / EDIT_SOURCE_STRIDE_SECONDS[durationSeconds]),
+      );
+      if (requiredShots > 12) {
+        const supportedSeconds = Math.floor(
+          12 * EDIT_SOURCE_STRIDE_SECONDS[durationSeconds],
+        );
+        throw new Error(
+          `Con blocchi da ${durationSeconds}s, Edit supporta circa ${supportedSeconds}s di sorgente. Scegli blocchi da 15s oppure accorcia il video.`,
+        );
+      }
+      shotCount = requiredShots;
+    }
   }
   if (
     generationMode === "R2V" &&
@@ -613,8 +642,10 @@ export function prepareStudioJob(
     requestNode.inputs.generation_mode = request.generationMode;
     requestNode.inputs.natural_prompt = audioPolicyPrompt(request);
     requestNode.inputs.reference_roles = request.referenceRoles;
-    requestNode.inputs.shot_count = request.shotCount;
-    requestNode.inputs.max_auto_shots = request.shotCount;
+    requestNode.inputs.shot_count =
+      request.generationMode === "VIDEO EDITING" ? 0 : request.shotCount;
+    requestNode.inputs.max_auto_shots =
+      request.generationMode === "VIDEO EDITING" ? 12 : request.shotCount;
     requestNode.inputs.shot_seconds = request.durationSeconds;
     requestNode.inputs.llm_media_context = "OFF - text only";
     requestNode.inputs.context_resolution = 512;

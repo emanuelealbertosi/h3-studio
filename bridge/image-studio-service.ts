@@ -25,9 +25,12 @@ import {
   buildAnimaGeneratePrompt,
   buildFlux2KleinEditPrompt,
   buildKreaGeneratePrompt,
+  buildMiniMaxH3ImagePrompt,
+  DEFAULT_MINIMAX_H3_IMAGE_SETTINGS,
   IMAGE_API_MAX_PIXELS,
   IMAGE_EDIT_MAX_REFERENCES,
   IMAGE_UI_TARGET_MAX_PIXELS,
+  MINIMAX_H3_IMAGE_MAX_REFERENCES,
 } from "./image-workflow-builder.js";
 import type { RuntimeSettings, RuntimeSettingsStore } from "./runtime-settings.js";
 import type { ComfyProgressTracker } from "./comfy-progress.js";
@@ -121,6 +124,7 @@ export function normalizeImageRequest(value: unknown) {
     : value.mode === "anima"
       ? "anima"
       : "generate";
+  const imageEngine = value.engine === "minimax" ? "minimax" : "default";
   // The persisted DB mode remains backward compatible; the engine snapshot
   // distinguishes Anima jobs from ordinary Krea generations.
   const mode: ImageJobMode = imageMode === "edit" ? "edit" : "generate";
@@ -187,8 +191,13 @@ export function normalizeImageRequest(value: unknown) {
   }
   const rawReferences = value.references === undefined ? [] : value.references;
   if (!Array.isArray(rawReferences)) throw new Error("Le reference devono essere un array");
-  if (rawReferences.length > IMAGE_EDIT_MAX_REFERENCES) {
-    throw new Error("Flux.2 Klein Edit supporta al massimo 4 reference");
+  const referenceLimit = imageEngine === "minimax"
+    ? MINIMAX_H3_IMAGE_MAX_REFERENCES
+    : IMAGE_EDIT_MAX_REFERENCES;
+  if (rawReferences.length > referenceLimit) {
+    throw new Error(imageEngine === "minimax"
+      ? "MiniMax H3 Image supporta al massimo 9 reference"
+      : "Flux.2 Klein Edit supporta al massimo 4 reference");
   }
   if (imageMode === "edit" && rawReferences.length === 0) {
     throw new Error("La modalità Edit richiede almeno una reference");
@@ -205,6 +214,7 @@ export function normalizeImageRequest(value: unknown) {
     projectId,
     mode,
     imageMode,
+    imageEngine,
     prompt,
     effectivePrompt,
     compositionPreset,
@@ -289,6 +299,7 @@ export class ImageStudioService {
     private readonly generateWorkflowPath: string,
     private readonly editWorkflowPath: string,
     private readonly animaWorkflowPath: string,
+    private readonly minimaxWorkflowPath: string,
     private readonly progressTracker?: ComfyProgressTracker,
   ) {}
 
@@ -301,8 +312,10 @@ export class ImageStudioService {
     const [settings, workflowTemplate] = await Promise.all([
       runtimeOverride ?? this.runtimeSettings.get(),
       readWorkflowTemplate(
-        request.imageMode === "edit"
-          ? this.editWorkflowPath
+        request.imageEngine === "minimax"
+          ? this.minimaxWorkflowPath
+          : request.imageMode === "edit"
+            ? this.editWorkflowPath
           : request.imageMode === "anima"
             ? this.animaWorkflowPath
             : this.generateWorkflowPath,
@@ -311,7 +324,38 @@ export class ImageStudioService {
     const id = randomUUID();
     const baseSeed = request.requestedSeed ?? randomSeed();
     const usedRandomSeeds = new Set<number>();
-    const engine = request.imageMode === "edit"
+    const minimaxSettings = {
+      model: settings.h3.model,
+      ...DEFAULT_MINIMAX_H3_IMAGE_SETTINGS,
+    };
+    const engine = request.imageEngine === "minimax"
+      ? {
+          kind: "minimax-h3-image" as const,
+          model: minimaxSettings.model,
+          encoder: minimaxSettings.encoder,
+          vae: minimaxSettings.vae,
+          steps: 8,
+          cfg: 1,
+          sampler: "er_sde",
+          scheduler: "sgm_uniform",
+          compositionPreset: request.compositionPreset,
+          effectivePrompt: request.effectivePrompt,
+          imageMode: request.references.length === 0
+            ? "t2i" as const
+            : request.references.length === 1
+              ? "i2i" as const
+              : "reference" as const,
+          turboLora: minimaxSettings.turboLora,
+          turboStrength: minimaxSettings.turboStrength,
+          detailLora: minimaxSettings.detailLora,
+          detailStrength: minimaxSettings.detailStrength,
+          preserveStrength: minimaxSettings.preserveStrength,
+          loras: [
+            { name: minimaxSettings.turboLora, strength: minimaxSettings.turboStrength },
+            { name: minimaxSettings.detailLora, strength: minimaxSettings.detailStrength },
+          ],
+        }
+      : request.imageMode === "edit"
       ? {
           kind: "flux2-klein-edit" as const,
           model: settings.imageEdit.model,
@@ -365,8 +409,19 @@ export class ImageStudioService {
       }
       const filenamePrefix =
         `images/H3_STUDIO/projects/${request.projectId}/${request.imageMode}_${id.slice(0, 8)}_c${index}`;
-      const apiPrompt = request.imageMode === "edit"
-        ? buildFlux2KleinEditPrompt({
+      const apiPrompt = request.imageEngine === "minimax"
+        ? buildMiniMaxH3ImagePrompt({
+            prompt: request.effectivePrompt,
+            seed,
+            width: request.width,
+            height: request.height,
+            filenamePrefix,
+            settings: minimaxSettings,
+            references: request.references,
+            template: workflowTemplate,
+          })
+        : request.imageMode === "edit"
+          ? buildFlux2KleinEditPrompt({
             prompt: request.effectivePrompt,
             seed,
             width: request.width,
@@ -458,8 +513,14 @@ export class ImageStudioService {
       (link) => link.projectId === original.originProjectId,
     );
     const mode = original.engine.kind === "anima" ? "anima" : original.mode;
+    const imageEngine = original.engine.kind === "minimax-h3-image" ? "minimax" : "default";
     const currentSettings = await this.runtimeSettings.get();
-    const preservedSettings: RuntimeSettings = original.engine.kind === "anima"
+    const preservedSettings: RuntimeSettings = original.engine.kind === "minimax-h3-image"
+      ? {
+          ...currentSettings,
+          h3: { ...currentSettings.h3, model: original.engine.model },
+        }
+      : original.engine.kind === "anima"
       ? {
           ...currentSettings,
           anima: {
@@ -498,6 +559,7 @@ export class ImageStudioService {
       {
         projectId: original.originProjectId,
         mode,
+        engine: imageEngine,
         prompt,
         compositionPreset: original.compositionPreset,
         candidateCount: candidateIndex === undefined ? original.candidateCount : 1,
@@ -700,6 +762,12 @@ export class ImageStudioService {
         kind: "anima",
         ...settings.anima,
       },
+      minimax: {
+        kind: "minimax-h3-image",
+        model: settings.h3.model,
+        ...DEFAULT_MINIMAX_H3_IMAGE_SETTINGS,
+        maxReferences: MINIMAX_H3_IMAGE_MAX_REFERENCES,
+      },
       limits: {
         uiTargetMaxPixels: IMAGE_UI_TARGET_MAX_PIXELS,
         apiMaxPixels: IMAGE_API_MAX_PIXELS,
@@ -738,6 +806,12 @@ export class ImageStudioService {
       "ReferenceLatent",
       "FluxKVCache",
       "ModelAttentionBackend",
+      "LoraLoaderModelOnly",
+      "H3ImagePrepare",
+      "H3ImageSamplingPreset",
+      "H3ImageDecode",
+      "H3ImageFrameSelector",
+      "BasicGuider",
     ];
     const [models, encoders, vaes, loras, ...nodeInfo] = await Promise.all([
       this.comfy.modelFiles("diffusion_models"),
@@ -800,6 +874,37 @@ export class ImageStudioService {
       loras: settings.anima.loras.every((slot) => loras.includes(slot.name)),
       nodes: Object.values(animaNodeChecks).every(Boolean),
     };
+    const minimaxCoreClasses = [
+      "UNETLoader",
+      "LoraLoaderModelOnly",
+      "CLIPLoader",
+      "VAELoader",
+      "LoadImage",
+      "H3ImagePrepare",
+      "H3ImageSamplingPreset",
+      "RandomNoise",
+      "BasicGuider",
+      "SamplerCustomAdvanced",
+      "H3ImageDecode",
+      "H3ImageFrameSelector",
+      "SaveImage",
+    ];
+    const minimaxNodeChecks = Object.fromEntries(
+      minimaxCoreClasses.map((className) => [
+        className,
+        objectInfoContains(nodeInfo[classNames.indexOf(className)], className),
+      ]),
+    );
+    const minimaxDefaults = DEFAULT_MINIMAX_H3_IMAGE_SETTINGS;
+    const minimaxChecks = {
+      workflow: existsSync(this.minimaxWorkflowPath),
+      model: models.includes(settings.h3.model),
+      encoder: encoders.includes(minimaxDefaults.encoder),
+      vae: vaes.includes(minimaxDefaults.vae),
+      turboLora: loras.includes(minimaxDefaults.turboLora),
+      detailLora: loras.includes(minimaxDefaults.detailLora),
+      nodes: Object.values(minimaxNodeChecks).every(Boolean),
+    };
     const editChecks = {
       workflow: existsSync(this.editWorkflowPath),
       model: models.includes(settings.imageEdit.model),
@@ -815,7 +920,8 @@ export class ImageStudioService {
     return {
       ready: Object.values(generateChecks).every(Boolean) &&
         Object.values(editChecks).every(Boolean) &&
-        Object.values(animaChecks).every(Boolean),
+        Object.values(animaChecks).every(Boolean) &&
+        Object.values(minimaxChecks).every(Boolean),
       generate: {
         ready: Object.values(generateChecks).every(Boolean),
         checks: generateChecks,
@@ -842,6 +948,16 @@ export class ImageStudioService {
         checks: { ...animaChecks, nodeClasses: animaNodeChecks },
         engine: settings.anima,
         workflow: this.animaWorkflowPath,
+      },
+      minimax: {
+        ready: Object.values(minimaxChecks).every(Boolean),
+        checks: { ...minimaxChecks, nodeClasses: minimaxNodeChecks },
+        engine: {
+          model: settings.h3.model,
+          ...minimaxDefaults,
+        },
+        workflow: this.minimaxWorkflowPath,
+        referenceLimit: MINIMAX_H3_IMAGE_MAX_REFERENCES,
       },
       capabilities: {
         models: [...new Set(models)].sort(),

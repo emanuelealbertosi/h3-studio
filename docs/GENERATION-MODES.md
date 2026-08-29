@@ -11,8 +11,8 @@ Questo documento descrive il mapping verificato tra H3 Studio e il workflow
 | Image to video | `I2V` | Picture 1 | Picture 1 diventa il frame iniziale; il planner resta text-only. |
 | Reference | `R2V` | Almeno un'immagine, video o audio | Gli asset seguono l'ordine del Media Loader e i ruoli dichiarati. |
 | Keyframes | `KEYFRAMES` | Almeno Picture 1 | Picture 1..N diventano anchor sulla timeline globale; Studio e Chat accettano distribuzione automatica, percentuali o secondi espliciti. |
-| Continue video | `VIDEO EXTENSION` | Video 1, massimo 15 secondi nello Studio | Il router continua dall'ultimo frame decodificato. |
-| Edit video | `VIDEO EDITING` | Video 1, massimo 15 secondi nello Studio | Video 1 è la sorgente diretta. |
+| Continue video | `VIDEO EXTENSION` | Video 1, fino a 180 secondi nello Studio | Il router continua dall'ultimo frame decodificato e salva soltanto il nuovo segmento. |
+| Edit video | `VIDEO EDITING` | Video 1, fino a 180 secondi nello Studio | Il video viene suddiviso automaticamente in blocchi H3 contigui e ricomposto alla durata sorgente. Il massimo effettivo dipende dalla durata blocco scelta; per sorgenti oltre circa 121 secondi usare blocchi da 15 secondi. |
 
 ## Multishot 1–12
 

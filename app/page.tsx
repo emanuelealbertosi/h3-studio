@@ -512,6 +512,7 @@ type EngineAdminResponse = {
   kreaWorkflow: { source: string };
   imageEditWorkflow: { source: string };
   animaWorkflow: { source: string };
+  minimaxImageWorkflow: { source: string };
   audioStudio?: {
     tts: { ready: boolean; root: string; voices: string[]; defaultVoice: string; unloadPolicy: string };
     music: { ready: boolean; model: string; encoder: string; vae: string; steps: number; cfg: number };
@@ -611,7 +612,7 @@ type AdminLlmRuntimeStatus = {
 
 type WorkflowCatalogItem = {
   id: string;
-  role: "video" | "fast" | "image" | "image_edit" | "image_anima";
+  role: "video" | "fast" | "image" | "image_edit" | "image_anima" | "image_minimax";
   name: string;
   description: string;
   file: string;
@@ -625,6 +626,7 @@ type InstallSettings = {
   imageWorkflowId: string;
   imageEditWorkflowId: string;
   imageAnimaWorkflowId: string;
+  imageMinimaxWorkflowId: string;
   ffmpegPath: string;
 };
 
@@ -3464,7 +3466,7 @@ function SetupWizard({ status }: { status: SetupStatus }) {
 
   const workflowSelect = (role: WorkflowCatalogItem["role"], key: keyof InstallSettings) => (
     <label>
-      <span>Workflow {role === "video" ? "Video" : role === "fast" ? "FAST" : role === "image_edit" ? "Flux Klein Edit" : role === "image_anima" ? "Anima" : "Krea"}</span>
+      <span>Workflow {role === "video" ? "Video" : role === "fast" ? "FAST" : role === "image_edit" ? "Flux Klein Edit" : role === "image_anima" ? "Anima" : role === "image_minimax" ? "MiniMax H3 Image" : "Krea"}</span>
       <select
         value={String(settings[key])}
         onChange={(event) => setSettings({ ...settings, [key]: event.target.value })}
@@ -3507,6 +3509,7 @@ function SetupWizard({ status }: { status: SetupStatus }) {
           {workflowSelect("image", "imageWorkflowId")}
           {workflowSelect("image_edit", "imageEditWorkflowId")}
           {workflowSelect("image_anima", "imageAnimaWorkflowId")}
+          {workflowSelect("image_minimax", "imageMinimaxWorkflowId")}
           <label>
             <span>FFmpeg</span>
             <input onChange={(event) => setSettings({ ...settings, ffmpegPath: event.target.value })} placeholder="ffmpeg oppure percorso completo" value={settings.ffmpegPath} />
@@ -4071,6 +4074,7 @@ function AdminPanel() {
                   ["image", "imageWorkflowId", "Workflow Krea"],
                   ["image_edit", "imageEditWorkflowId", "Workflow Flux Klein Edit"],
                   ["image_anima", "imageAnimaWorkflowId", "Workflow Anima"],
+                  ["image_minimax", "imageMinimaxWorkflowId", "Workflow MiniMax H3 Image"],
                 ] as const).map(([role, key, label]) => (
                   <label key={key}>
                     <span>{label}</span>
@@ -4131,6 +4135,12 @@ function AdminPanel() {
               <strong>{data.imageEditWorkflow.source.split("\\").at(-1)}</strong>
               <code>{data.imageEditWorkflow.source}</code>
               <small>Image edit multi-reference, fino a quattro input</small>
+            </div>
+            <div className="workflow-card">
+              <span>Workflow MiniMax H3 Image</span>
+              <strong>{data.minimaxImageWorkflow.source.split("\\").at(-1)}</strong>
+              <code>{data.minimaxImageWorkflow.source}</code>
+              <small>T2I, I2I e Reference fino a nove immagini</small>
             </div>
           </div>
 
@@ -6656,7 +6666,7 @@ function StudioApp() {
                           : mode === "continue"
                             ? "Video 1 viene continuato; l’output contiene solo il nuovo segmento."
                             : mode === "edit"
-                              ? "Video 1 è la sorgente dell’edit non distruttivo."
+                              ? "Video 1 è la sorgente dell’edit non distruttivo; i video lunghi vengono divisi automaticamente in blocchi."
                               : "Immagini, video e audio vengono usati come riferimenti."}
                     </span>
                   </div>

@@ -14,7 +14,7 @@ export type ChatAttachment = {
 };
 
 export type ChatActionRecord = {
-  type: "generate_video" | "generate_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
+  type: "generate_video" | "generate_image" | "generate_minimax_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
   prompt: string;
   jobId?: string;
   status: "started" | "failed";

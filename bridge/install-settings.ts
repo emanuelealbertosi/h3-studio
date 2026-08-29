@@ -37,6 +37,13 @@ export const WORKFLOW_CATALOG = [
     description: "Workflow Anima core con modello, encoder, VAE e fino a tre LoRA configurabili.",
     file: "studio-anima.api.json",
   },
+  {
+    id: "minimax-h3-image-aio",
+    role: "image_minimax" as const,
+    name: "MiniMax H3 Image AIO T2I / I2I / Reference",
+    description: "Workflow H3 single-frame con T2I, I2I e reference edit fino a nove immagini.",
+    file: "studio-minimax-h3-image.api.json",
+  },
 ] as const;
 
 export type InstallSettings = {
@@ -47,6 +54,7 @@ export type InstallSettings = {
   imageWorkflowId: string;
   imageEditWorkflowId: string;
   imageAnimaWorkflowId: string;
+  imageMinimaxWorkflowId: string;
   ffmpegPath: string;
 };
 
@@ -112,6 +120,9 @@ export class InstallSettingsStore {
       imageAnimaWorkflowId: String(
         value.imageAnimaWorkflowId ?? this.defaults.imageAnimaWorkflowId,
       ),
+      imageMinimaxWorkflowId: String(
+        value.imageMinimaxWorkflowId ?? this.defaults.imageMinimaxWorkflowId,
+      ),
     };
     for (const [key, role] of [
       ["videoWorkflowId", "video"],
@@ -119,6 +130,7 @@ export class InstallSettingsStore {
       ["imageWorkflowId", "image"],
       ["imageEditWorkflowId", "image_edit"],
       ["imageAnimaWorkflowId", "image_anima"],
+      ["imageMinimaxWorkflowId", "image_minimax"],
     ] as const) {
       if (!WORKFLOW_CATALOG.some((item) => item.id === selected[key] && item.role === role)) {
         throw new Error(`Workflow ${role} non valido`);

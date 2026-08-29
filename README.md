@@ -14,8 +14,8 @@ Il prodotto organizza prompt, personaggi, asset, candidati e continuazioni. Comf
 La voce **Chat** aggiunge un assistente LLM Vision locale con conversazioni
 multiple raggruppate per progetto, titoli automatici modificabili e memoria
 indipendente. Può conversare, analizzare fino a quattro immagini della Libreria e,
-su richiesta esplicita, avviare Video H3, immagini Krea, edit Flux.2 Klein o
-immagini Anima. Le immagini allegate possono inoltre diventare keyframe iniziali,
+su richiesta esplicita, avviare Video H3, immagini Krea, still MiniMax H3
+(T2I/I2I/Reference), edit Flux.2 Klein o immagini Anima. Le immagini allegate possono inoltre diventare keyframe iniziali,
 intermedi o finali, con posizioni automatiche, percentuali o tempi espliciti. I
 video avviati dalla Chat usano il profilo rapido controllato
 dal server: 10 secondi, un candidato, 0,5 MP e FAST 8-step. Il modello resta
@@ -78,7 +78,9 @@ con lo stesso nome originale, tipo e dimensione riusa la voce già registrata.
 
 Lo **Studio Immagini** condivide progetti e layout con lo Studio Video. Genera
 da uno a quattro candidati con Krea 2 oppure esegue edit Flux.2 Klein con un
-massimo di quattro reference ordinate. I preset di composizione Libero,
+massimo di quattro reference ordinate. Un selettore motore opzionale usa MiniMax
+H3 per T2I, I2I o Reference fino a nove immagini, mantenendo Krea come default
+di generazione e Flux come default di edit. I preset di composizione Libero,
 Character sheet/turnaround, Primo piano, Mezzo busto, Figura intera, Oggetto
 sheet e Paesaggio arricchiscono il prompt senza sostituire il testo dell'utente;
 il prompt effettivo resta ispezionabile prima del lancio. Ogni candidato può

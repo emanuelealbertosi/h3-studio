@@ -46,6 +46,18 @@
         "sampler": "euler",
         "scheduler": "simple"
       }
+    },
+    {
+      "id": "minimax-h3-image-aio",
+      "role": "image_minimax",
+      "name": "MiniMax H3 Image AIO T2I / I2I / Reference",
+      "api": "studio-minimax-h3-image.api.json",
+      "referenceLimit": 9,
+      "defaults": {
+        "steps": 8,
+        "samplingProfile": "hybrid single image | ER-SDE 8 steps",
+        "preserveStrength": 0.6
+      }
     }
   ]
 }

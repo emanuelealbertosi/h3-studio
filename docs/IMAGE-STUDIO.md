@@ -6,8 +6,13 @@ separata.
 
 ## Modalità
 
-- **Genera** usa il profilo Krea 2 configurato nell’Admin.
-- **Edit** usa Flux.2 Klein e richiede da una a quattro reference.
+- **Genera** usa Krea 2 per impostazione predefinita.
+- **Edit** usa Flux.2 Klein per impostazione predefinita e richiede da una a
+  quattro reference.
+- Il selettore discreto **Motore → MiniMax H3** sostituisce il motore della
+  modalità corrente: senza immagini esegue T2I, con una immagine I2I e con
+  due-nove immagini Reference. In Reference si possono inserire nel prompt i
+  token `<Picture 1>`…`<Picture 9>` direttamente dalle miniature.
 - Ogni batch può produrre da uno a quattro candidati con seed Random, Base +1
   oppure Bloccato.
 - I preset 1:1, 16:9, 9:16, 4:3 e 3:4 restano sotto circa 1,8 megapixel e usano
@@ -53,6 +58,17 @@ Un candidato completato può essere:
 
 La condivisione è per singolo candidato: condividere una immagine di un batch
 non espone le altre.
+
+## MiniMax H3 Image
+
+MiniMax riusa il checkpoint H3 scelto nella sezione Video dell’Admin, ma carica
+un VAE T=1 dedicato esclusivamente alle immagini. Il workflow applica il preset
+single-image ER-SDE a 8 step, la LoRA Turbo al ramo T2I e la LoRA ThisIsFine al
+ramo I2I/Reference. Il VAE immagini non sostituisce mai il VAE video.
+
+La modalità è sperimentale e utile soprattutto quando H3 riconosce meglio un
+soggetto o un IP. Krea resta il default generale e Flux Klein resta il default
+per gli edit ordinari.
 
 ## Riutilizzo nello Studio Video
 

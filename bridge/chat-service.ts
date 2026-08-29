@@ -10,7 +10,7 @@ import type { RuntimeSettingsStore } from "./runtime-settings.js";
 import type { AudioRoutingRole, GenerationMode, StudioJobService } from "./studio-job.js";
 
 type PlannedAction = {
-  type: "generate_video" | "generate_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
+  type: "generate_video" | "generate_image" | "generate_minimax_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
   prompt: string;
   videoMode?: "T2V" | "I2V" | "R2V" | "KEYFRAMES" | "VIDEO EXTENSION" | "VIDEO EDITING";
   aspect?: "16:9" | "9:16" | "1:1";
@@ -19,7 +19,7 @@ type PlannedAction = {
   lyrics?: string;
 };
 
-type ChatRoute = "auto" | "video" | "krea" | "anima" | "edit" | "tts" | "music";
+type ChatRoute = "auto" | "video" | "krea" | "minimax" | "anima" | "edit" | "tts" | "music";
 
 const RECENT_MESSAGE_COUNT = 10;
 const COMPACTION_TRIGGER_COUNT = 16;
@@ -225,7 +225,7 @@ function normalizeActionType(value: unknown): Pick<PlannedAction, "type" | "vide
     ? value.trim().toLowerCase().replace(/[\s-]+/g, "_")
     : "";
   const direct = new Set<PlannedAction["type"]>([
-    "generate_video", "generate_image", "edit_image", "generate_anima", "generate_tts", "generate_music",
+    "generate_video", "generate_image", "generate_minimax_image", "edit_image", "generate_anima", "generate_tts", "generate_music",
   ]);
   if (direct.has(token as PlannedAction["type"])) {
     return { type: token as PlannedAction["type"] };
@@ -244,6 +244,8 @@ function normalizeActionType(value: unknown): Pick<PlannedAction, "type" | "vide
     keyframes: { type: "generate_video", videoMode: "KEYFRAMES" },
     keyframe_video: { type: "generate_video", videoMode: "KEYFRAMES" },
     create_image: { type: "generate_image" },
+    minimax_image: { type: "generate_minimax_image" },
+    h3_image: { type: "generate_minimax_image" },
     image_editing: { type: "edit_image" },
     generate_anime: { type: "generate_anima" },
     tts: { type: "generate_tts" },
@@ -338,7 +340,7 @@ export function preserveMusicIntent(action: PlannedAction | null, request: strin
 }
 
 function normalizeRoute(value: unknown): ChatRoute {
-  return value === "video" || value === "krea" || value === "anima" || value === "edit" || value === "tts" || value === "music"
+  return value === "video" || value === "krea" || value === "minimax" || value === "anima" || value === "edit" || value === "tts" || value === "music"
     ? value
     : "auto";
 }
@@ -349,6 +351,8 @@ export function routeAction(action: PlannedAction | null, route: ChatRoute) {
     ? "generate_video"
     : route === "krea"
       ? "generate_image"
+      : route === "minimax"
+        ? "generate_minimax_image"
       : route === "anima"
         ? "generate_anima"
         : route === "edit"
@@ -367,6 +371,8 @@ function routeInstruction(route: ChatRoute) {
     ? "generate_video"
     : route === "krea"
       ? "generate_image"
+      : route === "minimax"
+        ? "generate_minimax_image"
       : route === "anima"
         ? "generate_anima"
         : route === "edit"
@@ -375,6 +381,16 @@ function routeInstruction(route: ChatRoute) {
             ? "generate_tts"
             : "generate_music";
   return `ROUTE_OVERRIDE=${route}. If and only if the user explicitly requests media creation, use action type ${action}. The selector alone never authorizes a render.`;
+}
+
+const EXPLICIT_MINIMAX_IMAGE_PATTERN = /(?:\b(?:usa|usando|con|tramite|motore)\s+(?:il\s+)?(?:minimax|h3)\b|\b(?:minimax|h3)\s+(?:per|image|immagine|foto)\b)/i;
+
+export function preserveMiniMaxImageIntent(action: PlannedAction | null, request: string, route: ChatRoute = "auto") {
+  if (!action) return action;
+  if (route === "minimax") return { ...action, type: "generate_minimax_image" } as PlannedAction;
+  if (route !== "auto" || !EXPLICIT_MINIMAX_IMAGE_PATTERN.test(request)) return action;
+  if (!["generate_image", "edit_image", "generate_anima", "generate_minimax_image"].includes(action.type)) return action;
+  return { ...action, type: "generate_minimax_image" } as PlannedAction;
 }
 
 function contextCharacterBudget(nCtx: number) {
@@ -403,12 +419,12 @@ const CHAT_SYSTEM_PROMPT = `You are H3 Studio, a concise Italian-speaking creati
 Always return exactly one JSON object and no markdown:
 {"reply":"natural Italian reply","title":"concise 3-7 word Italian conversation title","action":null}
 or
-{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|KEYFRAMES|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1","durationSeconds":10,"instrumental":true,"lyrics":"exact requested words to sing or empty string"}}
+{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|generate_minimax_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|KEYFRAMES|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1","durationSeconds":10,"instrumental":true,"lyrics":"exact requested words to sing or empty string"}}
 
 Only create an action when the user explicitly asks to generate, animate, continue or edit media. Questions and ordinary conversation use action:null.
 The title describes the main topic, never starts with "Chat" and never contains quotation marks.
 For video default to 10 seconds, one candidate, 0.5 MP and the FAST 8-step engine. When the user explicitly requests a total video duration, preserve it in durationSeconds; the server converts it into up to 12 H3 shots. Do not invent a duration that the user did not request.
-Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures. Use I2V when one attached picture is the start frame, R2V for broader references, KEYFRAMES when attached pictures are requested as first, intermediate, final or timed frames, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for editing one. Preserve Picture attachment order for KEYFRAMES; the server calculates percentages from explicit times or distributes them automatically. Video editing and extension still use action type generate_video; never invent video_editing, edit_video or continue_video action types.
+Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures and Flux Klein as the default editor. Use generate_minimax_image only when the user explicitly requests MiniMax or H3 for a still image: no attached pictures means T2I, one picture means I2I, and two to nine pictures mean Reference. Use I2V when one attached picture is the start frame, R2V for broader video references, KEYFRAMES when attached pictures are requested as first, intermediate, final or timed video frames, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for editing one. Preserve Picture attachment order for KEYFRAMES; the server calculates percentages from explicit times or distributes them automatically. Video editing and extension still use action type generate_video; never invent video_editing, edit_video or continue_video action types.
 Use generate_tts when the user asks for speech, narration, dubbing, reading or voice cloning. For TTS, prompt is the exact text to speak in the requested language, not an English description. An attached Audio 1 is the voice reference and is transcribed automatically.
 For a video in which a visible subject must speak or sing to an attached audio track, use I2V when Picture 1 must be the exact opening frame. The server preserves Audio 1 as the authoritative soundtrack and injects synchronized slices while H3 animates the mouth and performance. Use R2V only when the picture is a broader identity/style reference rather than the opening frame, or when a reference video is required. Do not reinterpret the attached track as a mere voice-timbre reference. State that the visible subject physically performs the audible track with natural lip synchronization and stops mouth motion when speech or singing ends; never invent or transcribe words that were not provided as text.
 Use generate_music when the user asks for a song, soundtrack, instrumental or music. Put the musical request in prompt, set durationSeconds when requested (default 30), and set instrumental:false whenever singing, a singer, a voice, vocals, lyrics or words to sing are requested. For a vocal song, copy every user-supplied lyric verbatim into lyrics, preserving its language and wording; never translate, summarize or omit quoted words. Use lyrics:"" only for instrumental music or when the user did not supply exact words.
@@ -582,12 +598,12 @@ export class ChatService {
         temperature: settings.temperature,
         top_p: settings.topP,
         messages: modelMessages,
-        images: attachments.filter((item) => item.kind === "picture").map((item) => item.file).slice(0, 4),
+        images: [],
       });
       if (!response.ok || !response.text) throw new Error(response.error ?? "LLM non ha risposto");
       rawText = response.text;
       const parsedPlan = normalizePlan(rawText);
-      const routedAction = routeAction(parsedPlan.action, route);
+      const routedAction = preserveMiniMaxImageIntent(routeAction(parsedPlan.action, route), content, route);
       const plan = { ...parsedPlan, action: preserveMusicIntent(routedAction, content) };
       this.repository.maybeAutoTitle(conversation.id, plan.title ?? content);
       const action = plan.action ? await this.executeAction(projectId, plan.action, attachments, content) : null;
@@ -835,8 +851,10 @@ export class ChatService {
         });
         return { type: plan.type, prompt: plan.prompt, jobId: job?.id, status: "started" };
       }
-      const imageMode = plan.type === "edit_image" ? "edit" : plan.type === "generate_anima" ? "anima" : "generate";
-      const imageReferences = attachments.filter((item) => item.kind === "picture").slice(0, 4);
+      const minimaxImage = plan.type === "generate_minimax_image";
+      const availablePictures = attachments.filter((item) => item.kind === "picture");
+      const imageMode = plan.type === "edit_image" || (minimaxImage && availablePictures.length > 0) ? "edit" : plan.type === "generate_anima" ? "anima" : "generate";
+      const imageReferences = availablePictures.slice(0, minimaxImage ? 9 : 4);
       if (imageMode === "edit" && !imageReferences.length) throw new Error("L'edit richiede almeno una immagine allegata");
       const vertical = plan.aspect === "9:16";
       const square = plan.aspect === "1:1";
@@ -845,6 +863,7 @@ export class ChatService {
       const job = await this.imageStudio.submit({
         projectId,
         mode: imageMode,
+        engine: minimaxImage ? "minimax" : "default",
         prompt: plan.prompt,
         compositionPreset: "free",
         candidateCount: 1,

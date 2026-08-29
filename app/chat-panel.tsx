@@ -16,7 +16,7 @@ type ChatConversation = {
   createdAt: string;
   updatedAt: string;
 };
-type ChatRoute = "auto" | "video" | "krea" | "anima" | "edit" | "tts" | "music";
+type ChatRoute = "auto" | "video" | "krea" | "minimax" | "anima" | "edit" | "tts" | "music";
 type ChatMemory = { active: boolean; summarizedMessages: number; summary: string };
 type ChatTrackedCandidate = {
   index: number;
@@ -57,7 +57,7 @@ type ChatMessage = {
   content: string;
   attachments: Attachment[];
   action: null | {
-    type: "generate_video" | "generate_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
+    type: "generate_video" | "generate_image" | "generate_minimax_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
     prompt: string;
     jobId?: string;
     status: "started" | "failed";
@@ -101,6 +101,7 @@ function annotated(output: { filename: string; subfolder: string; type: string }
 function actionLabel(type: NonNullable<ChatMessage["action"]>["type"]) {
   if (type === "generate_video") return "Video H3";
   if (type === "generate_anima") return "Immagine Anima";
+  if (type === "generate_minimax_image") return "Immagine MiniMax H3";
   if (type === "edit_image") return "Edit Flux.2 Klein";
   if (type === "generate_tts") return "Voce / TTS Higgs";
   if (type === "generate_music") return "Musica H3";
@@ -636,6 +637,7 @@ export default function ChatPanel({
     { id: "auto", label: "Auto", help: "LLM sceglie in base alla richiesta" },
     { id: "video", label: "Video H3", help: "Forza la generazione video" },
     { id: "krea", label: "Krea", help: "Forza una immagine fotografica/generale" },
+    { id: "minimax", label: "MiniMax", help: "T2I, I2I o Reference H3 fino a 9 immagini" },
     { id: "anima", label: "Anima", help: "Forza disegno, anime, manga o illustrazione" },
     { id: "edit", label: "Edit", help: "Forza Flux Klein sulle immagini allegate" },
     { id: "tts", label: "TTS", help: "Voce Higgs; un audio allegato diventa la reference da clonare" },

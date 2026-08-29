@@ -110,6 +110,20 @@
       "requiredFor": ["image_anima"]
     },
     {
+      "id": "minimax-h3-image-studio",
+      "label": "MiniMax H3 Image Studio",
+      "kind": "custom_node",
+      "requiredClasses": [
+        "H3ImagePrepare",
+        "H3ImageSamplingPreset",
+        "H3ImageDecode",
+        "H3ImageFrameSelector"
+      ],
+      "url": "https://github.com/astropuzzo/ComfyUI-MiniMax-H3-Image-Studio",
+      "notes": "Nodi pubblici per T2I, I2I e Reference MiniMax H3 a singolo frame.",
+      "requiredFor": ["image_minimax"]
+    },
+    {
       "id": "h3-face-refine",
       "label": "ComfyUI-H3-FaceRefine",
       "kind": "custom_node",
@@ -159,7 +173,7 @@
       "kind": "model",
       "folder": "diffusion_models",
       "filenames": ["minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors"],
-      "requiredFor": ["video"]
+      "requiredFor": ["video", "image_minimax"]
     },
     {
       "id": "h3-fast-base-model",
@@ -180,7 +194,35 @@
       "kind": "model",
       "folder": "text_encoders",
       "filenames": ["qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"],
-      "requiredFor": ["video", "fast"]
+      "requiredFor": ["video", "fast", "image_minimax"]
+    },
+    {
+      "id": "h3-image-vae",
+      "label": "MiniMax H3 T=1 Image VAE",
+      "kind": "model",
+      "folder": "vae",
+      "filenames": ["minimax_h3_t1_image_vae_step1597.safetensors"],
+      "url": "https://huggingface.co/Mamad8/MiniMax-H3-Image-VAE/blob/main/minimax_h3_t1_image_vae_step1597.safetensors",
+      "notes": "VAE sperimentale per immagini singole; non usarlo nei workflow video.",
+      "requiredFor": ["image_minimax"]
+    },
+    {
+      "id": "h3-image-turbo-lora",
+      "label": "MiniMax H3 FL2V Turbo 8-step v1.0",
+      "kind": "model",
+      "folder": "loras",
+      "filenames": ["minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors"],
+      "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+      "requiredFor": ["image_minimax"]
+    },
+    {
+      "id": "h3-image-detail-lora",
+      "label": "MaxiMin H3 ThisIsFine Reference LoRA",
+      "kind": "model",
+      "folder": "loras",
+      "filenames": ["MaxiMin-HHH-R2V-ThisIsFine_LoRA_V0_1.safetensors"],
+      "url": "https://huggingface.co/Mamad8/MaxiMin-HHH-R2V-ThisIsFine/blob/main/MaxiMin-HHH-R2V-ThisIsFine_LoRA_V0_1.safetensors",
+      "requiredFor": ["image_minimax"]
     },
     {
       "id": "h3-video-vae",

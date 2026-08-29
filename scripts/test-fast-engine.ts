@@ -564,6 +564,66 @@ assert.equal(continuationSampler.inputs.studio_source_context_clip_index, 2);
 assert.match(String(continuationRequest.inputs.natural_prompt), /SEAMLESS START/);
 assert.match(String(continuationRequest.inputs.natural_prompt), /no cut/i);
 
+const longContinuation = prepareStudioJob(
+  source,
+  {
+    ...baseRequest,
+    durationSeconds: 10,
+    generationMode: "VIDEO EXTENSION",
+    mediaState: JSON.stringify([{ kind: "video", file: "long.mp4 [input]", duration: 60 }]),
+    qualityMode: "fast",
+    turboEnabled: false,
+  },
+  structuredClone(DEFAULT_RUNTIME_SETTINGS),
+);
+assert.equal(longContinuation.request.shotCount, 1);
+
+const longEdit = prepareStudioJob(
+  source,
+  {
+    ...baseRequest,
+    durationSeconds: 10,
+    generationMode: "VIDEO EDITING",
+    mediaState: JSON.stringify([{ kind: "video", file: "long.mp4 [input]", duration: 60 }]),
+    qualityMode: "fast",
+    turboEnabled: false,
+  },
+  structuredClone(DEFAULT_RUNTIME_SETTINGS),
+);
+const longEditRequest = uniqueNode(longEdit.candidates[0].prompt, "H3AIOAutopromptRequest");
+assert.equal(longEdit.request.shotCount, 6);
+assert.equal(longEditRequest.inputs.shot_count, 0);
+assert.equal(longEditRequest.inputs.max_auto_shots, 12);
+assert.throws(
+  () => prepareStudioJob(
+    source,
+    {
+      ...baseRequest,
+      durationSeconds: 10,
+      generationMode: "VIDEO EDITING",
+      mediaState: JSON.stringify([{ kind: "video", file: "too-long.mp4 [input]", duration: 130 }]),
+      qualityMode: "fast",
+      turboEnabled: false,
+    },
+    structuredClone(DEFAULT_RUNTIME_SETTINGS),
+  ),
+  /Scegli blocchi da 15s/i,
+);
+assert.throws(
+  () => prepareStudioJob(
+    source,
+    {
+      ...baseRequest,
+      generationMode: "VIDEO EXTENSION",
+      mediaState: JSON.stringify([{ kind: "video", file: "too-long.mp4 [input]", duration: 181 }]),
+      qualityMode: "fast",
+      turboEnabled: false,
+    },
+    structuredClone(DEFAULT_RUNTIME_SETTINGS),
+  ),
+  /fino a 180 secondi/i,
+);
+
 const mismatch = structuredClone(DEFAULT_RUNTIME_SETTINGS);
 mismatch.fast.pddFile = fl2vaPair.pddFile;
 assert.throws(

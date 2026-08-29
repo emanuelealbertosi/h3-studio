@@ -54,6 +54,7 @@ const installSettingsStore = new InstallSettingsStore(config.dataDir, {
   imageWorkflowId: "krea2-character-sheet",
   imageEditWorkflowId: "flux2-klein-edit-core",
   imageAnimaWorkflowId: "anima-t2i-core",
+  imageMinimaxWorkflowId: "minimax-h3-image-aio",
   ffmpegPath: config.ffmpegPath,
 });
 let installSettings = await installSettingsStore.get();
@@ -124,6 +125,7 @@ const imageStudio = new ImageStudioService(
   workflowPath(config.workflowOutputDir, installSettings.imageWorkflowId),
   workflowPath(config.workflowOutputDir, installSettings.imageEditWorkflowId),
   workflowPath(config.workflowOutputDir, installSettings.imageAnimaWorkflowId),
+  workflowPath(config.workflowOutputDir, installSettings.imageMinimaxWorkflowId),
   progressTracker,
 );
 const timelineExport = new TimelineExportService(
@@ -1715,6 +1717,9 @@ async function engineSettingsPayload() {
     },
     animaWorkflow: {
       source: workflowPath(config.workflowOutputDir, installSettings.imageAnimaWorkflowId),
+    },
+    minimaxImageWorkflow: {
+      source: workflowPath(config.workflowOutputDir, installSettings.imageMinimaxWorkflowId),
     },
     settings,
     audioStudio: audioStatus,

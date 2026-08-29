@@ -1,0 +1,117 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": { "title": "MiniMax H3 shared image/video model" }
+  },
+  "2": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": ["1", 0],
+      "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+      "strength_model": 0.75
+    },
+    "_meta": { "title": "MiniMax H3 image Turbo" }
+  },
+  "3": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": ["2", 0],
+      "lora_name": "MaxiMin-HHH-R2V-ThisIsFine_LoRA_V0_1.safetensors",
+      "strength_model": 0.5
+    },
+    "_meta": { "title": "MiniMax H3 image edit detail adapter" }
+  },
+  "4": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "_meta": { "title": "MiniMax H3 text/vision encoder" }
+  },
+  "5": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "minimax_h3_t1_image_vae_step1597.safetensors" },
+    "_meta": { "title": "MiniMax H3 T=1 image VAE" }
+  },
+  "10": {
+    "class_type": "H3ImagePrepare",
+    "inputs": {
+      "clip": ["4", 0],
+      "mode": "text_to_image (FL2VA)",
+      "prompt": "Create one finished, sharp still image.",
+      "width": 1024,
+      "height": 1024,
+      "frame_preset": "single image | 1 frame (image VAE)",
+      "optimize_prompt": true,
+      "preserve_strength": 0.6,
+      "source_fit": "crop_center",
+      "reference_size": "max_identity_2048",
+      "vae": ["5", 0]
+    },
+    "_meta": { "title": "MiniMax H3 T2I / I2I / Reference prepare" }
+  },
+  "11": {
+    "class_type": "H3ImageSamplingPreset",
+    "inputs": {
+      "model": ["2", 0],
+      "sampling_profile": "hybrid single image | ER-SDE 8 steps"
+    },
+    "_meta": { "title": "MiniMax H3 single-image recipe" }
+  },
+  "12": {
+    "class_type": "RandomNoise",
+    "inputs": { "noise_seed": 1 },
+    "_meta": { "title": "MiniMax image seed" }
+  },
+  "13": {
+    "class_type": "BasicGuider",
+    "inputs": { "model": ["11", 0], "conditioning": ["10", 0] },
+    "_meta": { "title": "MiniMax image guider" }
+  },
+  "14": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": ["12", 0],
+      "guider": ["13", 0],
+      "sampler": ["11", 1],
+      "sigmas": ["11", 2],
+      "latent_image": ["10", 1]
+    },
+    "_meta": { "title": "MiniMax image sampler" }
+  },
+  "15": {
+    "class_type": "H3ImageDecode",
+    "inputs": { "samples": ["14", 0], "vae": ["5", 0] },
+    "_meta": { "title": "MiniMax exact T=1 decode" }
+  },
+  "16": {
+    "class_type": "H3ImageFrameSelector",
+    "inputs": {
+      "frames": ["15", 0],
+      "strategy": "decode_recommended",
+      "manual_index": 0,
+      "skip_first_frames": 0,
+      "candidate_start": 0,
+      "candidate_end": 1,
+      "similarity_weight": 0.35,
+      "top_k": 1,
+      "emit_candidate_batch": false,
+      "recommended_index": ["15", 3]
+    },
+    "_meta": { "title": "MiniMax single image output" }
+  },
+  "17": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["16", 0],
+      "filename_prefix": "images/H3_STUDIO/minimax"
+    },
+    "_meta": { "title": "Save MiniMax H3 image" }
+  }
+}

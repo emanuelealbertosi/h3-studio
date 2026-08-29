@@ -17,6 +17,7 @@ const defaults = {
   imageWorkflowId: "krea2-character-sheet",
   imageEditWorkflowId: "flux2-klein-edit-core",
   imageAnimaWorkflowId: "anima-t2i-core",
+  imageMinimaxWorkflowId: "minimax-h3-image-aio",
   ffmpegPath: "ffmpeg",
 };
 

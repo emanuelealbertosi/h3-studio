@@ -10,6 +10,7 @@ import {
   extractRequestedLyrics,
   musicInstrumentalIntent,
   normalizePlan,
+  preserveMiniMaxImageIntent,
   preserveMusicIntent,
   resolveChatKeyframePositions,
   resolveChatTtsText,
@@ -113,7 +114,11 @@ try {
   assert.equal(routeAction(proposedImage, "edit")?.type, "edit_image");
   assert.equal(routeAction(proposedImage, "tts")?.type, "generate_tts");
   assert.equal(routeAction(proposedImage, "music")?.type, "generate_music");
+  assert.equal(routeAction(proposedImage, "minimax")?.type, "generate_minimax_image");
   assert.equal(routeAction(proposedImage, "auto")?.type, "generate_image");
+  assert.equal(preserveMiniMaxImageIntent(proposedImage, "usa MiniMax per questa immagine")?.type, "generate_minimax_image");
+  assert.equal(preserveMiniMaxImageIntent(proposedImage, "crea una foto generica")?.type, "generate_image");
+  assert.equal(preserveMiniMaxImageIntent(proposedImage, "crea una foto generica", "minimax")?.type, "generate_minimax_image");
   assert.equal(routeAction(null, "anima"), null);
   const vocalRequest = 'crea una canzone jazz di 10s cantata da una donna che dice "Buongiornissimo caffè, Buongiornissimo caffeee" in italiano';
   assert.equal(musicInstrumentalIntent(vocalRequest), false);
@@ -282,7 +287,7 @@ try {
   assert.match(panel, /\(\^\|\\s\)@\$/);
   assert.match(panel, /chat-picker-grid/);
   assert.match(panel, /Crea con/);
-  assert.match(panel, /"auto" \| "video" \| "krea" \| "anima" \| "edit"/);
+  assert.match(panel, /"auto" \| "video" \| "krea" \| "minimax" \| "anima" \| "edit"/);
   assert.match(panel, /trackedActions/);
   assert.match(panel, /\/api\/image-jobs\/\$\{action\.jobId\}/);
   assert.match(panel, /\/api\/audio-jobs\/\$\{action\.jobId\}/);

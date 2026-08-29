@@ -19,9 +19,9 @@ di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
   un media.
 - Premi `+` oppure digita `@` alla fine del testo per aprire la Libreria. Le
   miniature mostrano immagini, video e media Esterni riutilizzabili.
-- Con immagini allegate puoi chiedere un'analisi, un edit Flux.2 Klein, un I2V
-  o un Reference H3. LLM può osservare fino a quattro immagini per messaggio;
-  il router accetta fino a otto media complessivi per un'azione.
+- Con immagini allegate puoi chiedere un'analisi testuale, un edit Flux.2 Klein,
+  un I2V o un Reference H3. Il planner riceve descrittori e ordine degli allegati,
+  mentre i file vengono passati direttamente al motore scelto.
 - Espressioni come **anima l'immagine precedente**, **crea un video da questa
   immagine** o **trasformala in video** forzano I2V e recuperano il media più
   recente. **Usala come riferimento/reference** forza invece R2V. Scrivendo
@@ -37,11 +37,14 @@ di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
   `Picture 1 al secondo 2, Picture 2 al secondo 8`. I secondi vengono convertiti
   sulla durata complessiva, anche nei video multishot. La Chat può usare fino a
   otto immagini come keyframe, pur mostrandone al massimo quattro al planner Vision.
-- Sopra il campo di testo scegli **Auto, Video H3, Krea, Anima o Edit**. La
+- Sopra il campo di testo scegli **Auto, Video H3, Krea, MiniMax, Anima o Edit**. La
   scelta esplicita prevale sempre sul router del modello LLM, ma non avvia nulla finché
   il testo non contiene una richiesta esplicita di generazione. Se vuoi essere
   certo di ottenere un disegno, seleziona **Anima**; se vuoi una fotografia o
-  un'immagine generale, seleziona **Krea**.
+  un'immagine generale, seleziona **Krea**. Seleziona **MiniMax** per generare
+  una still H3: nessun allegato crea T2I, una Picture crea I2I e da due a nove
+  Picture attivano Reference. In Auto funziona anche una richiesta esplicita
+  come “usa MiniMax per questa immagine”.
 - In **Auto**, anime, manga, disegno, illustrazione e cartoon vengono instradati
   ad Anima; le immagini fotografiche o generiche usano Krea.
 - Una richiesta video senza durata usa 10 secondi, un candidato, 0,5 MP e FAST

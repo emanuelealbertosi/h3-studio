@@ -20,6 +20,8 @@ import {
   buildAnimaGeneratePrompt,
   buildFlux2KleinEditPrompt,
   buildKreaGeneratePrompt,
+  buildMiniMaxH3ImagePrompt,
+  DEFAULT_MINIMAX_H3_IMAGE_SETTINGS,
 } from "../bridge/image-workflow-builder.js";
 import {
   ImageStudioService,
@@ -243,6 +245,26 @@ try {
   });
   assert.equal(normalizedAnima.mode, "generate");
   assert.equal(normalizedAnima.imageMode, "anima");
+  const normalizedMiniMaxReference = normalizeImageRequest({
+    projectId: "project-test",
+    mode: "edit",
+    engine: "minimax",
+    prompt: "Use <Picture 1> as the subject and <Picture 2> as the costume reference",
+    candidateCount: 1,
+    aspectFormat: "1:1",
+    width: 1024,
+    height: 1024,
+    seedMode: "random",
+    references: [1, 2, 3, 4, 5, 6, 7, 8, 9].map(reference),
+    tag: "character",
+  });
+  assert.equal(normalizedMiniMaxReference.imageEngine, "minimax");
+  assert.equal(normalizedMiniMaxReference.references.length, 9);
+  assert.throws(() => normalizeImageRequest({
+    ...normalizedMiniMaxReference,
+    engine: "minimax",
+    references: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(reference),
+  }), /massimo 9 reference/i);
   assert.throws(
     () => normalizeImageRequest({
       ...normalizedComposition,
@@ -282,6 +304,7 @@ try {
     path.join(process.cwd(), "workflows", "studio-krea2.api.json"),
     path.join(process.cwd(), "workflows", "studio-flux2-klein-edit.api.json"),
     path.join(process.cwd(), "workflows", "studio-anima.api.json"),
+    path.join(process.cwd(), "workflows", "studio-minimax-h3-image.api.json"),
   );
   const preparedComposition = await imageService.prepare({
     projectId: firstProject.id,
@@ -427,6 +450,48 @@ try {
   assert.deepEqual(animaGraph["40"].inputs.model, ["20", 0]);
   assert.equal(animaGraph["20"].inputs.strength_model, 0.8);
   assert.deepEqual(animaGraph["42"].inputs.images, ["41", 0]);
+  const miniMaxSettings = {
+    model: DEFAULT_RUNTIME_SETTINGS.h3.model,
+    ...DEFAULT_MINIMAX_H3_IMAGE_SETTINGS,
+  };
+  const miniMaxT2iGraph = buildMiniMaxH3ImagePrompt({
+    prompt: "A cinematic still image of a wizard",
+    seed: 101,
+    width: 1024,
+    height: 1024,
+    filenamePrefix: "tests/minimax-t2i",
+    settings: miniMaxSettings,
+    references: [],
+  });
+  assert.equal(miniMaxT2iGraph["10"].inputs.mode, "text_to_image (FL2VA)");
+  assert.deepEqual(miniMaxT2iGraph["11"].inputs.model, ["2", 0]);
+  assert.equal(Object.values(miniMaxT2iGraph).filter((node) => node.class_type === "LoadImage").length, 0);
+  const miniMaxI2iGraph = buildMiniMaxH3ImagePrompt({
+    prompt: "Turn <Picture 1> into a bright fantasy portrait",
+    seed: 102,
+    width: 1024,
+    height: 1024,
+    filenamePrefix: "tests/minimax-i2i",
+    settings: miniMaxSettings,
+    references: [reference(1)],
+  });
+  assert.equal(miniMaxI2iGraph["10"].inputs.mode, "image_to_image (FL2VA)");
+  assert.deepEqual(miniMaxI2iGraph["10"].inputs.source_image, ["20", 0]);
+  assert.deepEqual(miniMaxI2iGraph["11"].inputs.model, ["3", 0]);
+  const miniMaxReferenceGraph = buildMiniMaxH3ImagePrompt({
+    prompt: "Keep <Picture 1> and use the costume from <Picture 2>",
+    seed: 103,
+    width: 1344,
+    height: 768,
+    filenamePrefix: "tests/minimax-reference",
+    settings: miniMaxSettings,
+    references: [reference(1), reference(2), reference(3)],
+  });
+  assert.equal(miniMaxReferenceGraph["10"].inputs.mode, "reference_edit (REF2VA)");
+  assert.deepEqual(miniMaxReferenceGraph["10"].inputs.source_image, ["20", 0]);
+  assert.deepEqual(miniMaxReferenceGraph["10"].inputs.reference_image_2, ["21", 0]);
+  assert.deepEqual(miniMaxReferenceGraph["10"].inputs.reference_image_3, ["22", 0]);
+  assert.equal(Object.values(miniMaxReferenceGraph).filter((node) => node.class_type === "LoadImage").length, 3);
   const oneReferenceGraph = buildFlux2KleinEditPrompt({
     prompt: "Change the coat to blue",
     seed: 1,

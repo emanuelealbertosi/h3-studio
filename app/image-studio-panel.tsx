@@ -14,6 +14,7 @@ import {
 
 type SeedMode = "random" | "base" | "fixed";
 type ImageMode = "generate" | "edit" | "anima";
+type ImageEngineChoice = "default" | "minimax";
 type ImageTag = "untagged" | "character" | "object" | "background";
 type ReferenceRole = "base" | "subject" | "style" | "pose" | "background" | "other";
 type ProjectOption = { id: string; name: string };
@@ -73,7 +74,7 @@ type ImageJob = {
   requestedSeed?: number | null;
   selectedCandidateIndex: number | null;
   status: string;
-  engine: string | { model?: string; workflow?: string };
+  engine: string | { kind?: string; model?: string; workflow?: string };
   references: Array<Omit<ImageReference, "uid">>;
   candidates: ImageCandidate[];
   projectLinks: ImageProjectLink[];
@@ -130,6 +131,7 @@ type ImageStudioStatus = {
   generate: { ready: boolean };
   edit: { ready: boolean };
   anima: { ready: boolean };
+  minimax: { ready: boolean };
 };
 
 type PromptPlannerStatus = { ready: boolean; model: string; unloadPolicy: string };
@@ -241,6 +243,7 @@ export default function ImageStudioPanel({
   const [mode, setMode] = useState<ImageMode>(
     incomingReferences.length ? "edit" : "generate",
   );
+  const [engineChoice, setEngineChoice] = useState<ImageEngineChoice>("default");
   const [prompt, setPrompt] = useState("");
   const [plannerEnabled, setPlannerEnabled] = useState(true);
   const [plannerIdea, setPlannerIdea] = useState("");
@@ -319,8 +322,14 @@ export default function ImageStudioPanel({
         return candidateLinks.some((link) => link.projectId === projectId);
       })
     : Array.from({ length: candidateCount }, (_, index): ImageCandidate => ({ index: index + 1, seed: 0, status: "idle", output: null }));
-  const selectedEngineReady = mode === "edit"
-    ? engineStatus?.edit.ready === true
+  const usingMiniMax = engineChoice === "minimax" && mode !== "anima";
+  const referenceLimit = usingMiniMax ? 9 : 4;
+  const miniMaxReferenceCount = mode === "edit" ? references.length : 0;
+  const miniMaxImageMode = miniMaxReferenceCount === 0 ? "T2I" : miniMaxReferenceCount === 1 ? "I2I" : "REFERENCE";
+  const selectedEngineReady = usingMiniMax
+    ? engineStatus?.minimax.ready === true
+    : mode === "edit"
+      ? engineStatus?.edit.ready === true
     : mode === "anima"
       ? engineStatus?.anima.ready === true
       : engineStatus?.generate.ready === true;
@@ -434,8 +443,8 @@ export default function ImageStudioPanel({
         setMessage("Questa immagine è già allegata");
         return current;
       }
-      if (current.length >= 4) {
-        setMessage("Flux Klein accetta al massimo quattro reference");
+      if (current.length >= referenceLimit) {
+        setMessage(`${usingMiniMax ? "MiniMax H3" : "Flux Klein"} accetta al massimo ${referenceLimit} reference`);
         return current;
       }
       const next = [...current, {
@@ -447,14 +456,14 @@ export default function ImageStudioPanel({
         role: (current.length === 0 ? "base" : "other") as ReferenceRole,
         uid: crypto.randomUUID(),
       }];
-      setMessage(`${image.name} allegata all’Edit`);
+      setMessage(`${image.name} allegata a ${usingMiniMax ? "MiniMax H3" : "Flux Klein Edit"}`);
       return next;
     });
     setMode("edit");
   }
 
   function insertReferenceInPrompt(index: number) {
-    const token = `reference image ${index + 1}`;
+    const token = usingMiniMax ? `<Picture ${index + 1}>` : `reference image ${index + 1}`;
     const textarea = promptRef.current;
     const start = textarea?.selectionStart ?? prompt.length;
     const end = textarea?.selectionEnd ?? start;
@@ -486,6 +495,17 @@ export default function ImageStudioPanel({
     setJobs(loaded);
     setJob(selected);
     setActiveJobId(selected && active(selected) ? selected.id : null);
+    if (selected) {
+      setMode(selected.mode);
+      setEngineChoice(typeof selected.engine === "object" && selected.engine.kind === "minimax-h3-image" ? "minimax" : "default");
+      setPrompt(selected.prompt);
+      setPlannerIdea(selected.prompt);
+      setPlannerReady(true);
+      setCompositionPreset(selected.compositionPreset ?? "free");
+      setCandidateCount(selected.candidateCount);
+      setFormat((selected.aspectFormat === IMAGE_EDIT_KEEP_ASPECT_FORMAT || formats.some((item) => item.value === selected.aspectFormat) ? selected.aspectFormat : "1:1") as ImageFormatValue);
+      setReferences(selected.mode === "edit" ? selected.references.map((reference) => ({ ...reference, mediaPath: referenceMediaPath(reference.file), uid: crypto.randomUUID() })) : []);
+    }
   }
 
   useEffect(() => {
@@ -561,8 +581,8 @@ export default function ImageStudioPanel({
 
   async function upload(files: FileList | null) {
     if (!files?.length) return;
-    const selected = Array.from(files).slice(0, Math.max(0, 4 - references.length));
-    if (!selected.length) { setMessage("Puoi usare al massimo 4 reference."); return; }
+    const selected = Array.from(files).slice(0, Math.max(0, referenceLimit - references.length));
+    if (!selected.length) { setMessage(`Puoi usare al massimo ${referenceLimit} reference.`); return; }
     setUploading(true);
     try {
       const added: ImageReference[] = [];
@@ -580,7 +600,7 @@ export default function ImageStudioPanel({
           uid: crypto.randomUUID(),
         });
       }
-      setReferences((current) => [...current, ...added].slice(0, 4)); setMode("edit");
+      setReferences((current) => [...current, ...added].slice(0, referenceLimit)); setMode("edit");
       setMessage(`${added.length} reference caricate e salvate in Libreria come Esterni`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Upload fallito"); }
     finally { setUploading(false); }
@@ -652,7 +672,7 @@ export default function ImageStudioPanel({
       const engineEffectivePrompt = composeImagePrompt(enginePrompt, compositionPreset);
       const response = await fetch(`${bridgeUrl}/api/image-jobs`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId, mode, prompt: enginePrompt, effectivePrompt: engineEffectivePrompt, compositionPreset, candidateCount, aspectFormat: selectedFormat.value, width: selectedFormat.width, height: selectedFormat.height, seedMode, seed: seedMode === "random" ? undefined : numericSeed, references: mode === "edit" ? references.map((reference) => ({ file: reference.file, name: reference.name, width: reference.width, height: reference.height, role: reference.role })) : [], tag }),
+        body: JSON.stringify({ projectId, mode, engine: engineChoice, prompt: enginePrompt, effectivePrompt: engineEffectivePrompt, compositionPreset, candidateCount, aspectFormat: selectedFormat.value, width: selectedFormat.width, height: selectedFormat.height, seedMode, seed: seedMode === "random" ? undefined : numericSeed, references: mode === "edit" ? references.map((reference) => ({ file: reference.file, name: reference.name, width: reference.width, height: reference.height, role: reference.role })) : [], tag }),
       });
       const payload = (await response.json()) as { job?: ImageJob; error?: string };
       if (!response.ok || !payload.job) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
@@ -770,14 +790,14 @@ export default function ImageStudioPanel({
 
   function editCandidate(candidate: ImageCandidate) {
     if (!candidate.output) return;
-    setMode("edit"); setReferences([{ file: referenceFile(candidate.output), name: candidate.output.filename ?? `candidate_${candidate.index}.png`, width: candidate.output.width, height: candidate.output.height, mediaPath: candidate.output.mediaPath, role: "base", uid: crypto.randomUUID() }]);
+    setMode("edit"); setEngineChoice("default"); setReferences([{ file: referenceFile(candidate.output), name: candidate.output.filename ?? `candidate_${candidate.index}.png`, width: candidate.output.width, height: candidate.output.height, mediaPath: candidate.output.mediaPath, role: "base", uid: crypto.randomUUID() }]);
     setExpanded(true); setMessage(`Candidato ${candidate.index} impostato come base`);
     window.requestAnimationFrame(() => composerRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }));
   }
 
   function addCandidateReference(candidate: ImageCandidate) {
     if (!candidate.output) return;
-    if (references.length >= 4) { setMessage("Hai già raggiunto il limite di 4 reference."); return; }
+    if (references.length >= referenceLimit) { setMessage(`Hai già raggiunto il limite di ${referenceLimit} reference.`); return; }
     setMode("edit");
     setReferences((current) => [...current, {
       file: referenceFile(candidate.output!),
@@ -787,7 +807,7 @@ export default function ImageStudioPanel({
       mediaPath: candidate.output!.mediaPath,
       role: (current.length === 0 ? "base" : "other") as ReferenceRole,
       uid: crypto.randomUUID(),
-    }].slice(0, 4));
+    }].slice(0, referenceLimit));
     setExpanded(true);
     setMessage(`Candidato ${candidate.index} aggiunto alle reference`);
   }
@@ -809,7 +829,7 @@ export default function ImageStudioPanel({
                   className={item.id === job?.id ? "active" : ""}
                   key={item.id}
                   onClick={() => {
-                    setJob(item); setActiveJobId(active(item) ? item.id : null); setMode(item.mode); setPrompt(item.prompt); setPlannerIdea(item.prompt); setPlannerReady(true); setPlannerSummary("Prompt gia preparato per questo batch."); setCompositionPreset(item.compositionPreset ?? "free"); setCandidateCount(item.candidateCount);
+                    setJob(item); setActiveJobId(active(item) ? item.id : null); setMode(item.mode); setEngineChoice(typeof item.engine === "object" && item.engine.kind === "minimax-h3-image" ? "minimax" : "default"); setPrompt(item.prompt); setPlannerIdea(item.prompt); setPlannerReady(true); setPlannerSummary("Prompt gia preparato per questo batch."); setCompositionPreset(item.compositionPreset ?? "free"); setCandidateCount(item.candidateCount);
                     setFormat((item.aspectFormat === IMAGE_EDIT_KEEP_ASPECT_FORMAT || formats.some((candidate) => candidate.value === item.aspectFormat) ? item.aspectFormat : "1:1") as ImageFormatValue);
                     setSeedMode(item.seedMode);
                     setSeedValue(item.requestedSeed === null || item.requestedSeed === undefined ? "1024" : String(item.requestedSeed));
@@ -897,7 +917,7 @@ export default function ImageStudioPanel({
                           role: "base",
                         })} title="Invia al tab Video come reference" type="button">▶ Video</button>
                         <button onClick={() => editCandidate(candidate)} type="button">Edita questa</button>
-                        <button disabled={references.length >= 4} onClick={() => addCandidateReference(candidate)} type="button">+ Reference</button>
+                        <button disabled={references.length >= referenceLimit} onClick={() => addCandidateReference(candidate)} type="button">+ Reference</button>
                         <button className="regenerate-action" disabled={busy === `regenerate-${candidate.index}`} onClick={() => setRegenerateTarget({ candidateIndex: candidate.index })} type="button">{busy === `regenerate-${candidate.index}` ? "Rigenerazione…" : "↻ Rigenera"}</button>
                       </div>
                       <div className="image-share-row">
@@ -989,7 +1009,8 @@ export default function ImageStudioPanel({
           </details>
 
           <div className="image-control-grid">
-            <fieldset className="segmented-control"><legend>Modalità</legend><div><button className={mode === "generate" ? "selected" : ""} onClick={() => { setMode("generate"); setPlannerReady(false); if (format === IMAGE_EDIT_KEEP_ASPECT_FORMAT) setFormat("1:1"); }} type="button">Genera</button><button className={mode === "edit" ? "selected" : ""} onClick={() => { setMode("edit"); setPlannerReady(false); if (!references.length) void openImageLibrary(); }} type="button">Edit</button><button className={mode === "anima" ? "selected" : ""} onClick={() => { setMode("anima"); setPlannerReady(false); if (format === IMAGE_EDIT_KEEP_ASPECT_FORMAT) setFormat("1:1"); }} type="button">Anima</button></div></fieldset>
+            <fieldset className="segmented-control"><legend>Modalità</legend><div><button className={mode === "generate" ? "selected" : ""} onClick={() => { setMode("generate"); setEngineChoice("default"); setPlannerReady(false); if (format === IMAGE_EDIT_KEEP_ASPECT_FORMAT) setFormat("1:1"); }} type="button">Genera</button><button className={mode === "edit" ? "selected" : ""} onClick={() => { setMode("edit"); setEngineChoice("default"); setPlannerReady(false); if (!references.length) void openImageLibrary(); }} type="button">Edit</button><button className={mode === "anima" ? "selected" : ""} onClick={() => { setMode("anima"); setEngineChoice("default"); setPlannerReady(false); if (format === IMAGE_EDIT_KEEP_ASPECT_FORMAT) setFormat("1:1"); }} type="button">Anima</button></div></fieldset>
+            {mode !== "anima" && <fieldset className="segmented-control image-engine-switch"><legend>Motore</legend><div><button className={engineChoice === "default" ? "selected" : ""} onClick={() => { setEngineChoice("default"); setReferences((current) => current.slice(0, 4)); setMessage(mode === "edit" ? "Flux Klein selezionato per Edit" : "Krea selezionato per la generazione"); }} type="button">{mode === "edit" ? "Flux Klein" : "Krea"}</button><button className={engineChoice === "minimax" ? "selected" : ""} onClick={() => { setEngineChoice("minimax"); setMessage(`MiniMax H3 selezionato · ${mode === "edit" ? references.length === 1 ? "I2I" : references.length > 1 ? "Reference" : "allega almeno una immagine" : "T2I"}`); }} type="button">MiniMax H3</button></div></fieldset>}
             <label className="select-control">
               <span>Formato</span>
               <select
@@ -1011,7 +1032,7 @@ export default function ImageStudioPanel({
 
           {mode === "edit" && (
             <div className="asset-panel image-reference-panel">
-              <div className="asset-panel-heading"><div><strong>Reference Flux Klein</strong><span>Da 1 a 4 immagini · ordine e ruolo modificabili</span></div><div className="asset-source-actions"><button onClick={() => void openImageLibrary()} type="button">▧ Scegli dalla libreria</button><label className="asset-upload">{uploading ? "Caricamento…" : `+ Carica (${references.length}/4)`}<input accept="image/*" disabled={uploading || references.length >= 4} multiple onChange={(event) => { void upload(event.currentTarget.files); event.currentTarget.value = ""; }} type="file" /></label></div></div>
+              <div className="asset-panel-heading"><div><strong>{usingMiniMax ? "Reference MiniMax H3" : "Reference Flux Klein"}</strong><span>{usingMiniMax ? "1 immagine = I2I · 2–9 immagini = Reference" : "Da 1 a 4 immagini · ordine e ruolo modificabili"}</span></div><div className="asset-source-actions"><button onClick={() => void openImageLibrary()} type="button">▧ Scegli dalla libreria</button><label className="asset-upload">{uploading ? "Caricamento…" : `+ Carica (${references.length}/${referenceLimit})`}<input accept="image/*" disabled={uploading || references.length >= referenceLimit} multiple onChange={(event) => { void upload(event.currentTarget.files); event.currentTarget.value = ""; }} type="file" /></label></div></div>
               <div className="image-reference-list">
                 {!references.length ? <span className="asset-empty">Carica una base e, se servono, soggetto, stile, posa o sfondo.</span> : references.map((reference, index) => (
                   <article key={reference.uid}>
@@ -1043,7 +1064,7 @@ export default function ImageStudioPanel({
           >
             <div aria-modal="true" className="media-library-picker media-library-modal image-library-modal" role="dialog">
               <div className="media-picker-heading">
-                <div><strong>Scegli immagini dalla libreria</strong><span>Tutte le immagini generate e gli asset storici · massimo 4 reference</span></div>
+                <div><strong>Scegli immagini dalla libreria</strong><span>Tutte le immagini generate e gli asset storici · massimo {referenceLimit} reference</span></div>
                 <button aria-label="Chiudi libreria" onClick={() => setLibraryOpen(false)} type="button">×</button>
               </div>
               {libraryBusy && !libraryImages.length ? (
@@ -1056,7 +1077,7 @@ export default function ImageStudioPanel({
                       return (
                         <button
                           className={selected ? "selected" : ""}
-                          disabled={!selected && references.length >= 4}
+                          disabled={!selected && references.length >= referenceLimit}
                           key={image.id}
                           onClick={() => addLibraryReference(image)}
                           title={image.detail}
@@ -1073,7 +1094,7 @@ export default function ImageStudioPanel({
                 </div>
               )}
               <div className="media-picker-footer">
-                <span>{references.length}/4 reference allegate</span>
+                <span>{references.length}/{referenceLimit} reference allegate</span>
                 <button onClick={() => setLibraryOpen(false)} type="button">Fine</button>
               </div>
             </div>
@@ -1084,7 +1105,7 @@ export default function ImageStudioPanel({
           <div className={selectedEngineReady ? "image-engine-state ready" : "image-engine-state blocked"}>
             {selectedEngineReady ? "Motore immagini pronto" : engineStatusError ?? "Dipendenze motore mancanti"}
           </div>
-          <div className="preset-note"><span className="fast-badge">{mode === "edit" ? "FLUX KLEIN EDIT" : mode === "anima" ? "ANIMA" : "IMAGE"}</span>{keepAspectUnavailable ? "Reference 1 senza dimensioni" : `${selectedFormat.width} × ${selectedFormat.height} · ${(selectedFormat.width * selectedFormat.height / 1_000_000).toFixed(1)} MP`} · {selectedComposition.shortLabel}</div>
+          <div className="preset-note"><span className="fast-badge">{usingMiniMax ? `MINIMAX H3 · ${miniMaxImageMode}` : mode === "edit" ? "FLUX KLEIN EDIT" : mode === "anima" ? "ANIMA" : "KREA"}</span>{keepAspectUnavailable ? "Reference 1 senza dimensioni" : `${selectedFormat.width} × ${selectedFormat.height} · ${(selectedFormat.width * selectedFormat.height / 1_000_000).toFixed(1)} MP`} · {selectedComposition.shortLabel}</div>
           <div className="generation-cta"><div><span>Output</span><strong>{candidateCount} immagin{candidateCount === 1 ? "e" : "i"} · {tag === "untagged" ? "senza tag" : tags.find((item) => item.value === tag)?.label}</strong></div><button disabled={busy === "run" || busy === "planner" || active(job) || !projectId || !selectedEngineReady || turnaroundFormatMismatch || keepAspectUnavailable || (plannerEnabled && (!plannerStatus?.ready || !plannerIdea.trim()))} onClick={() => void run()} type="button">{busy === "planner" ? "LLM prepara..." : busy === "run" || active(job) ? "Generazione in corso" : turnaroundFormatMismatch ? "Formato 16:9 richiesto" : keepAspectUnavailable ? "Dimensioni reference mancanti" : !selectedEngineReady ? "Motore non pronto" : mode === "edit" ? "Crea " + candidateCount + " edit" : mode === "anima" ? "Genera " + candidateCount + " anime" : "Genera " + candidateCount + " immagini"}</button></div>
         </div>
         {message && <div className="run-message">{message}</div>}

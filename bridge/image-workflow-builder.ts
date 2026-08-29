@@ -7,8 +7,28 @@ import type {
 } from "./runtime-settings.js";
 
 export const IMAGE_EDIT_MAX_REFERENCES = 4;
+export const MINIMAX_H3_IMAGE_MAX_REFERENCES = 9;
 export const IMAGE_API_MAX_PIXELS = 4_000_000;
 export const IMAGE_UI_TARGET_MAX_PIXELS = 2_000_000;
+export type MiniMaxH3ImageSettings = {
+  model: string;
+  encoder: string;
+  vae: string;
+  turboLora: string;
+  turboStrength: number;
+  detailLora: string;
+  detailStrength: number;
+  preserveStrength: number;
+};
+export const DEFAULT_MINIMAX_H3_IMAGE_SETTINGS: Omit<MiniMaxH3ImageSettings, "model"> = {
+  encoder: "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+  vae: "minimax_h3_t1_image_vae_step1597.safetensors",
+  turboLora: "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+  turboStrength: 0.75,
+  detailLora: "MaxiMin-HHH-R2V-ThisIsFine_LoRA_V0_1.safetensors",
+  detailStrength: 0.5,
+  preserveStrength: 0.6,
+};
 const KREA_REBALANCE_WEIGHTS =
   "1.0,1.0,1.0,1.0,1.0,1.0,1.0,2.5,5.0,1.1,4.0,1.0";
 const ANIMA_NEGATIVE_PROMPT =
@@ -240,6 +260,154 @@ export function buildAnimaGeneratePrompt(input: {
     "SaveImage",
     { images: ["41", 0], filename_prefix: input.filenamePrefix },
     "Save Anima image",
+  );
+  return apiPrompt;
+}
+
+export function buildMiniMaxH3ImagePrompt(input: {
+  prompt: string;
+  seed: number;
+  width: number;
+  height: number;
+  filenamePrefix: string;
+  settings: MiniMaxH3ImageSettings;
+  references: ImageJobReferenceInput[];
+  template?: ComfyApiPrompt;
+}): ComfyApiPrompt {
+  assertImageDimensions(input.width, input.height);
+  if (input.references.length > MINIMAX_H3_IMAGE_MAX_REFERENCES) {
+    throw new Error("MiniMax H3 Image supporta al massimo 9 reference");
+  }
+  const apiPrompt: ComfyApiPrompt = cloneTemplate(input.template);
+  for (const id of Object.keys(apiPrompt)) delete apiPrompt[id];
+
+  apiPrompt["1"] = node(
+    "UNETLoader",
+    { unet_name: input.settings.model, weight_dtype: "default" },
+    "MiniMax H3 shared image/video model",
+  );
+  let textModel: [string, number] = ["1", 0];
+  if (input.settings.turboLora) {
+    apiPrompt["2"] = node(
+      "LoraLoaderModelOnly",
+      {
+        model: textModel,
+        lora_name: input.settings.turboLora,
+        strength_model: input.settings.turboStrength,
+      },
+      "MiniMax H3 image Turbo",
+    );
+    textModel = ["2", 0];
+  }
+  let editModel = textModel;
+  if (input.settings.detailLora) {
+    apiPrompt["3"] = node(
+      "LoraLoaderModelOnly",
+      {
+        model: editModel,
+        lora_name: input.settings.detailLora,
+        strength_model: input.settings.detailStrength,
+      },
+      "MiniMax H3 image edit detail adapter",
+    );
+    editModel = ["3", 0];
+  }
+  apiPrompt["4"] = node(
+    "CLIPLoader",
+    { clip_name: input.settings.encoder, type: "minimax", device: "default" },
+    "MiniMax H3 text/vision encoder",
+  );
+  apiPrompt["5"] = node(
+    "VAELoader",
+    { vae_name: input.settings.vae },
+    "MiniMax H3 T=1 image VAE",
+  );
+
+  const referenceInputs: Record<string, unknown> = {};
+  input.references.forEach((reference, index) => {
+    const id = String(20 + index);
+    apiPrompt[id] = node(
+      "LoadImage",
+      { image: loadImageName(reference.file) },
+      `MiniMax Picture ${index + 1}: ${reference.role}`,
+    );
+    referenceInputs[index === 0 ? "source_image" : `reference_image_${index + 1}`] = [id, 0];
+  });
+  const mode = input.references.length === 0
+    ? "text_to_image (FL2VA)"
+    : input.references.length === 1
+      ? "image_to_image (FL2VA)"
+      : "reference_edit (REF2VA)";
+  const selectedModel = input.references.length === 0 ? textModel : editModel;
+  apiPrompt["10"] = node(
+    "H3ImagePrepare",
+    {
+      clip: ["4", 0],
+      mode,
+      prompt: input.prompt,
+      width: input.width,
+      height: input.height,
+      frame_preset: "single image | 1 frame (image VAE)",
+      optimize_prompt: true,
+      preserve_strength: input.settings.preserveStrength,
+      source_fit: "crop_center",
+      reference_size: "max_identity_2048",
+      vae: ["5", 0],
+      ...referenceInputs,
+    },
+    "MiniMax H3 T2I / I2I / Reference prepare",
+  );
+  apiPrompt["11"] = node(
+    "H3ImageSamplingPreset",
+    {
+      model: selectedModel,
+      sampling_profile: "hybrid single image | ER-SDE 8 steps",
+    },
+    "MiniMax H3 single-image recipe",
+  );
+  apiPrompt["12"] = node("RandomNoise", { noise_seed: input.seed }, "MiniMax image seed");
+  apiPrompt["13"] = node(
+    "BasicGuider",
+    { model: ["11", 0], conditioning: ["10", 0] },
+    "MiniMax image guider",
+  );
+  apiPrompt["14"] = node(
+    "SamplerCustomAdvanced",
+    {
+      noise: ["12", 0],
+      guider: ["13", 0],
+      sampler: ["11", 1],
+      sigmas: ["11", 2],
+      latent_image: ["10", 1],
+    },
+    "MiniMax image sampler",
+  );
+  apiPrompt["15"] = node(
+    "H3ImageDecode",
+    { samples: ["14", 0], vae: ["5", 0] },
+    "MiniMax exact T=1 decode",
+  );
+  apiPrompt["16"] = node(
+    "H3ImageFrameSelector",
+    {
+      frames: ["15", 0],
+      strategy: "decode_recommended",
+      manual_index: 0,
+      skip_first_frames: 0,
+      candidate_start: 0,
+      candidate_end: 1,
+      similarity_weight: 0.35,
+      top_k: 1,
+      emit_candidate_batch: false,
+      recommended_index: ["15", 3],
+      ...(input.references.length ? { source_image: ["20", 0] } : {}),
+    },
+    "MiniMax single image output",
+  );
+  apiPrompt["17"] = node(
+    "SaveImage",
+    { images: ["16", 0], filename_prefix: input.filenamePrefix },
+    "Save MiniMax H3 image",
   );
   return apiPrompt;
 }
