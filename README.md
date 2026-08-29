@@ -212,3 +212,8 @@ Per l'accesso diretto dalla LAN, impostare localmente `H3_WEB_HOST=0.0.0.0` e
 dei client autorizzati, per esempio `http://192.168.1.17:3000`. Questa scelta
 espone frontend e API sulla rete locale: usare password Admin robusta e una rete
 fidata. Le impostazioni locali restano nel file `.env`, escluso da Git.
+
+Se Windows Firewall blocca il bridge sul dispositivo remoto, eseguire
+`ENABLE_H3_STUDIO_LAN_FIREWALL.bat` e approvare il popup UAC. La regola apre
+soltanto TCP 3000/8787 sull'indirizzo LAN corrente e accetta esclusivamente
+client della subnet locale; non cambia il profilo generale della rete.
