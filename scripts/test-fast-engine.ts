@@ -285,8 +285,12 @@ const keepAspectI2vRequest = uniqueNode(
 );
 assert.equal(keepAspectSize.inputs.size_mode, "source aspect + megapixels");
 assert.equal(keepAspectSize.inputs.aspect_format, "16:9 landscape");
-assert.equal(keepAspectI2vRequest.inputs.llm_media_context, "IMAGES");
-assert.equal(keepAspectI2vRequest.inputs.context_resolution, 384);
+assert.equal(keepAspectI2vRequest.inputs.llm_media_context, "OFF - text only");
+assert.equal(keepAspectI2vRequest.inputs.context_resolution, 512);
+assert.match(
+  String(keepAspectI2vRequest.inputs.natural_prompt),
+  /I2V CONTINUITY LOCK: Use Picture 1 as the exact opening frame/,
+);
 const keepAspectKeyframes = prepareStudioJob(
   source,
   {

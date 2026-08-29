@@ -8,7 +8,7 @@ Questo documento descrive il mapping verificato tra H3 Studio e il workflow
 | Modalità Studio | Valore workflow | Asset minimi | Routing |
 |---|---|---|---|
 | Text to video | `T2V` | Nessuno | Il Media Loader viene svuotato intenzionalmente. |
-| Image to video | `I2V` | Picture 1 | Picture 1 diventa il frame iniziale ed è inviata al planner Vision a 384 px. |
+| Image to video | `I2V` | Picture 1 | Picture 1 diventa il frame iniziale; il planner resta text-only. |
 | Reference | `R2V` | Almeno un'immagine, video o audio | Gli asset seguono l'ordine del Media Loader e i ruoli dichiarati. |
 | Keyframes | `KEYFRAMES` | Almeno Picture 1 | Picture 1..N diventano anchor sulla timeline globale; posizioni `AUTO` o percentuali esplicite. |
 | Continue video | `VIDEO EXTENSION` | Video 1, massimo 15 secondi nello Studio | Il router continua dall'ultimo frame decodificato. |
@@ -34,15 +34,16 @@ inattivi e ricompatta localmente i marker `<Picture N>`, `<Video N>` e `<Audio N
 Un video con soundtrack accoppiata rimane un unico blocco fisico, quindi video e
 audio abbinati vengono attivati insieme.
 
-## Blocco visivo I2V
+## Blocco di continuità I2V
 
-In I2V il planner riceve soltanto Picture 1 in una copia ridotta a 384 px. La
-riduzione riguarda esclusivamente l'analisi LLM: il sampler H3 continua a usare
-l'immagine originale. Identità, volto, corpo, capelli, abbigliamento o stato di
-vestizione, oggetti, ambiente, luce, composizione e punto macchina sono trattati
-come fatti autorevoli. Con un solo shot il parser elimina inoltre eventuali
-`[Shot 2+]` inventati dal planner, conservandone soltanto le azioni come beat
-temporali continui dentro `[Shot 1]`.
+In I2V il planner riceve solo testo: Picture 1 resta collegata direttamente al
+conditioning H3 come frame iniziale e non passa dal backend LLM. Lo Studio
+aggiunge al prompt una direttiva che impone di conservare identità, volto, corpo,
+capelli, abbigliamento, colori, ambiente, composizione e stile, animando soltanto
+l'azione richiesta. Questo evita di richiedere capacità Vision ai backend GGUF
+text-only. Con un solo shot il parser elimina inoltre eventuali `[Shot 2+]`
+inventati dal planner, conservandone soltanto le azioni come beat temporali
+continui dentro `[Shot 1]`.
 
 ## Invarianti dello Studio
 

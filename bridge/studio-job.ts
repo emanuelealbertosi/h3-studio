@@ -401,6 +401,9 @@ function normalizeRequest(value: unknown): StudioJobRequest {
 
 function audioPolicyPrompt(request: StudioJobRequest) {
   let prompt = request.prompt;
+  if (request.generationMode === "I2V") {
+    prompt += "\n\nI2V CONTINUITY LOCK: Use Picture 1 as the exact opening frame. Preserve the same subject identity, face, body, hair, outfit, colors, environment, composition and visual style. Animate only the action explicitly requested. Do not introduce an unrequested cut, camera-angle change, outfit change, scene change or new subject.";
+  }
   if (request.generationMode === "VIDEO EXTENSION") {
     prompt += "\n\nSEAMLESS START: Begin from the exact final state of Video 1 and preserve visual and motion continuity through the first second. No cut, scene reset, teleport or pose reset. Then transition naturally into the requested action and camera direction.";
   }
@@ -614,10 +617,8 @@ export function prepareStudioJob(
     requestNode.inputs.shot_count = request.shotCount;
     requestNode.inputs.max_auto_shots = request.shotCount;
     requestNode.inputs.shot_seconds = request.durationSeconds;
-    requestNode.inputs.llm_media_context =
-      request.generationMode === "I2V" ? "IMAGES" : "OFF - text only";
-    requestNode.inputs.context_resolution =
-      request.generationMode === "I2V" ? 384 : 512;
+    requestNode.inputs.llm_media_context = "OFF - text only";
+    requestNode.inputs.context_resolution = 512;
     requestNode.inputs.audio_1_role = audioRouting.role;
     requestNode.inputs.keyframe_positions = request.keyframePositions;
     requestNode.inputs.source_video_audio = request.sourceVideoAudio;

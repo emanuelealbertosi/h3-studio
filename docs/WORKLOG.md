@@ -1,5 +1,11 @@
 # Worklog
 
+### 29 agosto 2026 — Planner I2V compatibile con GGUF text-only
+
+- Rimossa Picture 1 dall'input del planner LLM dopo che il backend DaSiWa/llama.cpp ha rifiutato il modello GGUF in modalità Vision.
+- Picture 1 resta il frame iniziale effettivo del conditioning I2V; il prompt riceve un continuity lock testuale contro cambi non richiesti di identità, abiti, scena e camera.
+- Aggiornata la regressione FAST/I2V per fissare `OFF - text only`, contesto 512 e la presenza della direttiva di continuità.
+
 ### 29 agosto 2026 — Routing deterministico immagine Chat → I2V/R2V
 
 - La Chat recupera ora anche “ultima/precedente immagine” e varianti equivalenti, evitando prompt `Picture 1` senza media allegato.
@@ -13,9 +19,9 @@
 - Il default resta 10 secondi, FAST, 0,5 MP e un candidato; la Chat può pianificare fino a 12 shot e 180 secondi complessivi.
 - Aggiunte regressioni per default, 30, 120, 180 secondi e rifiuto delle durate superiori.
 
-### 29 agosto 2026 — I2V con visual lock e monoshot continuo
+### 29 agosto 2026 — I2V con visual lock e monoshot continuo (visual input poi rimosso)
 
-- Picture 1 viene ora inviata al planner Vision a 384 px solo in I2V; il render H3 continua a usare la sorgente originale.
+- Il primo tentativo inviava Picture 1 al planner Vision a 384 px; è stato poi sostituito dal lock testuale descritto sopra per compatibilità GGUF.
 - Il planner non può più inventare outfit, ambienti, luce, composizione o punto macchina quando non sono richiesti dall'utente.
 - Nei job I2V da uno shot, il parser converte automaticamente eventuali `[Shot 2+]` in azioni temporali dello stesso `[Shot 1]`, evitando tagli e reframing impliciti.
 - Aggiunte regressioni automatiche sul routing Vision e sul flattening dei marker interni.
