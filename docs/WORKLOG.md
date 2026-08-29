@@ -1,5 +1,12 @@
 # Worklog
 
+### 29 agosto 2026 — TTS Chat: battuta separata dalle istruzioni
+
+- La Chat estrae letteralmente il parlato fra virgolette dopo “dice/pronuncia/recita” invece di affidare a Higgs l'intero prompt descrittivo prodotto dall'LLM.
+- Il confine TTS elimina in modo difensivo tag H3 `<d>[Lingua] ...</d>` e testo esterno, conservando soltanto la battuta e gli eventuali token Higgs validi.
+- “Arrabbiato/gridando” viene tradotto nei token `<|emotion:anger|> <|style:shouting|>`; reference e trascrizione restano dedicate esclusivamente al cloning vocale.
+- Aggiunte regressioni Chat e Audio sul prompt reale osservato durante il test italiano con reference WhatsApp.
+
 ### 29 agosto 2026 — Keyframes multipli dalla Chat
 
 - Frasi su frame iniziali, intermedi o finali instradano deterministicamente le Picture al modo `KEYFRAMES`, senza confonderle con I2V o Reference.

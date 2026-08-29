@@ -5,6 +5,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { AudioJobRepository } from "../bridge/audio-job-repository.js";
 import {
+  normalizeHiggsTtsText,
   normalizeMusicPlan,
   speechTrackMixFilter,
   stereoCodecArgs,
@@ -42,6 +43,14 @@ const audio = new AudioJobRepository(jobs.databasePath);
   assert.match(audioServiceSource, /auto_f0_adjust=/);
   assert.match(audioServiceSource, /stopAudioCppProcess/);
   assert.match(audioServiceSource, /Canzone col timbro scelto pronta · modelli scaricati/);
+  assert.equal(
+    normalizeHiggsTtsText('<d>[Italian] Vi faccio secchi brutti bastardi!</d> The speaker delivers the line with an angry expression.'),
+    "Vi faccio secchi brutti bastardi!",
+  );
+  assert.equal(
+    normalizeHiggsTtsText('<|emotion:anger|> <d>[Italian] Basta!</d> Unused direction.'),
+    "<|emotion:anger|> Basta!",
+  );
   const speechFilter = speechTrackMixFilter({
     durationSeconds: 12.345,
     voiceGain: 1,

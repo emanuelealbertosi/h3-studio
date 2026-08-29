@@ -263,6 +263,27 @@ export function extractRequestedLyrics(request: string) {
   return VOCAL_MUSIC_PATTERN.test(request) && quoted.length ? quoted.join("\n") : "";
 }
 
+const ANGRY_SPEECH_PATTERN = /\b(?:arrabbiat[oaie]?|furios[oaie]?|rabbia|anger|angry|furious|gridando|urla(?:ndo)?|shout(?:ing)?)\b/i;
+
+export function resolveChatTtsText(plannedText: string, request: string) {
+  const sourceRequest = String(request ?? "");
+  const contextual = sourceRequest.match(/(?:dice|dica|dire|pronuncia|recita|legge|says?|speak(?:s|ing)?|read(?:s|ing)?)\b[^"“«]{0,120}["“«]([^"”»]{1,20000})["”»]/i)?.[1];
+  const quoted = [...sourceRequest.matchAll(/["“«]([^"”»]{1,20000})["”»]/g)]
+    .map((match) => match[1].trim())
+    .filter(Boolean)
+    .at(-1);
+  const tagged = [...String(plannedText ?? "").matchAll(/<d>\s*(?:\[[^\]]+\]\s*)?([\s\S]*?)\s*<\/d>/gi)]
+    .map((match) => match[1].trim())
+    .filter(Boolean)
+    .join(" ");
+  const speech = contextual?.trim() || quoted || tagged || String(plannedText ?? "").trim();
+  const existingTokens = String(plannedText ?? "").match(/^(?:\s*<\|(?:emotion|style|prosody|sfx):[^>]+\|>\s*)+/i)?.[0].trim() ?? "";
+  const styleTokens = existingTokens || (ANGRY_SPEECH_PATTERN.test(sourceRequest)
+    ? "<|emotion:anger|> <|style:shouting|>"
+    : "");
+  return [styleTokens, speech].filter(Boolean).join(" ");
+}
+
 export function preserveMusicIntent(action: PlannedAction | null, request: string) {
   if (action?.type !== "generate_music") return action;
   const detected = musicInstrumentalIntent(request);
@@ -706,11 +727,12 @@ export class ChatService {
       if (plan.type === "generate_tts") {
         await this.comfy.chatUnload().catch(() => undefined);
         const reference = attachments.find((item) => item.kind === "audio");
+        const ttsText = resolveChatTtsText(plan.prompt, originalRequest ?? "");
         const job = await this.audioStudio.submit({
-          kind: "tts", projectId, text: plan.prompt,
+          kind: "tts", projectId, text: ttsText,
           referenceFile: reference?.file,
         });
-        return { type: plan.type, prompt: plan.prompt, jobId: job?.id, status: "started" };
+        return { type: plan.type, prompt: ttsText, jobId: job?.id, status: "started" };
       }
       await this.comfy.chatUnload();
       if (plan.type === "generate_video") {

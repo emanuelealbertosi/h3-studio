@@ -67,6 +67,13 @@ popup è disponibile per candidati e batch negli Studio Video e Immagini.
 I prompt di produzione sono generati in inglese, mentre la risposta
 dell'assistente resta in italiano.
 
+Per il TTS, il testo fra virgolette dopo espressioni come **dice**, **pronuncia**
+o **recita** è autorevole e viene passato letteralmente a Higgs. Le descrizioni
+del planner e i tag video `<d>[Lingua] ...</d>` vengono rimossi prima della
+sintesi, così non possono essere letti ad alta voce. Indicazioni evidenti come
+**arrabbiato** o **gridando** diventano token emotivi Higgs; l'eventuale audio
+allegato e la sua trascrizione servono esclusivamente a clonare il timbro.
+
 ## Runtime e memoria
 
 Ogni conversazione conserva cronologia e memoria proprie in SQLite, ma non viene

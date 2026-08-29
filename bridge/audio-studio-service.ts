@@ -127,6 +127,17 @@ function text(value: unknown, label: string, minimum: number, maximum: number) {
   return normalized;
 }
 
+export function normalizeHiggsTtsText(value: unknown) {
+  const source = typeof value === "string" ? value.trim() : "";
+  if (!source) return "";
+  const higgsTokens = source.match(/^(?:\s*<\|(?:emotion|style|prosody|sfx):[^>]+\|>\s*)+/i)?.[0].trim() ?? "";
+  const dialogue = [...source.matchAll(/<d>\s*(?:\[[^\]]+\]\s*)?([\s\S]*?)\s*<\/d>/gi)]
+    .map((match) => match[1].trim())
+    .filter(Boolean);
+  if (dialogue.length) return [higgsTokens, dialogue.join(" ")].filter(Boolean).join(" ");
+  return source;
+}
+
 function boundedNumber(value: unknown, label: string, minimum: number, maximum: number) {
   const normalized = Number(value);
   if (!Number.isFinite(normalized) || normalized < minimum || normalized > maximum) {
@@ -467,7 +478,7 @@ export class AudioStudioService {
     const projectId = text(value.projectId, "Progetto", 1, 100);
     const settings = await this.runtimeSettings.get();
     if (kind === "tts") {
-      const prompt = text(value.text, "Testo TTS", 1, 20_000);
+      const prompt = text(normalizeHiggsTtsText(value.text), "Testo TTS", 1, 20_000);
       const referenceFile = typeof value.referenceFile === "string" && value.referenceFile.trim()
         ? value.referenceFile.trim()
         : null;

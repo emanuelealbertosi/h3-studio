@@ -12,6 +12,7 @@ import {
   normalizePlan,
   preserveMusicIntent,
   resolveChatKeyframePositions,
+  resolveChatTtsText,
   resolveChatVideoMode,
   resolveChatVideoTiming,
   routeAction,
@@ -117,6 +118,14 @@ try {
   assert.equal(musicInstrumentalIntent(vocalRequest), false);
   assert.equal(extractRequestedLyrics(vocalRequest), "Buongiornissimo caffè, Buongiornissimo caffeee");
   assert.equal(musicInstrumentalIntent("Crea un tema jazz strumentale senza voce"), true);
+  assert.equal(
+    resolveChatTtsText(
+      '<d>[Italian] Vi faccio secchi brutti bastardi!</d> The speaker delivers the line with an angry and intense expression.',
+      'usa questo audio come riferimento per creare un parlato in italiano che dice arrabbiato "Vi faccio secchi brutti bastardi!"',
+    ),
+    "<|emotion:anger|> <|style:shouting|> Vi faccio secchi brutti bastardi!",
+  );
+  assert.equal(resolveChatTtsText("Questa è una prova.", "Crea un parlato neutro"), "Questa è una prova.");
   const preservedSong = preserveMusicIntent({
     type: "generate_music",
     prompt: "Sophisticated jazz with warm female vocal",
@@ -231,6 +240,7 @@ try {
   assert.match(service, /preserveMusicIntent/);
   assert.match(service, /lyrics: plan\.lyrics/);
   assert.match(service, /referenceFile: reference\?\.file/);
+  assert.match(service, /const ttsText = resolveChatTtsText\(plan\.prompt, originalRequest \?\? ""\)/);
   assert.match(service, /video_editing: \{ type: "generate_video", videoMode: "VIDEO EDITING" \}/);
   assert.match(service, /catch \(error\) \{\s+await this\.comfy\.chatUnload\(\)\.catch/);
   assert.match(audioService, /Trascrizione reference con Whisper/);
