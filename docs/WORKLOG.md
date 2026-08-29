@@ -1,5 +1,13 @@
 # Worklog
 
+### 29 agosto 2026 — Riparazione schema Inpaint dopo rollback Bernini
+
+- Corretto il conflitto storico sulla migrazione SQLite `24`: alcune installazioni
+  la registravano dalla build Bernini poi rimossa e saltavano le colonne Inpaint.
+- Il repository verifica ora le colonne reali con `PRAGMA table_info(jobs)` e
+  aggiunge in modo idempotente i quattro campi SAM3 mancanti.
+- La riparazione viene tracciata come migrazione `25` ed è coperta dal contratto Chat.
+
 ### 29 agosto 2026 — Keep Aspect nel Video Edit da Chat
 
 - Il router Chat riconosce `mantieni le proporzioni`, `mantieni il formato` e

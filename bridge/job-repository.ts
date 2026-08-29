@@ -181,8 +181,48 @@ export class JobRepository {
         throw error;
       }
     }
+    this.ensureInpaintColumns();
     this.ensureFifteenSecondJobs();
     this.database.exec("PRAGMA optimize");
+  }
+
+  private ensureInpaintColumns() {
+    const columns = new Set(
+      (
+        this.database.prepare("PRAGMA table_info(jobs)").all() as Array<{ name: string }>
+      ).map((column) => column.name),
+    );
+    const missing = [
+      {
+        name: "inpaint_target",
+        statement: "ALTER TABLE jobs ADD COLUMN inpaint_target TEXT NOT NULL DEFAULT ''",
+      },
+      {
+        name: "inpaint_mask_grow",
+        statement: `ALTER TABLE jobs ADD COLUMN inpaint_mask_grow INTEGER NOT NULL DEFAULT 8
+          CHECK (inpaint_mask_grow BETWEEN 0 AND 96)`,
+      },
+      {
+        name: "inpaint_start_seconds",
+        statement: `ALTER TABLE jobs ADD COLUMN inpaint_start_seconds REAL NOT NULL DEFAULT 0
+          CHECK (inpaint_start_seconds BETWEEN 0 AND 180)`,
+      },
+      {
+        name: "inpaint_end_seconds",
+        statement: `ALTER TABLE jobs ADD COLUMN inpaint_end_seconds REAL NOT NULL DEFAULT 0
+          CHECK (inpaint_end_seconds BETWEEN 0 AND 180)`,
+      },
+    ].filter((column) => !columns.has(column.name));
+    if (!missing.length) return;
+
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      for (const column of missing) this.database.prepare(column.statement).run();
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   private ensureFifteenSecondJobs() {

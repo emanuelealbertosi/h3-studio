@@ -603,4 +603,12 @@ export const JOB_DATABASE_MIGRATIONS = [
        CHECK (inpaint_end_seconds BETWEEN 0 AND 180)`,
     ],
   },
+  {
+    // Version 24 briefly belonged to the reverted Bernini experiment. Existing
+    // databases may therefore report it as applied without the H3 inpaint
+    // columns. JobRepository repairs the schema by inspecting PRAGMA table_info;
+    // this marker records that compatibility repair for upgraded installs.
+    version: 25,
+    statements: [],
+  },
 ] as const;

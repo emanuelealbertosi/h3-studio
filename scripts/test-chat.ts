@@ -97,7 +97,20 @@ try {
   assert.equal(chat.memoryStatus(project!.id, primary.id).active, false);
   assert.equal(chat.deleteConversation(secondary.id).deleted, true);
   const migration = new DatabaseSync(jobs.databasePath, { readOnly: true });
-  assert.ok(migration.prepare("SELECT version FROM schema_migrations WHERE version = 20").get());
+  assert.ok(migration.prepare("SELECT version FROM schema_migrations WHERE version = 25").get());
+  const jobColumns = new Set(
+    (migration.prepare("PRAGMA table_info(jobs)").all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    ),
+  );
+  for (const column of [
+    "inpaint_target",
+    "inpaint_mask_grow",
+    "inpaint_start_seconds",
+    "inpaint_end_seconds",
+  ]) {
+    assert.ok(jobColumns.has(column), `missing jobs.${column}`);
+  }
   assert.equal(migration.prepare("PRAGMA foreign_key_check").all().length, 0);
   migration.close();
   chat.close(); projects.close(); jobs.close();
