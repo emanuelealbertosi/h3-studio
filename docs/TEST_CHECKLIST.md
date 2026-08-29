@@ -1,12 +1,23 @@
 # H3 Studio — Checklist di collaudo
 
-Aggiornamento: 28 agosto 2026
+Aggiornamento: 29 agosto 2026
 
 ## Legenda
 
 - [x] Eseguito e superato
 - [ ] Da eseguire o da riconfermare dopo una modifica
 - ⚠️ Eseguito, ma fallito o parziale
+
+## Sessione automatica non-GUI — 29 agosto 2026
+
+- [x] Setup/Auth, repository progetti, export timeline FFmpeg, Libreria creativa, media esterni e migrazioni SQLite.
+- [x] Contratti Krea, Image Studio, Chat, Audio Studio, FAST/PDD, post-process, riparazione tempi e controllo runtime LLM.
+- [x] Multishot 1–12 con filtro fisico delle reference per shot, continuazione boundary e riparazione JSON Composer.
+- [x] Cancellazione ComfyUI confinata ai job H3 Studio e helper di riavvio bridge.
+- [x] Workflow bundled sanitizzati senza differenze residue; test layout statico, typecheck e build di produzione superati.
+- ⚠️ Lint non verde: 20 errori e 37 warning già presenti. Errori principali: 17 `react-hooks/set-state-in-effect`, più un caso ciascuno di `preserve-manual-memoization`, `refs` e `rules-of-hooks`. La build e il typecheck restano verdi, ma il debito va corretto separatamente.
+
+Non inclusi in questa sessione: interazioni browser/GUI, render GPU reali, valutazione visiva o sonora, verifica VRAM, LAN/Tailscale e installazione su una seconda macchina.
 
 ## Avvio e Admin
 
@@ -95,6 +106,7 @@ Aggiornamento: 28 agosto 2026
 
 ## Assets e Libreria
 
+- [x] Contratto statico del filtro categorie Libreria e layout responsive.
 - [ ] Filtro Libreria: verificare Tutto, Montaggi, Asset, Immagini, Esterni e Video, inclusi conteggi e stato attivo.
 - [ ] Filtro Libreria: selezionare più elementi, cambiare categoria e verificare che selezione e cancellazione multipla restino coerenti.
 
