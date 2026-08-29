@@ -80,6 +80,15 @@ PICTURE_1_NO_LIPSYNC_LOCK = (
     "while movement may continue in time with <Soundtrack>."
 )
 
+EXACT_AUDIO_DRIVE_LOCK = (
+    "[native exact-audio drive] The clean target audio stream is fixed and "
+    "authoritative. <Subject 1> visibly speaks or performs that exact audio "
+    "with precise phoneme-level lip synchronization, matching every audible "
+    "syllable, pause, breath, timing cue and emotion. Do not rewrite, "
+    "translate, replace or regenerate the supplied audio. When it is silent, "
+    "the mouth rests naturally."
+)
+
 
 def _snap_shot_seconds(value):
     value = int(round(float(value)))
@@ -827,6 +836,45 @@ def _audio_slice(audio, start_seconds, duration_seconds):
     return {"waveform": part, "sample_rate": sr}
 
 
+def _lock_exact_audio_latent(av_latent, audio_vae, audio):
+    """Put source audio in the target AV latent and denoise video only."""
+    import torch
+    import torch.nn.functional as functional
+    import torchaudio
+    import comfy.nested_tensor
+
+    samples = av_latent.get("samples")
+    if samples is None or not getattr(samples, "is_nested", False):
+        raise ValueError(
+            "Exact-audio drive requires a joint MiniMax H3 AV latent.")
+
+    video_latent, audio_template = samples.unbind()[:2]
+    waveform, sample_rate = _normalise_audio(audio)
+    vae_rate = int(getattr(audio_vae, "audio_sample_rate", 32000))
+    if sample_rate != vae_rate:
+        waveform = torchaudio.functional.resample(
+            waveform, sample_rate, vae_rate)
+
+    exact_audio = audio_vae.encode(waveform.movedim(1, -1))
+    target_t = audio_template.shape[-1]
+    if exact_audio.shape[-1] > target_t:
+        exact_audio = exact_audio[..., :target_t]
+    elif exact_audio.shape[-1] < target_t:
+        exact_audio = functional.pad(
+            exact_audio, (0, target_t - exact_audio.shape[-1]))
+    exact_audio = exact_audio.to(
+        device=audio_template.device, dtype=audio_template.dtype)
+
+    locked = dict(av_latent)
+    locked["samples"] = comfy.nested_tensor.NestedTensor(
+        (video_latent, exact_audio))
+    locked["noise_mask"] = comfy.nested_tensor.NestedTensor((
+        torch.ones_like(video_latent),
+        torch.zeros_like(exact_audio),
+    ))
+    return locked
+
+
 def _clone_with_soundtrack(bank, audio_vae, soundtrack_slice):
     clone = h3_refs.RefBank()
     clone.items = list(bank.items)
@@ -1125,6 +1173,7 @@ class H3MusicVideoReferenceMemorySampler(H3MultishotSampler):
 
         audio_output_mode = str(audio_output_mode or "h3_generated")
         original_modes = {"original_music3", "original_soundtrack"}
+        exact_audio_drive = audio_output_mode in original_modes
         hybrid_modes = {
             "music3_base_plus_h3_vocal",
             "soundtrack_base_plus_h3_vocal",
@@ -1203,6 +1252,14 @@ class H3MusicVideoReferenceMemorySampler(H3MultishotSampler):
 
             latent, frame_count = mmh3._empty_av_latent(
                 width, height, frames_per_shot)
+            if exact_audio_drive:
+                latent = _lock_exact_audio_latent(
+                    latent, audio_vae, song_slice)
+                prompt = EXACT_AUDIO_DRIVE_LOCK + "\n\n" + prompt
+                print(
+                    "[H3MusicVideo] native exact-audio latent locked; "
+                    "audio denoise mask=0, video denoise mask=1",
+                    flush=True)
             keyframes = []
             if continuation is not None:
                 keyframes.append({

@@ -367,3 +367,10 @@
 - Corretto il riconoscimento del bridge rilanciato dall'Admin, il cui runtime `tsx` usa il percorso fisico pnpm anziché il collegamento diretto in `node_modules`.
 - Se il bridge della stessa installazione risponde a `/api/health`, `START_H3_STUDIO.bat` lo conserva e avvia soltanto il frontend; un bridge riconosciuto ma non responsivo viene invece sostituito.
 - Restano fail-closed i listener estranei, ambigui o cambiati durante il controllo; aggiunta una regressione Windows che verifica riuso sano, cleanup stale e rifiuto del processo estraneo.
+
+### 29 agosto 2026 — I2V con audio esatto: vero latent lock
+
+- Corretto il falso lip-sync del percorso Immagine + Audio: il sampler non usa più l'audio soltanto come reference temporale da rimuxare.
+- In modalità original_soundtrack ogni slice viene codificata nel target AV latent; la maschera mantiene l'audio pulito e immutabile (0) mentre consente al sampler di generare il video (1).
+- Il conditioning riceve anche un vincolo esplicito fonema/bocca, pause e respiri, senza riscrivere o rigenerare l'audio allegato.
+- Aggiunta una regressione sorgente e verificati compilazione Python, motore FAST/standard, TypeScript e build di produzione.

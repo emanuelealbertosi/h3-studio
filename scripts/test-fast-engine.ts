@@ -25,6 +25,14 @@ const source = JSON.parse(
 const dependencyManifest = JSON.parse(
   await readFile(path.resolve("workflows", "dependencies.json"), "utf8"),
 ) as { items: Array<{ id: string; filenames?: string[] }> };
+const musicVideoSamplerSource = await readFile(
+  path.resolve(
+    "comfyui_nodes",
+    "ComfyUI-H3-Multishot",
+    "h3_music_video.py",
+  ),
+  "utf8",
+);
 const ref2vaPair = FAST_PDD_PAIRS[0];
 const fl2vaPair = FAST_PDD_PAIRS[1];
 
@@ -276,6 +284,12 @@ assert.equal(i2vLipSyncRequest.inputs.audio_1_role, "music_video_lipsync");
 assert.deepEqual(i2vLipSyncSampler.inputs.start_image, ["66", 1]);
 assert.deepEqual(i2vLipSyncSampler.inputs.soundtrack, ["66", 17]);
 assert.equal(i2vLipSyncSampler.inputs.audio_output_mode, "original_soundtrack");
+assert.match(musicVideoSamplerSource, /def _lock_exact_audio_latent\(/);
+assert.match(
+  musicVideoSamplerSource,
+  /torch\.zeros_like\(exact_audio\)/,
+  "Exact-audio mode must preserve the supplied audio latent while video denoises",
+);
 const unknownDurationLipSync = prepareStudioJob(
   source,
   {
