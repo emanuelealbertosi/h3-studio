@@ -12,6 +12,7 @@ import { JobRepository } from "../bridge/job-repository.js";
 import {
   PostprocessService,
   normalizeUpscaleTarget,
+  scaledManualUpscaleDimensions,
   upscalePrompt,
 } from "../bridge/postprocess-service.js";
 
@@ -121,6 +122,36 @@ try {
 
   assert.equal(dimensions(upscalePrompt(originalPrompt, "test/1mp", 1)).inputs.megapixels, 0.98);
   assert.equal(dimensions(upscalePrompt(originalPrompt, "test/2mp", 2)).inputs.megapixels, 1.96);
+  assert.equal(
+    dimensions(upscalePrompt(originalPrompt, "test/format", 1)).inputs.size_mode,
+    "megapixels + format",
+  );
+  const keepAspectPrompt = structuredClone(originalPrompt);
+  dimensions(keepAspectPrompt).inputs.size_mode = "source aspect + megapixels";
+  dimensions(keepAspectPrompt).inputs.aspect_format = "16:9 landscape";
+  const keepAspectUpscale = upscalePrompt(keepAspectPrompt, "test/keep-aspect", 2);
+  assert.equal(dimensions(keepAspectUpscale).inputs.size_mode, "source aspect + megapixels");
+  assert.equal(dimensions(keepAspectUpscale).inputs.megapixels, 1.96);
+  const portraitPrompt = structuredClone(originalPrompt);
+  dimensions(portraitPrompt).inputs.aspect_format = "9:16 portrait";
+  const portraitUpscale = upscalePrompt(portraitPrompt, "test/portrait", 1);
+  assert.equal(dimensions(portraitUpscale).inputs.aspect_format, "9:16 portrait");
+  assert.equal(dimensions(portraitUpscale).inputs.size_mode, "megapixels + format");
+  const manualPrompt = structuredClone(originalPrompt);
+  dimensions(manualPrompt).inputs.size_mode = "manual width x height";
+  dimensions(manualPrompt).inputs.manual_width = 832;
+  dimensions(manualPrompt).inputs.manual_height = 640;
+  const manualUpscale = upscalePrompt(manualPrompt, "test/manual", 1);
+  const manualDimensions = dimensions(manualUpscale).inputs;
+  assert.equal(manualDimensions.size_mode, "manual width x height");
+  assert.ok(
+    Math.abs(
+      Number(manualDimensions.manual_width) / Number(manualDimensions.manual_height) - 832 / 640,
+    ) < 0.03,
+  );
+  const scaledPortrait = scaledManualUpscaleDimensions(640, 832, 2);
+  assert.ok(scaledPortrait.height > scaledPortrait.width);
+  assert.ok(Math.abs(scaledPortrait.width / scaledPortrait.height - 640 / 832) < 0.03);
   const safeReferenceUpscale = upscalePrompt(originalPrompt, "test/reference-safe", 2);
   const safeReferenceSampler = Object.values(safeReferenceUpscale).find(
     (item) => item.class_type === "H3ReferenceMemorySampler",

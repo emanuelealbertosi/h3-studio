@@ -1,5 +1,11 @@
 # Worklog
 
+### 29 agosto 2026 — Upscale con aspect ratio sorgente
+
+- Corretto il post-process Upscale: non forza più `megapixels + format` sui job creati con `Mantieni proporzioni`.
+- I job Keep Aspect conservano il collegamento Picture/Video usato dal nodo dimensionale H3; i formati espliciti mantengono il proprio preset e i vecchi job manuali vengono scalati sulla stessa proporzione.
+- Aggiunte regressioni automatiche per Keep Aspect, 9:16 e dimensioni manuali verticali/orizzontali.
+
 ### 29 agosto 2026 — Filtro categorie nella Libreria
 
 - Aggiunto un filtro compatto con conteggi reali per Tutto, Montaggi, Asset, Immagini, Esterni e Video.

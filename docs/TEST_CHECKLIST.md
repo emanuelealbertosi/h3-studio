@@ -163,6 +163,7 @@ Non inclusi in questa sessione: interazioni browser/GUI, render GPU reali, valut
 
 ## Upscale e Face
 
+- [x] Contratto automatico: Upscale conserva Keep Aspect, formato esplicito e proporzioni dei job manuali.
 - [x] Avvio di un'elaborazione Upscale.
 - [ ] Popup di conferma prima dell'avvio.
 - [ ] Target 1 MP e 2 MP verificati da log e dimensioni finali.

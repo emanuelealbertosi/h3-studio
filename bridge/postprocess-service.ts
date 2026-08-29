@@ -35,6 +35,25 @@ export function workflowMegapixelsForTarget(target: UpscaleTargetMegapixels) {
   return WORKFLOW_TARGET_MEGAPIXELS[target];
 }
 
+export function scaledManualUpscaleDimensions(
+  widthValue: unknown,
+  heightValue: unknown,
+  targetMegapixels: UpscaleTargetMegapixels,
+) {
+  const width = Number(widthValue);
+  const height = Number(heightValue);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw new Error("Dimensioni manuali sorgente non valide");
+  }
+  const ratio = width / height;
+  const targetPixels = workflowMegapixelsForTarget(targetMegapixels) * 1024 * 1024;
+  const snap = (value: number) => Math.max(32, Math.min(4096, Math.round(value / 32) * 32));
+  return {
+    width: snap(Math.sqrt(targetPixels * ratio)),
+    height: snap(Math.sqrt(targetPixels / ratio)),
+  };
+}
+
 function optionalSourceVariantId(value: unknown) {
   if (value === undefined || value === null || value === "") return null;
   if (typeof value !== "string" || value.length > 80) {
@@ -89,7 +108,21 @@ export function upscalePrompt(
   const sampler = node(prompt, "H3ReferenceMemorySampler");
   const saver = node(prompt, "H3SaveContinuation");
   const dimensions = node(prompt, "H3AspectMegapixelSize");
-  dimensions.inputs.size_mode = "megapixels + format";
+  const sourceSizeMode = String(dimensions.inputs.size_mode ?? "megapixels + format");
+  if (sourceSizeMode === "manual width x height") {
+    const scaled = scaledManualUpscaleDimensions(
+      dimensions.inputs.manual_width,
+      dimensions.inputs.manual_height,
+      targetMegapixels,
+    );
+    dimensions.inputs.manual_width = scaled.width;
+    dimensions.inputs.manual_height = scaled.height;
+  } else if (
+    sourceSizeMode !== "source aspect + megapixels"
+    && sourceSizeMode !== "megapixels + format"
+  ) {
+    dimensions.inputs.size_mode = "megapixels + format";
+  }
   dimensions.inputs.megapixels = workflowMegapixelsForTarget(targetMegapixels);
   sampler.inputs.studio_upscale = true;
   sampler.inputs.studio_upscale_model =
