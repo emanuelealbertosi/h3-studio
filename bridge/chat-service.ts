@@ -809,8 +809,6 @@ export class ChatService {
         const audioRole = resolveChatVideoAudioRole(
           requestText, generationMode, audios.length,
         );
-        const exactAudioLipSync = audioRole === "music_video_lipsync";
-        const voiceReferenceDialogue = audioRole === "voice_ref";
         let audioIndex = 0;
         const routedAttachments = attachments.map((attachment) => {
           if (attachment.kind !== "audio") return attachment;
@@ -841,7 +839,10 @@ export class ChatService {
                   : "16:9 landscape",
           seedMode: "random",
           qualityMode: "fast",
-          turboEnabled: !(exactAudioLipSync || voiceReferenceDialogue),
+          // Chat is deliberately predictable: it always uses the configured
+          // standard H3/Hybrid engine at 8 steps. PDD remains an explicit
+          // Studio-only FAST choice.
+          turboEnabled: false,
           mediaState: JSON.stringify(mediaState),
           referenceRoles: "AUTO",
           keyframePositions,

@@ -270,7 +270,9 @@ try {
   assert.match(service, /natural lip synchronization/);
   assert.match(service, /audio_role: audioRole/);
   assert.match(service, /resolveChatVideoAudioRole\(/);
-  assert.match(service, /turboEnabled: !\(exactAudioLipSync \|\| voiceReferenceDialogue\)/);
+  assert.match(service, /PDD remains an explicit[\s\S]*?Studio-only FAST choice/);
+  assert.match(service, /turboEnabled: false/);
+  assert.doesNotMatch(service, /turboEnabled: true/);
   assert.match(service, /resolveChatVideoMode\(/);
   assert.match(service, /KEEP_SOURCE_ASPECT_PATTERN\.test\(requestText\)/);
   assert.match(service, /resolveChatKeyframePositions\(requestText, pictures\.length, timing\.totalSeconds\)/);
