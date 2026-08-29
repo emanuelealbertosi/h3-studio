@@ -66,8 +66,8 @@ Non inclusi in questa sessione: interazioni browser/GUI, render GPU reali, valut
 - [ ] GPU: schedule Video/Audio per-shot verificato dal log `[H3Refs]`.
 - [x] Contratto automatico `Audio esatto + lip-sync`: soundtrack codificato nel latent AV, maschera denoise video=1/audio=0, start frame I2V e fallback standard senza PDD/Turbo.
 - [x] Contratto automatico `Solo voce/timbro`: I2V e Keyframes inoltrano `voice_ref`, conservano il nuovo dialogo del prompt e non copiano le parole della reference.
-- 🟡 GPU: I2V + audio esatto da 34,28 s completato in 4 shot da circa 10 s con processo ComfyUI riavviato dopo il nodo aggiornato, Hybrid INT8, 0,5 MP, 8 step standard e nessun LoRA/PDD. Output: 544×960, 24 fps, 34,125 s, AAC stereo 48 kHz; elaborazione 1.063,9 s. Resta la valutazione visiva.
-- [ ] Sul render lungo verificare lip-sync percepibile, identità, continuità ai tre confini, audio senza tagli e durata finale uguale alla sorgente.
+- [x] GPU: I2V + audio esatto da 34,28 s completato in 4 shot da circa 10 s con processo ComfyUI riavviato dopo il nodo aggiornato, Hybrid INT8, 0,5 MP, 8 step standard e nessun LoRA/PDD. Output: 544×960, 24 fps, 34,125 s, AAC stereo 48 kHz; elaborazione 1.063,9 s.
+- [x] Valutazione visiva del render lungo: lip-sync corretto anche oltre 30 s, identità stabile, nessuno stacco percepibile ai tre confini e audio continuo.
 - [ ] GPU rapido definitivo: I2V + parlato di circa 2 s, primo piano o mezzo busto frontale, per isolare e confermare il movimento labiale.
 - [ ] GPU `Solo voce/timbro`: I2V e Keyframes con reference vocale, battuta diversa scritta nel prompt, voce coerente e parole della reference assenti.
 - [ ] Stress test 6 e 12 shot con recupero dopo riavvio e misurazione VRAM/tempo.
@@ -222,7 +222,7 @@ Non inclusi in questa sessione: interazioni browser/GUI, render GPU reali, valut
 
 1. Persistenza modello, CFG e step Anima/Nova.
 2. Persistenza dei job lasciando e riaprendo lo Studio.
-3. Concludere e valutare il render I2V lip-sync da 34,28 s/4 shot; poi ripetere con audio di circa 2 s.
+3. Test rapido I2V lip-sync con audio di circa 2 s.
 4. Verificare `Solo voce/timbro` su I2V e Keyframes con un dialogo nuovo.
 5. Parlato → brano da Libreria, con verifica durata, stereo e ducking.
 6. Apertura nello Studio del media corretto creato dalla Chat.
