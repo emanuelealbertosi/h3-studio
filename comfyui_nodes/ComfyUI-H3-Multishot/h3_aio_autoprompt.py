@@ -419,6 +419,17 @@ class H3AIOAutopromptRequest:
                 "Audio 1 is added only in the final mux and is not an H3 "
                 "reference. Set every music field to N/A and do not bind "
                 "<Audio 1> in the generated H3 plan.")
+        elif role == "voice_ref":
+            audio_rule = (
+                "Audio 1 is only the voice-identity and vocal-timbre reference "
+                "for the visible speaker; never copy, quote or continue words "
+                "spoken in Audio 1. H3 must generate the dialogue requested in "
+                "the natural prompt, preserving its wording and punctuation "
+                "verbatim inside <d>[Language] ...</d>. Bind the speaking "
+                "subject's voice to <Audio 1> and describe natural precise lip "
+                "synchronization to the newly generated dialogue. For schemas "
+                "with active_ref_audios, include Audio 1 in every shot where "
+                "that subject speaks.")
         else:
             audio_rule = (
                 "Follow the Audio 1 routing role in the media manifest.")
@@ -807,6 +818,7 @@ class H3AIOGenerationRouter:
                 "exact_soundtrack", "exact_soundtrack_plus_h3_sfx",
                 "music_video_lipsync") and audios
             else None)
+        voice, generic = self._route_generic_audio(audios, audio_1_role)
 
         if mode == "T2V":
             print("[H3AIO] mode=T2V; all media ignored.", flush=True)
@@ -816,12 +828,17 @@ class H3AIOGenerationRouter:
                 raise ValueError(
                     "I2V requires Picture 1 in Fantastic H3 Media Loader.")
             print(
-                "[H3AIO] mode=I2V; Picture 1 is the start frame.",
+                "[H3AIO] mode=I2V; Picture 1 is the start frame; "
+                "voice=%s reference_audio=%d."
+                % (voice is not None,
+                   sum(value is not None for value in generic)),
                 flush=True)
-            return ((script, pictures[0], None) + (None,) * 14
-                    + (exact_soundtrack,))
+            return (
+                script, pictures[0], voice,
+                None, None, None, None,
+                None, None, generic[0], generic[1],
+                None, None, None, None, None, None, exact_soundtrack)
 
-        voice, generic = self._route_generic_audio(audios, audio_1_role)
         if mode == "KEYFRAMES":
             if not pictures:
                 raise ValueError(

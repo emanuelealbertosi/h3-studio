@@ -7,7 +7,7 @@ import {
 import type { ImageStudioService } from "./image-studio-service.js";
 import type { AudioStudioService } from "./audio-studio-service.js";
 import type { RuntimeSettingsStore } from "./runtime-settings.js";
-import type { StudioJobService } from "./studio-job.js";
+import type { AudioRoutingRole, GenerationMode, StudioJobService } from "./studio-job.js";
 
 type PlannedAction = {
   type: "generate_video" | "generate_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
@@ -96,6 +96,8 @@ export function resolveChatVideoTiming(requestedDuration?: number) {
 
 const I2V_INTENT_PATTERN = /(?:\b(?:anima(?:re|zione|la|lo)?|animate)\b.{0,100}\b(?:immagine|foto|image|picture)\b|\b(?:trasforma(?:re|la|lo)?|turn)\b.{0,100}\b(?:immagine|foto|image|picture)\b.{0,60}\b(?:video|filmato)\b|\b(?:video|filmato)\b.{0,100}\b(?:da|from|partendo\s+da|starting\s+from)\b.{0,100}\b(?:immagine|foto|image|picture)\b)/i;
 const LIP_SYNC_AUDIO_INTENT_PATTERN = /\b(?:lip[\s-]?sync|sincron(?:izza(?:re)?|izzato|izzazione)\s+(?:il\s+)?(?:labbra|labiale|bocca)|(?:fall[oa]|rendil[oa]|fai\s+(?:la|il|lo))\s+(?:parlare|cantare)|(?:parla|dice|pronuncia|recita|canta)\b.{0,120}\b(?:audio|voce|dialogo|traccia)|(?:audio|voce|dialogo|traccia)\b.{0,120}\b(?:parlare|cantare|labbra|labiale|bocca))\b/i;
+const VOICE_TIMBRE_VIDEO_PATTERN = /\b(?:solo\s+come\s+(?:riferimento\s+(?:di\s+)?)?(?:voce|timbro)|(?:riferimento|reference)\s+(?:di\s+)?(?:voce|vocale|timbro)|(?:voce|timbro)\s+(?:di|dell['’]?)\s*(?:quest[oa]|audio|traccia)|(?:con|usando|usa|utilizza)\s+(?:questa|la|questo|il)\s+(?:voce|timbro)|stessa\s+voce|voice\s+(?:reference|identity|timbre)|same\s+voice)\b/i;
+const EXACT_AUDIO_VIDEO_PATTERN = /\b(?:audio\s+esatto|traccia\s+esatta|preserva\s+(?:esattamente|identic[oa])\s+(?:quest[oa]\s+)?(?:audio|traccia)|(?:usa|riproduci|pronuncia|recita|fai\s+dire)\b.{0,100}\b(?:esattamente|identic[oa]|integralmente)\b.{0,100}\b(?:audio|traccia|allegat[oa])|(?:esattamente|identic[oa]|integralmente)\b.{0,100}\b(?:audio|traccia)\s+(?:in\s+)?allegat[oa])\b/i;
 const REFERENCE_VIDEO_INTENT_PATTERN = /\b(?:come\s+(?:riferimento|reference)|as\s+(?:a\s+)?reference|reference|riferimento|ispirati\s+(?:a|alla|al))\b/i;
 const KEEP_SOURCE_ASPECT_PATTERN = /\b(?:mantieni|conserva|preserva)\s+(?:il\s+)?(?:formato|aspect\s+ratio|proporzioni)|\bkeep\s+(?:the\s+)?(?:aspect\s+ratio|format)\b/i;
 const KEYFRAME_INTENT_PATTERN = /\b(?:key[\s-]?frames?|fotogramm[io]\s+chiave|(?:primo|iniziale|ultimo|finale|intermedi(?:[oae])?)\s+(?:frame|fotogramm[io])|(?:frame|fotogramm[io])\s+(?:iniziale|finale|intermedi(?:[oae])?))\b/i;
@@ -180,6 +182,33 @@ export function resolveChatVideoMode(
   if (requested === "I2V" && pictureCount === 0) return "T2V" as const;
   if (requested === "KEYFRAMES" && pictureCount === 0) return "T2V" as const;
   return requested;
+}
+
+export function resolveChatVideoAudioRole(
+  content: string,
+  generationMode: GenerationMode,
+  audioCount: number,
+): AudioRoutingRole {
+  if (audioCount < 1) return "reference_audio";
+  const text = String(content ?? "");
+  if (
+    (generationMode === "I2V" ||
+      generationMode === "KEYFRAMES" ||
+      generationMode === "R2V") &&
+    VOICE_TIMBRE_VIDEO_PATTERN.test(text)
+  ) {
+    return "voice_ref";
+  }
+  if (
+    (generationMode === "I2V" || generationMode === "R2V") &&
+    (EXACT_AUDIO_VIDEO_PATTERN.test(text) ||
+      LIP_SYNC_AUDIO_INTENT_PATTERN.test(text))
+  ) {
+    return "music_video_lipsync";
+  }
+  return generationMode === "I2V"
+    ? "music_video_lipsync"
+    : "reference_audio";
 }
 
 function extractJson(text: string) {
@@ -761,14 +790,17 @@ export class ChatService {
         const generationMode = resolveChatVideoMode(
           requestText, plan.videoMode, pictures.length, videos.length, audios.length,
         );
-        const exactAudioLipSync =
-          generationMode === "I2V" && audios.length > 0;
+        const audioRole = resolveChatVideoAudioRole(
+          requestText, generationMode, audios.length,
+        );
+        const exactAudioLipSync = audioRole === "music_video_lipsync";
+        const voiceReferenceDialogue = audioRole === "voice_ref";
         let audioIndex = 0;
         const routedAttachments = attachments.map((attachment) => {
           if (attachment.kind !== "audio") return attachment;
           audioIndex += 1;
-          return audioIndex === 1 && exactAudioLipSync
-            ? { ...attachment, audio_role: "music_video_lipsync" as const }
+          return audioIndex === 1
+            ? { ...attachment, audio_role: audioRole }
             : attachment;
         });
         const mediaState = generationMode === "T2V" ? [] : routedAttachments;
@@ -793,7 +825,7 @@ export class ChatService {
                   : "16:9 landscape",
           seedMode: "random",
           qualityMode: "fast",
-          turboEnabled: !exactAudioLipSync,
+          turboEnabled: !(exactAudioLipSync || voiceReferenceDialogue),
           mediaState: JSON.stringify(mediaState),
           referenceRoles: "AUTO",
           keyframePositions,

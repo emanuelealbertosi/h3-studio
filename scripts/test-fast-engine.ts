@@ -290,6 +290,84 @@ assert.match(
   /torch\.zeros_like\(exact_audio\)/,
   "Exact-audio mode must preserve the supplied audio latent while video denoises",
 );
+const aioRouterSource = await readFile(
+  path.resolve(
+    "comfyui_nodes",
+    "ComfyUI-H3-Multishot",
+    "h3_aio_autoprompt.py",
+  ),
+  "utf8",
+);
+assert.match(
+  aioRouterSource,
+  /script, pictures\[0\], voice,/,
+  "I2V must forward Audio 1 when it is routed as voice_ref",
+);
+assert.match(aioRouterSource, /Audio 1 is only the voice-identity/);
+const i2vVoiceReference = prepareStudioJob(
+  source,
+  {
+    ...baseRequest,
+    generationMode: "I2V",
+    mediaState: JSON.stringify([
+      { kind: "picture", file: "speaker.png [input]" },
+      {
+        kind: "audio",
+        file: "voice/timbre.wav [input]",
+        audio_role: "voice_ref",
+      },
+    ]),
+    qualityMode: "fast",
+    turboEnabled: false,
+  },
+  structuredClone(DEFAULT_RUNTIME_SETTINGS),
+  "00000000-0000-4000-8000-000000000022",
+);
+const i2vVoiceRequest = uniqueNode(
+  i2vVoiceReference.candidates[0].prompt,
+  "H3AIOAutopromptRequest",
+);
+const i2vVoiceSampler = uniqueNode(
+  i2vVoiceReference.candidates[0].prompt,
+  "H3ReferenceMemorySampler",
+);
+assert.equal(i2vVoiceReference.engineSettings.profile, "standard");
+assert.equal(i2vVoiceRequest.inputs.audio_1_role, "voice_ref");
+assert.deepEqual(i2vVoiceSampler.inputs.start_image, ["66", 1]);
+assert.deepEqual(i2vVoiceSampler.inputs.voice_ref, ["66", 2]);
+
+const keyframesVoiceReference = prepareStudioJob(
+  source,
+  {
+    ...baseRequest,
+    generationMode: "KEYFRAMES",
+    mediaState: JSON.stringify([
+      { kind: "picture", file: "speaker-start.png [input]" },
+      { kind: "picture", file: "speaker-end.png [input]" },
+      {
+        kind: "audio",
+        file: "voice/timbre.wav [input]",
+        audio_role: "voice_ref",
+      },
+    ]),
+    keyframePositions: "0%, 100%",
+    qualityMode: "fast",
+    turboEnabled: false,
+  },
+  structuredClone(DEFAULT_RUNTIME_SETTINGS),
+  "00000000-0000-4000-8000-000000000023",
+);
+const keyframesVoiceRequest = uniqueNode(
+  keyframesVoiceReference.candidates[0].prompt,
+  "H3AIOAutopromptRequest",
+);
+const keyframesVoiceSampler = uniqueNode(
+  keyframesVoiceReference.candidates[0].prompt,
+  "H3ReferenceMemorySampler",
+);
+assert.equal(keyframesVoiceRequest.inputs.audio_1_role, "voice_ref");
+assert.deepEqual(keyframesVoiceSampler.inputs.voice_ref, ["66", 2]);
+assert.deepEqual(keyframesVoiceSampler.inputs.keyframe_plan, ["66", 16]);
 const unknownDurationLipSync = prepareStudioJob(
   source,
   {

@@ -13,6 +13,7 @@ import {
   preserveMusicIntent,
   resolveChatKeyframePositions,
   resolveChatTtsText,
+  resolveChatVideoAudioRole,
   resolveChatVideoMode,
   resolveChatVideoTiming,
   routeAction,
@@ -176,6 +177,34 @@ try {
   assert.equal(resolveChatVideoMode("usa questa immagine come ultimo frame", "I2V", 1, 0, 0), "KEYFRAMES");
   assert.equal(resolveChatVideoMode("usa le tre immagini come keyframe intermedi", "T2V", 3, 0, 0), "KEYFRAMES");
   assert.equal(resolveChatVideoMode("usa come keyframe", "KEYFRAMES", 0, 0, 0), "T2V");
+  assert.equal(
+    resolveChatVideoAudioRole(
+      "usa questa voce solo come riferimento di timbro e falle dire: Ciao mondo",
+      "I2V",
+      1,
+    ),
+    "voice_ref",
+  );
+  assert.equal(
+    resolveChatVideoAudioRole(
+      "usa questo audio come riferimento vocale nei keyframes e falle dire buongiorno",
+      "KEYFRAMES",
+      1,
+    ),
+    "voice_ref",
+  );
+  assert.equal(
+    resolveChatVideoAudioRole(
+      "usa l'immagine come start frame e falle dire esattamente l'audio allegato con lipsync",
+      "I2V",
+      1,
+    ),
+    "music_video_lipsync",
+  );
+  assert.equal(
+    resolveChatVideoAudioRole("anima questa immagine con l'audio allegato", "I2V", 1),
+    "music_video_lipsync",
+  );
   assert.equal(resolveChatKeyframePositions("usa questa immagine come ultimo frame", 1, 10), "100%");
   assert.equal(resolveChatKeyframePositions("usa questa immagine come primo frame", 1, 10), "0%");
   assert.equal(resolveChatKeyframePositions("usa questa immagine come frame intermedio", 1, 10), "50%");
@@ -234,8 +263,9 @@ try {
   assert.match(service, /VOICE_COVER_PATTERN/);
   assert.match(service, /kind: voiceCover \? "voice_cover" : "music"/);
   assert.match(service, /natural lip synchronization/);
-  assert.match(service, /audio_role: "music_video_lipsync"/);
-  assert.match(service, /turboEnabled: !exactAudioLipSync/);
+  assert.match(service, /audio_role: audioRole/);
+  assert.match(service, /resolveChatVideoAudioRole\(/);
+  assert.match(service, /turboEnabled: !\(exactAudioLipSync \|\| voiceReferenceDialogue\)/);
   assert.match(service, /resolveChatVideoMode\(/);
   assert.match(service, /KEEP_SOURCE_ASPECT_PATTERN\.test\(requestText\)/);
   assert.match(service, /resolveChatKeyframePositions\(requestText, pictures\.length, timing\.totalSeconds\)/);

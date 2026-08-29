@@ -374,3 +374,10 @@
 - In modalità original_soundtrack ogni slice viene codificata nel target AV latent; la maschera mantiene l'audio pulito e immutabile (0) mentre consente al sampler di generare il video (1).
 - Il conditioning riceve anche un vincolo esplicito fonema/bocca, pause e respiri, senza riscrivere o rigenerare l'audio allegato.
 - Aggiunta una regressione sorgente e verificati compilazione Python, motore FAST/standard, TypeScript e build di produzione.
+
+### 29 agosto 2026 — I2V/Keyframes con solo timbro vocale
+
+- Corretto il router I2V che scartava Audio 1 anche quando era selezionato come riferimento voce/timbro; Keyframes conserva il percorso già supportato.
+- Il planner tratta ora Audio 1 esclusivamente come identità vocale: le parole della reference non vengono copiate e il nuovo dialogo resta quello scritto nel prompt, con sintassi H3 e lip-sync generato.
+- La Chat distingue richieste di audio esatto da richieste di sola voce/timbro e disattiva FAST/PDD per entrambe le modalità sensibili al parlato.
+- Lo Studio mostra una spiegazione contestuale sotto il selettore; aggiunte regressioni I2V e Keyframes sul cablaggio di start frame, voice_ref e piano keyframe.

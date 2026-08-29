@@ -6762,6 +6762,11 @@ function StudioApp() {
                                   La traccia parlata o musicale viene divisa per shot e preservata identica. In I2V Picture 1 è il frame iniziale esatto; in Reference resta un riferimento visivo.
                                 </small>
                               )}
+                              {asset.audio_role === "voice_ref" && (
+                                <small>
+                                  Usa soltanto voce e timbro dell’audio. Scrivi nel prompt le parole da pronunciare: H3 genera il nuovo dialogo e il relativo lip-sync. Funziona con I2V, Keyframes e Reference.
+                                </small>
+                              )}
                             </label>
                           )}
                           {shotCount > 1 && (
