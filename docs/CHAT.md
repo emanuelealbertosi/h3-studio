@@ -26,6 +26,10 @@ di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
   immagine** o **trasformala in video** forzano I2V e recuperano il media più
   recente. **Usala come riferimento/reference** forza invece R2V. Scrivendo
   **mantieni il formato** in I2V viene conservato anche l'aspect ratio sorgente.
+- Nel Video Edit puoi scrivere **mantieni le proporzioni**, **keep aspect ratio**
+  oppure **mantieni il formato**: la Chat passa `keep source aspect` e usa Video 1
+  per determinare il rapporto. Un formato esplicito come `9:16`, `4:3` o `1:1`
+  prevale invece sulla proposta del planner LLM.
 - Allegando un'immagine e un audio e chiedendo di far parlare o cantare il
   soggetto, la Chat usa I2V con Picture 1 come frame iniziale esatto e conserva
   Audio 1 nel master. Per usare invece l'immagine soltanto come identità o stile,

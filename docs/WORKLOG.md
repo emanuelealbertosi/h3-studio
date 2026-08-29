@@ -1,5 +1,14 @@
 # Worklog
 
+### 29 agosto 2026 — Keep Aspect nel Video Edit da Chat
+
+- Il router Chat riconosce `mantieni le proporzioni`, `mantieni il formato` e
+  `keep aspect ratio` anche per VIDEO EDITING e VIDEO EXTENSION.
+- I rapporti numerici scritti dall'utente (`16:9`, `9:16`, `1:1`, `4:3`, `3:4`)
+  hanno precedenza sul formato proposto dal planner LLM.
+- Aggiunte regressioni specifiche per Video Edit e protezione del T2V, che non
+  può richiedere un aspect ratio sorgente senza media.
+
 ### 29 agosto 2026 — TTS Chat: battuta separata dalle istruzioni
 
 - La Chat estrae letteralmente il parlato fra virgolette dopo “dice/pronuncia/recita” invece di affidare a Higgs l'intero prompt descrittivo prodotto dall'LLM.

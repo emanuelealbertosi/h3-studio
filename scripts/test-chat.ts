@@ -17,6 +17,7 @@ import {
   resolveChatKeyframePositions,
   resolveChatTtsText,
   resolveChatVideoAudioRole,
+  resolveChatVideoAspectFormat,
   resolveChatVideoMode,
   resolveChatVideoTiming,
   routeAction,
@@ -127,6 +128,26 @@ try {
   );
   assert.deepEqual(resolveChatImageH3Settings("crea con Image H3"), { steps: 20, megapixels: 0.98 });
   assert.equal(resolveChatImageAspect("Image H3 formato 4:3", "16:9"), "4:3");
+  assert.equal(
+    resolveChatVideoAspectFormat(
+      "modifica Video 1 e mantieni le proporzioni originali",
+      "VIDEO EDITING",
+      "16:9",
+    ),
+    "keep source aspect",
+  );
+  assert.equal(
+    resolveChatVideoAspectFormat(
+      "modifica Video 1 in formato 9:16",
+      "VIDEO EDITING",
+      "16:9",
+    ),
+    "9:16 portrait",
+  );
+  assert.equal(
+    resolveChatVideoAspectFormat("crea un video e mantieni le proporzioni", "T2V", "4:3"),
+    "4:3 landscape",
+  );
   assert.equal(routeAction(null, "anima"), null);
   const vocalRequest = 'crea una canzone jazz di 10s cantata da una donna che dice "Buongiornissimo caffè, Buongiornissimo caffeee" in italiano';
   assert.equal(musicInstrumentalIntent(vocalRequest), false);
@@ -284,7 +305,7 @@ try {
   assert.match(service, /turboEnabled: false/);
   assert.doesNotMatch(service, /turboEnabled: true/);
   assert.match(service, /resolveChatVideoMode\(/);
-  assert.match(service, /KEEP_SOURCE_ASPECT_PATTERN\.test\(requestText\)/);
+  assert.match(service, /resolveChatVideoAspectFormat\(\s*requestText,\s*generationMode,\s*plan\.aspect/);
   assert.match(service, /resolveChatKeyframePositions\(requestText, pictures\.length, timing\.totalSeconds\)/);
   assert.match(service, /T2V\|I2V\|R2V\|KEYFRAMES\|VIDEO EXTENSION\|VIDEO EDITING/);
   assert.match(service, /audioStudio\.planMusic/);

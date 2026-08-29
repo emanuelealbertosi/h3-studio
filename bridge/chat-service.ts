@@ -104,7 +104,7 @@ const LIP_SYNC_AUDIO_INTENT_PATTERN = /\b(?:lip[\s-]?sync|sincron(?:izza(?:re)?|
 const VOICE_TIMBRE_VIDEO_PATTERN = /\b(?:solo\s+come\s+(?:riferimento\s+(?:di\s+)?)?(?:voce|timbro)|(?:riferimento|reference)\s+(?:di\s+)?(?:voce|vocale|timbro)|(?:voce|timbro)\s+(?:di|dell['’]?)\s*(?:quest[oa]|audio|traccia)|(?:con|usando|usa|utilizza)\s+(?:questa|la|questo|il)\s+(?:voce|timbro)|stessa\s+voce|voice\s+(?:reference|identity|timbre)|same\s+voice)\b/i;
 const EXACT_AUDIO_VIDEO_PATTERN = /\b(?:audio\s+esatto|traccia\s+esatta|preserva\s+(?:esattamente|identic[oa])\s+(?:quest[oa]\s+)?(?:audio|traccia)|(?:usa|riproduci|pronuncia|recita|fai\s+dire)\b.{0,100}\b(?:esattamente|identic[oa]|integralmente)\b.{0,100}\b(?:audio|traccia|allegat[oa])|(?:esattamente|identic[oa]|integralmente)\b.{0,100}\b(?:audio|traccia)\s+(?:in\s+)?allegat[oa])\b/i;
 const REFERENCE_VIDEO_INTENT_PATTERN = /\b(?:come\s+(?:riferimento|reference)|as\s+(?:a\s+)?reference|reference|riferimento|ispirati\s+(?:a|alla|al))\b/i;
-const KEEP_SOURCE_ASPECT_PATTERN = /\b(?:mantieni|conserva|preserva)\s+(?:il\s+)?(?:formato|aspect\s+ratio|proporzioni)|\bkeep\s+(?:the\s+)?(?:aspect\s+ratio|format)\b/i;
+const KEEP_SOURCE_ASPECT_PATTERN = /\b(?:mantieni|conserva|preserva)\s+(?:(?:il|le)\s+)?(?:formato|aspect\s+ratio|proporzioni)|\bkeep\s+(?:the\s+)?(?:aspect\s+ratio|format)\b/i;
 const KEYFRAME_INTENT_PATTERN = /\b(?:key[\s-]?frames?|fotogramm[io]\s+chiave|(?:primo|iniziale|ultimo|finale|intermedi(?:[oae])?)\s+(?:frame|fotogramm[io])|(?:frame|fotogramm[io])\s+(?:iniziale|finale|intermedi(?:[oae])?))\b/i;
 const FIRST_KEYFRAME_PATTERN = /\b(?:(?:primo|iniziale)\s+(?:frame|fotogramma)|(?:frame|fotogramma)\s+iniziale|first\s+(?:frame|keyframe))\b/i;
 const LAST_KEYFRAME_PATTERN = /\b(?:(?:ultimo|finale)\s+(?:frame|fotogramma)|(?:frame|fotogramma)\s+finale|last\s+(?:frame|keyframe)|end\s+frame)\b/i;
@@ -331,6 +331,32 @@ export function resolveChatImageH3Settings(
 export function resolveChatImageAspect(request: string, planned?: PlannedAction["aspect"]) {
   const explicit = String(request).match(/\b(16\s*:\s*9|9\s*:\s*16|1\s*:\s*1|4\s*:\s*3|3\s*:\s*4)\b/);
   return (explicit?.[1]?.replace(/\s+/g, "") as PlannedAction["aspect"] | undefined) ?? planned ?? "16:9";
+}
+
+export function resolveChatVideoAspectFormat(
+  request: string,
+  generationMode: GenerationMode,
+  planned?: PlannedAction["aspect"],
+) {
+  const canKeepSourceAspect = [
+    "I2V",
+    "KEYFRAMES",
+    "VIDEO EXTENSION",
+    "VIDEO EDITING",
+  ].includes(generationMode);
+  if (canKeepSourceAspect && KEEP_SOURCE_ASPECT_PATTERN.test(String(request))) {
+    return "keep source aspect" as const;
+  }
+  const aspect = resolveChatImageAspect(request, planned);
+  return aspect === "9:16"
+    ? "9:16 portrait" as const
+    : aspect === "1:1"
+      ? "1:1 square" as const
+      : aspect === "4:3"
+        ? "4:3 landscape" as const
+        : aspect === "3:4"
+          ? "3:4 portrait" as const
+          : "16:9 landscape" as const;
 }
 
 export function inferVideoInpaintTarget(request: string) {
@@ -890,18 +916,11 @@ export class ChatService {
           durationSeconds: timing.durationSeconds,
           megapixels: 0.5,
           generationMode,
-          aspectFormat:
-            (generationMode === "I2V" || generationMode === "KEYFRAMES") && KEEP_SOURCE_ASPECT_PATTERN.test(requestText)
-              ? "keep source aspect"
-              : plan.aspect === "9:16"
-                ? "9:16 portrait"
-                : plan.aspect === "1:1"
-                  ? "1:1 square"
-                  : plan.aspect === "4:3"
-                    ? "4:3 landscape"
-                    : plan.aspect === "3:4"
-                      ? "3:4 portrait"
-                      : "16:9 landscape",
+          aspectFormat: resolveChatVideoAspectFormat(
+            requestText,
+            generationMode,
+            plan.aspect,
+          ),
           seedMode: "random",
           qualityMode: "fast",
           // Chat is deliberately predictable: it always uses the configured
