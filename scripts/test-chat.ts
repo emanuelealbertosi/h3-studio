@@ -291,6 +291,9 @@ try {
   assert.match(panel, /Crea con/);
   assert.match(panel, /"auto" \| "video" \| "krea" \| "minimax" \| "anima" \| "edit"/);
   assert.match(panel, /trackedActions/);
+  assert.match(panel, /Connessione temporaneamente persa · nuovo tentativo automatico/);
+  assert.match(panel, /if \(job\.fetchError\) return true/);
+  assert.doesNotMatch(panel, /tracked\?\.fetchError \|\| action\?\.status === "failed"/);
   assert.match(panel, /\/api\/image-jobs\/\$\{action\.jobId\}/);
   assert.match(panel, /\/api\/audio-jobs\/\$\{action\.jobId\}/);
   assert.match(panel, /audio\/\*/);

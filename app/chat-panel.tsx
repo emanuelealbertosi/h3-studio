@@ -138,7 +138,10 @@ function terminalCandidate(candidate: ChatTrackedCandidate | undefined) {
 
 function trackedJobActive(job: ChatTrackedJob | undefined) {
   if (!job) return true;
-  if (job.fetchError) return false;
+  // A network error does not mean the ComfyUI job failed. Keep polling while
+  // the bridge reconnects; the authoritative job/candidate status decides
+  // whether a render is terminal.
+  if (job.fetchError) return true;
   return job.candidates.length > 0 && job.candidates.some((candidate) => !terminalCandidate(candidate));
 }
 
@@ -296,12 +299,20 @@ export default function ChatPanel({
         try {
           const response = await fetch(`${bridgeUrl}${endpoint}`, { cache: "no-store" });
           const payload = await response.json() as { job?: Omit<ChatTrackedJob, "kind"> | AudioJob; error?: string };
-          if (!response.ok || !payload.job) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+          if (!response.ok || !payload.job) {
+            const message = payload.error ?? `Bridge HTTP ${response.status}`;
+            return [action.jobId!, {
+              id: action.jobId!, kind, status: "failed",
+              candidates: [{ index: 0, status: "failed", error: message }],
+            }];
+          }
           return [action.jobId!, isAudio ? trackedAudioJob(payload.job as AudioJob) : { ...payload.job as Omit<ChatTrackedJob, "kind">, kind }];
         } catch (error) {
+          const detail = error instanceof Error ? error.message : "Bridge non raggiungibile";
           return [action.jobId!, {
-            id: action.jobId!, kind, status: "failed", candidates: [],
-            fetchError: error instanceof Error ? error.message : "Job non disponibile",
+            id: action.jobId!, kind, status: "pending",
+            candidates: [{ index: 0, status: "submitted", phaseLabel: "Riconnessione al bridge…" }],
+            fetchError: `Connessione temporaneamente persa · nuovo tentativo automatico (${detail})`,
           }];
         }
       }));
@@ -745,7 +756,7 @@ export default function ChatPanel({
           const candidate = tracked?.candidates[0];
           const actionActive = Boolean(action?.jobId && trackedJobActive(tracked));
           const ready = candidate?.status === "ready" && Boolean(candidate.output?.mediaPath);
-          const failed = Boolean(tracked?.fetchError || action?.status === "failed" || candidate?.status === "failed" || candidate?.status === "cancelled");
+          const failed = Boolean(action?.status === "failed" || candidate?.status === "failed" || candidate?.status === "cancelled");
           const progress = typeof candidate?.progress === "number" ? Math.max(0, Math.min(100, Math.round(candidate.progress))) : null;
           const exact = candidate?.progressExact === true && progress !== null;
           const mediaUrl = candidate?.output?.mediaPath ? `${bridgeUrl}${candidate.output.mediaPath}` : null;
