@@ -151,6 +151,14 @@ try {
   );
   assert.equal(
     resolveChatVideoAspectFormat(
+      "modifica il video in allegato mantenedo il formato",
+      "VIDEO EDITING",
+      "16:9",
+    ),
+    "keep source aspect",
+  );
+  assert.equal(
+    resolveChatVideoAspectFormat(
       "modifica Video 1 in formato 9:16",
       "VIDEO EDITING",
       "16:9",
