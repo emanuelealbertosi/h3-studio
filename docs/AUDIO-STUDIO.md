@@ -54,9 +54,9 @@ caption tecnica e lyrics, entrambe modificabili.
 
 ## Music video e lip-sync H3
 
-Un brano completato o importato può essere inviato al Video Studio e impostato,
-nella card `Audio 1`, come **Music video + lip-sync**. Non è un semplice mux e
-non chiede a MiniMax Music di creare un secondo brano:
+Un parlato, brano o audio importato può essere inviato al Video Studio e
+impostato, nella card `Audio 1`, come **Audio esatto + lip-sync (I2V/R2V)**.
+Non è un semplice mux e non chiede a H3 di ricreare la traccia:
 
 - la durata rilevata determina automaticamente il numero di shot H3;
 - il sampler riceve per ogni shot la porzione temporale corrispondente come
@@ -69,9 +69,11 @@ non chiede a MiniMax Music di creare un secondo brano:
 - PDD/Turbo viene escluso automaticamente perché non è compatibile con il
   sampler musicale; il preset FAST diventa standard 8-step.
 
-La modalità richiede `Reference`, un `Audio 1` con durata leggibile e al
-massimo 12 shot. Un'immagine del cantante può essere aggiunta come Picture
-reference. **Soundtrack esatto** resta disponibile quando serve soltanto
+La modalità accetta `I2V` oppure `Reference` e al massimo 12 shot. In I2V
+`Picture 1` è il frame iniziale esatto; in Reference è una reference visiva.
+Se la durata dell'audio è nota, gli shot vengono calcolati automaticamente;
+altrimenti restano validi durata e numero di shot scelti nello Studio.
+**Soundtrack esatto** resta disponibile quando serve soltanto
 conservare/muxare l'audio senza il condizionamento temporale dedicato al
 lip-sync.
 
@@ -118,12 +120,12 @@ possono cambiare root, percorsi dei modelli, backend, step e opzioni F0.
 
 ## Voce H3 e lip-sync
 
-Per un video con un soggetto parlante, allegare una reference vocale nella Chat
-e chiedere esplicitamente chi deve parlare e cosa deve dire. Il router seleziona
-Reference H3 anche in assenza di immagini, associa `<Audio 1>` alla voce del
-soggetto, conserva il dialogo nel tag `<d>[Lingua] ...</d>` e richiede che il
-soggetto parli fisicamente con sincronizzazione labiale naturale. La reference
-non viene trattata come musica di sottofondo.
+Per un video con un soggetto parlante, allegare l'immagine iniziale e l'audio
+nella Chat e chiedere esplicitamente di animare l'immagine con quel parlato.
+Il router seleziona I2V, mantiene Picture 1 sul frame zero, inietta porzioni
+temporali dell'audio nel sampler e conserva la traccia originale nel master.
+Senza immagine, oppure chiedendo esplicitamente un riferimento, resta
+disponibile Reference H3.
 
 ## Stati e cancellazione
 

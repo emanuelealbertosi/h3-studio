@@ -26,6 +26,10 @@ di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
   immagine** o **trasformala in video** forzano I2V e recuperano il media più
   recente. **Usala come riferimento/reference** forza invece R2V. Scrivendo
   **mantieni il formato** in I2V viene conservato anche l'aspect ratio sorgente.
+- Allegando un'immagine e un audio e chiedendo di far parlare o cantare il
+  soggetto, la Chat usa I2V con Picture 1 come frame iniziale esatto e conserva
+  Audio 1 nel master. Per usare invece l'immagine soltanto come identità o stile,
+  scrivi esplicitamente **usa come riferimento**: in quel caso viene scelto R2V.
 - **Usa questa immagine come ultimo frame** attiva Keyframes al `100%`.
   Con più Picture, **usale come keyframe** le distribuisce nell'ordine di
   allegato da `0%` a `100%`; aggiungendo **intermedi** le colloca solo fra gli

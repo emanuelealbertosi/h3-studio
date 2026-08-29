@@ -170,7 +170,9 @@ try {
   assert.equal(resolveChatVideoMode("anima l'immagine precedente", "R2V", 1, 0, 0), "I2V");
   assert.equal(resolveChatVideoMode("crea un video da questa ultima immagine", "T2V", 1, 0, 0), "I2V");
   assert.equal(resolveChatVideoMode("usa questa immagine come riferimento", "I2V", 1, 0, 0), "R2V");
-  assert.equal(resolveChatVideoMode("falla parlare con questa voce", "I2V", 1, 0, 1), "R2V");
+  assert.equal(resolveChatVideoMode("falla parlare con questa voce", "I2V", 1, 0, 1), "I2V");
+  assert.equal(resolveChatVideoMode("falla parlare con questa voce", "R2V", 0, 0, 1), "R2V");
+  assert.equal(resolveChatVideoMode("usa questa immagine come riferimento e questa voce", "I2V", 1, 0, 1), "R2V");
   assert.equal(resolveChatVideoMode("usa questa immagine come ultimo frame", "I2V", 1, 0, 0), "KEYFRAMES");
   assert.equal(resolveChatVideoMode("usa le tre immagini come keyframe intermedi", "T2V", 3, 0, 0), "KEYFRAMES");
   assert.equal(resolveChatVideoMode("usa come keyframe", "KEYFRAMES", 0, 0, 0), "T2V");
@@ -232,6 +234,8 @@ try {
   assert.match(service, /VOICE_COVER_PATTERN/);
   assert.match(service, /kind: voiceCover \? "voice_cover" : "music"/);
   assert.match(service, /natural lip synchronization/);
+  assert.match(service, /audio_role: "music_video_lipsync"/);
+  assert.match(service, /turboEnabled: !exactAudioLipSync/);
   assert.match(service, /resolveChatVideoMode\(/);
   assert.match(service, /KEEP_SOURCE_ASPECT_PATTERN\.test\(requestText\)/);
   assert.match(service, /resolveChatKeyframePositions\(requestText, pictures\.length, timing\.totalSeconds\)/);

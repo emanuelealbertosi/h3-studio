@@ -336,21 +336,20 @@ function normalizeRequest(value: unknown): StudioJobRequest {
     throw new Error("Reference richiede almeno un asset");
   }
   if (audioRouting.role === "music_video_lipsync") {
-    if (generationMode !== "R2V") {
-      throw new Error("Music video + lip-sync richiede la modalità Reference");
-    }
-    if (!audioRouting.duration || audioRouting.duration <= 0) {
+    if (generationMode !== "I2V" && generationMode !== "R2V") {
       throw new Error(
-        "Music video + lip-sync richiede un Audio 1 con durata rilevata",
+        "Audio esatto + lip-sync richiede I2V oppure Reference",
       );
     }
-    shotCount = Math.ceil(
-      audioRouting.duration / EFFECTIVE_SHOT_SECONDS[durationSeconds],
-    );
-    if (shotCount > 12) {
-      throw new Error(
-        "Il brano richiede più di 12 shot: scegli shot da 15s o accorcia l’audio",
+    if (audioRouting.duration && audioRouting.duration > 0) {
+      shotCount = Math.ceil(
+        audioRouting.duration / EFFECTIVE_SHOT_SECONDS[durationSeconds],
       );
+      if (shotCount > 12) {
+        throw new Error(
+          "La traccia richiede più di 12 shot: scegli shot da 15s o accorcia l’audio",
+        );
+      }
     }
   }
 

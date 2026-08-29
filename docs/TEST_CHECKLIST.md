@@ -159,7 +159,8 @@ Non inclusi in questa sessione: interazioni browser/GUI, render GPU reali, valut
 - [ ] Verifica somiglianza timbrica senza perdita evidente di parole, melodia o timing.
 - [ ] Interruzione durante separazione e Seed-VC con rilascio VRAM.
 - [ ] Chat: audio vocale + richiesta di canzone con «mia voce/mio timbro» instrada la conversione timbrica.
-- [ ] Chat: audio vocale + richiesta Video produce R2V, dialogo letterale e lip-sync del soggetto corretto.
+- [x] Contratto Chat: immagine + audio + richiesta di parlato produce I2V, Audio 1 esatto, standard 8-step e Turbo/PDD disattivati.
+- [ ] Collaudo GPU Chat: Picture 1 coincide col frame iniziale e il soggetto segue correttamente il parlato allegato.
 
 ## Upscale e Face
 

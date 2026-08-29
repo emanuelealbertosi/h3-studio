@@ -241,26 +241,60 @@ assert.equal(musicSampler.inputs.trim_to_soundtrack, true);
 assert.equal(musicSampler.inputs.pdd_acc_file, undefined);
 assert.equal(musicSampler.inputs.keyframe_plan, undefined);
 assert.equal(publicDryRun(musicVideo).audioRoutingRole, "music_video_lipsync");
-assert.throws(
-  () => prepareStudioJob(
-    source,
-    {
-      ...baseRequest,
-      generationMode: "R2V",
-      mediaState: JSON.stringify([
-        {
-          kind: "audio",
-          file: "music/unknown.flac [input]",
-          audio_role: "music_video_lipsync",
-        },
-      ]),
-      qualityMode: "fast",
-      turboEnabled: false,
-    },
-    structuredClone(DEFAULT_RUNTIME_SETTINGS),
-  ),
-  /durata rilevata/i,
+const i2vLipSync = prepareStudioJob(
+  source,
+  {
+    ...baseRequest,
+    generationMode: "I2V",
+    durationSeconds: 10,
+    mediaState: JSON.stringify([
+      { kind: "picture", file: "speaker.png [input]" },
+      {
+        kind: "audio",
+        file: "voice/dialogue.wav [input]",
+        duration: 10,
+        audio_role: "music_video_lipsync",
+      },
+    ]),
+    qualityMode: "fast",
+    turboEnabled: true,
+  },
+  structuredClone(DEFAULT_RUNTIME_SETTINGS),
+  "00000000-0000-4000-8000-000000000021",
 );
+const i2vLipSyncRequest = uniqueNode(
+  i2vLipSync.candidates[0].prompt,
+  "H3AIOAutopromptRequest",
+);
+const i2vLipSyncSampler = uniqueNode(
+  i2vLipSync.candidates[0].prompt,
+  "H3MusicVideoReferenceMemorySampler",
+);
+assert.equal(i2vLipSync.request.generationMode, "I2V");
+assert.equal(i2vLipSync.engineSettings.profile, "standard");
+assert.equal(i2vLipSyncRequest.inputs.audio_1_role, "music_video_lipsync");
+assert.deepEqual(i2vLipSyncSampler.inputs.start_image, ["66", 1]);
+assert.deepEqual(i2vLipSyncSampler.inputs.soundtrack, ["66", 17]);
+assert.equal(i2vLipSyncSampler.inputs.audio_output_mode, "original_soundtrack");
+const unknownDurationLipSync = prepareStudioJob(
+  source,
+  {
+    ...baseRequest,
+    generationMode: "R2V",
+    shotCount: 1,
+    mediaState: JSON.stringify([
+      {
+        kind: "audio",
+        file: "music/unknown.flac [input]",
+        audio_role: "music_video_lipsync",
+      },
+    ]),
+    qualityMode: "fast",
+    turboEnabled: false,
+  },
+  structuredClone(DEFAULT_RUNTIME_SETTINGS),
+);
+assert.equal(unknownDurationLipSync.request.shotCount, 1);
 
 const keepAspectI2v = prepareStudioJob(
   source,

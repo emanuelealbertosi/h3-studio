@@ -6729,7 +6729,13 @@ function StudioApp() {
                                       : item
                                   ));
                                   if (audioRole === "music_video_lipsync") {
-                                    setMode("reference");
+                                    if (
+                                      mode !== "i2v" &&
+                                      mode !== "reference" &&
+                                      mediaAssets.some((item) => item.kind === "picture")
+                                    ) {
+                                      setMode("i2v");
+                                    }
                                     setTurboEnabled(false);
                                     if (asset.duration && asset.duration > 0) {
                                       setShotCount(Math.min(
@@ -6738,7 +6744,7 @@ function StudioApp() {
                                       ));
                                     }
                                     setRunMessage(
-                                      "Music video: shot sincronizzati automaticamente, brano originale nel master finale e Turbo disattivato.",
+                                      "Audio lipsync: in I2V Picture 1 resta il frame iniziale; la traccia viene sincronizzata e conservata identica. Turbo disattivato.",
                                     );
                                   }
                                 }}
@@ -6748,12 +6754,12 @@ function StudioApp() {
                                 <option value="voice_ref">Riferimento voce / timbro</option>
                                 <option value="exact_soundtrack">Soundtrack esatto</option>
                                 <option value="exact_soundtrack_plus_h3_sfx">Soundtrack esatto + SFX H3</option>
-                                <option value="music_video_lipsync">Music video + lip-sync</option>
+                                <option value="music_video_lipsync">Audio esatto + lip-sync (I2V/R2V)</option>
                                 <option value="ignore">Ignora Audio 1</option>
                               </select>
                               {asset.audio_role === "music_video_lipsync" && (
                                 <small>
-                                  Il brano viene diviso per shot e preservato identico; H3 sincronizza la performance sulle porzioni corrispondenti.
+                                  La traccia parlata o musicale viene divisa per shot e preservata identica. In I2V Picture 1 è il frame iniziale esatto; in Reference resta un riferimento visivo.
                                 </small>
                               )}
                             </label>

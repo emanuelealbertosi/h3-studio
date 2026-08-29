@@ -438,8 +438,8 @@ Legenda: `[x]` completato e verificato; `[~]` parziale o presente solo a livello
 - [x] Trascrizione automatica multilingua delle reference vocali con Whisper Small in processo isolato e fallback manuale.
 - [x] Routing esplicito TTS/Music alla Chat multimodale con reference audio.
 - [x] Pipeline `Canzone col mio timbro`: MiniMax Music → BS-RoFormer → Seed-VC → remix stereo, con Stop e unload garantiti.
-- [x] Video H3 parlante da Chat: reference timbrica, dialogo letterale e istruzione lip-sync nel prompt R2V.
-- [x] `Music video + lip-sync` nel Video Studio: segmentazione temporale del brano, `<Soundtrack>` per-shot, memoria H3, trim esatto e mux dell'audio originale; fallback standard 8-step senza PDD.
+- [x] Video H3 parlante da Chat: Picture 1 come frame iniziale I2V, audio esterno preservato, segmentazione temporale e lip-sync; R2V solo per reference esplicite.
+- [x] `Audio esatto + lip-sync (I2V/R2V)` nel Video Studio: parlato o musica, `<Soundtrack>` per-shot, memoria H3, trim esatto e mux dell'audio originale; fallback standard 8-step senza PDD.
 - [ ] Collaudare su GPU reale un brano cantato da 20–30 secondi e valutare fedeltà labiale, identità e continuità fra shot.
 - [ ] Collaudare la conversione timbrica completa sulla GPU reale dopo il download dei modelli audio.cpp.
 - [ ] Collaudare voice clone italiano e una generazione Music lunga su GPU reale.

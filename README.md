@@ -107,12 +107,13 @@ sezioni, durata fino a sei minuti, seed e decode tiled. Entrambi espongono
 progresso, interruzione, player, download, tempo di esecuzione e registrano
 l'output come audio riutilizzabile in Libreria.
 
-Nel Video Studio, la card `Audio 1` espone anche **Music video + lip-sync**:
-il brano viene suddiviso automaticamente sulle finestre H3, ogni shot riceve
-la porzione temporale corretta come `<Soundtrack>`, la memoria visiva collega
-gli shot e il master viene rifilato alla durata del brano usando l'audio
-originale invariato. Il numero di shot è calcolato dalla durata rilevata
-(massimo 12); questa modalità usa il sampler standard e disattiva
+Nel Video Studio, la card `Audio 1` espone anche **Audio esatto + lip-sync
+(I2V/R2V)**: parlato, canto o musica vengono suddivisi sulle finestre H3 e ogni
+shot riceve la porzione temporale corretta come `<Soundtrack>`. In I2V,
+`Picture 1` rimane il frame iniziale esatto; in Reference resta una reference
+visiva. Il master conserva l'audio originale invariato. Quando la durata è
+disponibile il numero di shot viene calcolato automaticamente (massimo 12);
+questa modalità usa il sampler standard e disattiva
 automaticamente PDD/Turbo, mantenendo comunque 8 step quando era selezionato
 FAST.
 
@@ -126,9 +127,10 @@ MiniMax Music, separa voce e accompagnamento con BS-RoFormer Q8, trasferisce
 solo il timbro di una reference tramite Seed-VC Q8 e ricrea il mix stereo con
 FFmpeg. `INSTALL_AUDIO_VOICE.bat` installa il runtime audio.cpp v0.7 e i pesi
 esterni; ciascun processo è effimero e viene terminato anche su Stop o errore.
-Nella Chat, un audio vocale allegato a una richiesta Video forza Reference H3:
-il planner associa il timbro al soggetto, inserisce il dialogo letterale e
-richiede il lip-sync naturale.
+Nella Chat, immagine + audio allegati a una richiesta di animazione/parlato
+attivano I2V con frame iniziale esatto, audio originale preservato e lip-sync.
+Reference H3 rimane disponibile quando l'immagine deve essere soltanto un
+riferimento o quando viene usato un video reference.
 
 Ogni candidato completato espone derivati non distruttivi **Face**, **Upscale
 1 MP** e **Upscale 2 MP**. I target compaiono soltanto quando superano la

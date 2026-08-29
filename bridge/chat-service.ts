@@ -95,6 +95,7 @@ export function resolveChatVideoTiming(requestedDuration?: number) {
 }
 
 const I2V_INTENT_PATTERN = /(?:\b(?:anima(?:re|zione|la|lo)?|animate)\b.{0,100}\b(?:immagine|foto|image|picture)\b|\b(?:trasforma(?:re|la|lo)?|turn)\b.{0,100}\b(?:immagine|foto|image|picture)\b.{0,60}\b(?:video|filmato)\b|\b(?:video|filmato)\b.{0,100}\b(?:da|from|partendo\s+da|starting\s+from)\b.{0,100}\b(?:immagine|foto|image|picture)\b)/i;
+const LIP_SYNC_AUDIO_INTENT_PATTERN = /\b(?:lip[\s-]?sync|sincron(?:izza(?:re)?|izzato|izzazione)\s+(?:il\s+)?(?:labbra|labiale|bocca)|(?:fall[oa]|rendil[oa]|fai\s+(?:la|il|lo))\s+(?:parlare|cantare)|(?:parla|dice|pronuncia|recita|canta)\b.{0,120}\b(?:audio|voce|dialogo|traccia)|(?:audio|voce|dialogo|traccia)\b.{0,120}\b(?:parlare|cantare|labbra|labiale|bocca))\b/i;
 const REFERENCE_VIDEO_INTENT_PATTERN = /\b(?:come\s+(?:riferimento|reference)|as\s+(?:a\s+)?reference|reference|riferimento|ispirati\s+(?:a|alla|al))\b/i;
 const KEEP_SOURCE_ASPECT_PATTERN = /\b(?:mantieni|conserva|preserva)\s+(?:il\s+)?(?:formato|aspect\s+ratio|proporzioni)|\bkeep\s+(?:the\s+)?(?:aspect\s+ratio|format)\b/i;
 const KEYFRAME_INTENT_PATTERN = /\b(?:key[\s-]?frames?|fotogramm[io]\s+chiave|(?:primo|iniziale|ultimo|finale|intermedi(?:[oae])?)\s+(?:frame|fotogramm[io])|(?:frame|fotogramm[io])\s+(?:iniziale|finale|intermedi(?:[oae])?))\b/i;
@@ -156,7 +157,18 @@ export function resolveChatVideoMode(
   if (REFERENCE_VIDEO_INTENT_PATTERN.test(content) && pictureCount + videoCount + audioCount > 0) {
     return "R2V" as const;
   }
-  if (audioCount > 0 && (requested === "T2V" || requested === "I2V" || requested === "R2V")) {
+  if (
+    pictureCount > 0 &&
+    audioCount > 0 &&
+    (requested === "I2V" || I2V_INTENT_PATTERN.test(content) || LIP_SYNC_AUDIO_INTENT_PATTERN.test(content))
+  ) {
+    return "I2V" as const;
+  }
+  if (
+    audioCount > 0 &&
+    (pictureCount === 0 || requested === "R2V") &&
+    (requested === "T2V" || requested === "I2V" || requested === "R2V")
+  ) {
     return "R2V" as const;
   }
   if (pictureCount > 0 && I2V_INTENT_PATTERN.test(content)) return "I2V" as const;
@@ -369,7 +381,7 @@ The title describes the main topic, never starts with "Chat" and never contains 
 For video default to 10 seconds, one candidate, 0.5 MP and the FAST 8-step engine. When the user explicitly requests a total video duration, preserve it in durationSeconds; the server converts it into up to 12 H3 shots. Do not invent a duration that the user did not request.
 Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures. Use I2V when one attached picture is the start frame, R2V for broader references, KEYFRAMES when attached pictures are requested as first, intermediate, final or timed frames, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for editing one. Preserve Picture attachment order for KEYFRAMES; the server calculates percentages from explicit times or distributes them automatically. Video editing and extension still use action type generate_video; never invent video_editing, edit_video or continue_video action types.
 Use generate_tts when the user asks for speech, narration, dubbing, reading or voice cloning. For TTS, prompt is the exact text to speak in the requested language, not an English description. An attached Audio 1 is the voice reference and is transcribed automatically.
-For a video in which a visible subject must speak with an attached voice, use R2V. Define <Audio 1> as a voice-timbre reference, not copied signal or background music. If a picture or video defines the visible speaker, bind the audio to that actual <Subject N> and reuse its global speaker ID (S1). If no visual reference defines a subject, describe the visible target speaker and assign (S1) without inventing a <Subject N> reference label. Put the exact dialogue inside <d>[Italian] ...</d>, <d>[English] ...</d> or the correct language name, and state that the speaker physically speaks with natural lip synchronization and stops mouth motion when the line ends.
+For a video in which a visible subject must speak or sing to an attached audio track, use I2V when Picture 1 must be the exact opening frame. The server preserves Audio 1 as the authoritative soundtrack and injects synchronized slices while H3 animates the mouth and performance. Use R2V only when the picture is a broader identity/style reference rather than the opening frame, or when a reference video is required. Do not reinterpret the attached track as a mere voice-timbre reference. State that the visible subject physically performs the audible track with natural lip synchronization and stops mouth motion when speech or singing ends; never invent or transcribe words that were not provided as text.
 Use generate_music when the user asks for a song, soundtrack, instrumental or music. Put the musical request in prompt, set durationSeconds when requested (default 30), and set instrumental:false whenever singing, a singer, a voice, vocals, lyrics or words to sing are requested. For a vocal song, copy every user-supplied lyric verbatim into lyrics, preserving its language and wording; never translate, summarize or omit quoted words. Use lyrics:"" only for instrumental music or when the user did not supply exact words.
 When the user asks for a song sung with an attached voice reference, still use generate_music with instrumental:false. Preserve the attached Audio 1: the server will route it through singing voice conversion after MiniMax Music.
 Write rich, production-ready prompts in English except the exact spoken TTS script. When attachments are present, refer to them as Picture 1, Picture 2, Video 1 or Audio 1 in attachment order. Never invent file paths, model names, LoRAs, workflow nodes or numeric engine settings.`;
@@ -749,7 +761,17 @@ export class ChatService {
         const generationMode = resolveChatVideoMode(
           requestText, plan.videoMode, pictures.length, videos.length, audios.length,
         );
-        const mediaState = generationMode === "T2V" ? [] : attachments;
+        const exactAudioLipSync =
+          generationMode === "I2V" && audios.length > 0;
+        let audioIndex = 0;
+        const routedAttachments = attachments.map((attachment) => {
+          if (attachment.kind !== "audio") return attachment;
+          audioIndex += 1;
+          return audioIndex === 1 && exactAudioLipSync
+            ? { ...attachment, audio_role: "music_video_lipsync" as const }
+            : attachment;
+        });
+        const mediaState = generationMode === "T2V" ? [] : routedAttachments;
         const keyframePositions = generationMode === "KEYFRAMES"
           ? resolveChatKeyframePositions(requestText, pictures.length, timing.totalSeconds)
           : "AUTO";
@@ -771,7 +793,7 @@ export class ChatService {
                   : "16:9 landscape",
           seedMode: "random",
           qualityMode: "fast",
-          turboEnabled: true,
+          turboEnabled: !exactAudioLipSync,
           mediaState: JSON.stringify(mediaState),
           referenceRoles: "AUTO",
           keyframePositions,
