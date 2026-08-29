@@ -198,8 +198,10 @@ Il contratto della Chat locale si verifica con `npm run test:chat`.
 ## Avvio rapido
 
 1. Installa Node.js 22.16.0 o superiore e prepara una ComfyUI funzionante.
-2. Clona il repository ed esegui una volta `INSTALL_COMFY_DEPENDENCIES.bat`.
-3. Avvia `START_H3_STUDIO.bat`.
+2. Clona il repository ed esegui una volta `INSTALL_COMFY_DEPENDENCIES.bat` su
+   Windows oppure `./INSTALL_COMFY_DEPENDENCIES.sh --comfy-root /percorso/ComfyUI`
+   su Linux.
+3. Avvia `START_H3_STUDIO.bat` su Windows o `./START_H3_STUDIO.sh` su Linux.
 4. Al primo avvio crea la password Admin e configura URL, cartella output e workflow.
 5. Riavvia una volta H3 Studio e apri `http://localhost:3000`.
 

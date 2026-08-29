@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
   LlmRuntimeControl,
+  parseLinuxProcessList,
   parseNvidiaMemory,
   parseWindowsTaskList,
 } from "../bridge/llm-runtime-control.js";
@@ -12,6 +13,10 @@ const taskList = '"llama-server.exe","284","Console","1","1,234 K"\r\n' +
 assert.deepEqual(parseWindowsTaskList(taskList), [
   { name: "llama-server.exe", pid: 284 },
 ]);
+assert.deepEqual(parseLinuxProcessList(
+  "  284 llama-server /opt/llama.cpp/llama-server --model planner.gguf\n" +
+  "29996 python3 python3 worker.py\n",
+), [{ name: "llama-server", pid: 284 }]);
 assert.deepEqual(parseNvidiaMemory("10240, 16303\r\n"), {
   usedMiB: 10240,
   totalMiB: 16303,
@@ -52,5 +57,31 @@ assert.deepEqual(stopped.after.processes, []);
 assert.equal(stopped.after.gpu?.usedMiB, 900);
 assert.equal(calls.some((call) => call.file === "taskkill.exe"), true);
 await assert.rejects(() => runtime.terminate(29996), /non è un processo llama-server attivo/);
+
+let linuxActive = true;
+const linuxCalls: Array<{ file: string; args: string[] }> = [];
+const linuxRuntime = new LlmRuntimeControl("linux", async (file, args) => {
+  linuxCalls.push({ file, args });
+  if (file === "ps") {
+    return {
+      stdout: linuxActive ? "  812 llama-server /usr/local/bin/llama-server --model planner.gguf\n" : "",
+      stderr: "",
+    };
+  }
+  if (file === "nvidia-smi") return { stdout: "2048, 16303\n", stderr: "" };
+  if (file === "kill") {
+    assert.deepEqual(args, ["-TERM", "812"]);
+    linuxActive = false;
+    return { stdout: "", stderr: "" };
+  }
+  throw new Error("Comando Linux inatteso: " + file);
+});
+const linuxBefore = await linuxRuntime.status();
+assert.equal(linuxBefore.supported, true);
+assert.equal(linuxBefore.processes[0]?.pid, 812);
+assert.equal(linuxBefore.gpu?.usedMiB, 2048);
+const linuxStopped = await linuxRuntime.terminate(812);
+assert.deepEqual(linuxStopped.after.processes, []);
+assert.equal(linuxCalls.some((call) => call.file === "kill"), true);
 
 console.log("Admin LLM runtime control: OK");

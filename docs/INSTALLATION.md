@@ -5,7 +5,7 @@ workflow. Stato locale, password, database, log e media non vengono versionati.
 
 ## Requisiti
 
-- Windows 10/11.
+- Windows 10/11 oppure una distribuzione Linux x86_64 con driver NVIDIA.
 - Node.js 22.16.0 o superiore.
 - ComfyUI già funzionante e raggiungibile via HTTP.
 - FFmpeg nel `PATH` oppure il suo percorso configurato nell'Admin.
@@ -40,9 +40,24 @@ La modalità predefinita è conservativa: per i requisiti Python si può usare
 anche ComfyUI Manager. Il secondo launcher esegue `npm install` soltanto se le
 dipendenze web non sono presenti, poi apre `http://localhost:3000`.
 
+Su Linux gli equivalenti sono:
+
+```bash
+git clone <URL-DEL-REPOSITORY>
+cd H3-Studio
+chmod +x INSTALL_COMFY_DEPENDENCIES.sh START_H3_STUDIO.sh STOP_H3_STUDIO.sh
+./INSTALL_COMFY_DEPENDENCIES.sh --comfy-root /percorso/ComfyUI
+./START_H3_STUDIO.sh
+```
+
+Lo script Linux non scarica i pesi, conserva un backup dei nodi inclusi già
+presenti e non installa i `requirements.txt` Python salvo l'opzione esplicita
+`--install-python-requirements`. `START_H3_STUDIO.sh` salva PID e log in
+`data/` e può essere arrestato con `./STOP_H3_STUDIO.sh`.
+
 ### Protezione dal bridge precedente
 
-Prima di avviare il bridge, `START_H3_STUDIO.bat` legge anche
+Prima di avviare il bridge, `START_H3_STUDIO.bat` e `START_H3_STUDIO.sh` leggono anche
 `H3_BRIDGE_HOST` e `H3_BRIDGE_PORT` da `.env`, quindi verifica il listener
 dell'endpoint configurato (predefinito `127.0.0.1:8787`). Se trova un processo
 Node la cui command line punta esattamente a `bridge/server.ts` nella stessa
@@ -101,6 +116,9 @@ durante la conversazione, in ascolto su una porta loopback casuale. In
 alternativa si può copiare una distribuzione completa di llama.cpp nella
 sottocartella `runtime` del nodo (eseguibile e DLL adiacenti) oppure impostare
 la variabile di ambiente `H3_CHAT_LLAMA_SERVER` nel processo che avvia ComfyUI.
+Su Linux il nodo cerca `llama-server` nel `PATH`, nella sottocartella `runtime`
+o nel percorso indicato dalla stessa variabile. L'Admin rileva e termina in
+sicurezza il processo effimero sia su Windows sia su Linux.
 Il server effimero viene terminato prima di Video, Image, Face e Upscale, quindi
 LM Studio non deve essere aperto e il modello non rimane in VRAM durante i render.
 

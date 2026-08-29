@@ -57,6 +57,29 @@ export function parseWindowsTaskList(output: string): LlmRuntimeProcess[] {
     );
 }
 
+export function parseLinuxProcessList(output: string): LlmRuntimeProcess[] {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const match = /^(\d+)\s+(\S+)\s*(.*)$/.exec(line);
+      if (!match) return null;
+      const pid = Number(match[1]);
+      const commandName = match[2] ?? "";
+      const commandLine = match[3] ?? "";
+      const executable = commandLine.trim().split(/\s+/)[0] ?? "";
+      const name = commandName.split("/").at(-1) ?? commandName;
+      const executableName = executable.split("/").at(-1) ?? executable;
+      return name === "llama-server" || executableName === "llama-server"
+        ? { name: "llama-server", pid }
+        : null;
+    })
+    .filter((process): process is LlmRuntimeProcess =>
+      process !== null && Number.isInteger(process.pid) && process.pid > 0,
+    );
+}
+
 export function parseNvidiaMemory(output: string) {
   const [used, total] = output.trim().split(/\s*,\s*/).map(Number);
   return Number.isFinite(used) && Number.isFinite(total) && total > 0
@@ -78,16 +101,22 @@ export class LlmRuntimeControl {
   ) {}
 
   private async processes() {
-    if (this.platform !== "win32") return [];
     try {
-      const result = await this.run("tasklist.exe", [
-        "/FI",
-        "IMAGENAME eq llama-server.exe",
-        "/FO",
-        "CSV",
-        "/NH",
-      ]);
-      return parseWindowsTaskList(result.stdout);
+      if (this.platform === "win32") {
+        const result = await this.run("tasklist.exe", [
+          "/FI",
+          "IMAGENAME eq llama-server.exe",
+          "/FO",
+          "CSV",
+          "/NH",
+        ]);
+        return parseWindowsTaskList(result.stdout);
+      }
+      if (this.platform === "linux") {
+        const result = await this.run("ps", ["-eo", "pid=,comm=,args="]);
+        return parseLinuxProcessList(result.stdout);
+      }
+      return [];
     } catch {
       return [];
     }
@@ -95,7 +124,7 @@ export class LlmRuntimeControl {
 
   private async gpuMemory() {
     try {
-      const result = await this.run("nvidia-smi.exe", [
+      const result = await this.run(this.platform === "win32" ? "nvidia-smi.exe" : "nvidia-smi", [
         "--query-gpu=memory.used,memory.total",
         "--format=csv,noheader,nounits",
       ]);
@@ -111,7 +140,7 @@ export class LlmRuntimeControl {
       this.gpuMemory(),
     ]);
     return {
-      supported: this.platform === "win32",
+      supported: this.platform === "win32" || this.platform === "linux",
       processes,
       gpu,
     };
@@ -125,7 +154,13 @@ export class LlmRuntimeControl {
     if (!before.processes.some((process) => process.pid === pid)) {
       throw new Error(`Il PID ${pid} non è un processo llama-server attivo`);
     }
-    await this.run("taskkill.exe", ["/PID", String(pid), "/F"]);
+    if (this.platform === "win32") {
+      await this.run("taskkill.exe", ["/PID", String(pid), "/F"]);
+    } else if (this.platform === "linux") {
+      await this.run("kill", ["-TERM", String(pid)]);
+    } else {
+      throw new Error(`Arresto LLM non supportato su ${this.platform}`);
+    }
     await new Promise((resolve) => setTimeout(resolve, 700));
     return { before, after: await this.status(), terminatedPid: pid };
   }
