@@ -206,3 +206,9 @@ listener è estraneo o non verificabile.
 L'accesso Admin è protetto dalla password creata nel wizard. Prima di esporre
 l'app direttamente a Internet va aggiunta autenticazione anche alle API utente;
 la configurazione attuale è pensata per localhost, LAN fidata o Tailscale.
+
+Per l'accesso diretto dalla LAN, impostare localmente `H3_WEB_HOST=0.0.0.0` e
+`H3_BRIDGE_HOST=0.0.0.0`, aggiungendo a `H3_WEB_ORIGINS` soltanto gli URL
+dei client autorizzati, per esempio `http://192.168.1.17:3000`. Questa scelta
+espone frontend e API sulla rete locale: usare password Admin robusta e una rete
+fidata. Le impostazioni locali restano nel file `.env`, escluso da Git.

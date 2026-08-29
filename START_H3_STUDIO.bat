@@ -41,13 +41,15 @@ if not exist "node_modules" (
 set "H3_BRIDGE_HOST_RESOLVED="
 set "H3_BRIDGE_PORT_RESOLVED="
 set "H3_BRIDGE_URL_RESOLVED="
-for /f "tokens=1,2,3" %%H in ('node --env-file-if-exists=.env -e "const rawHost=String(process.env.H3_BRIDGE_HOST??'').trim();const host=rawHost.length?rawHost:'127.0.0.1';const parsed=Number.parseInt(String(process.env.H3_BRIDGE_PORT??''),10);const port=Number.isInteger(parsed)&&parsed>0&&parsed<=65535?parsed:8787;if (!/^[A-Za-z0-9._:-]+$/.test(host)) process.exit(2);const target=host==='0.0.0.0'?'127.0.0.1':host==='::'?'::1':host;const url='http://'+(target.includes(':')?'['+target+']':target)+':'+port;console.log(host,port,url)"') do (
+set "H3_WEB_HOST_RESOLVED="
+for /f "tokens=1,2,3,4" %%H in ('node --env-file-if-exists=.env -e "const rawHost=String(process.env.H3_BRIDGE_HOST??'').trim();const host=rawHost.length?rawHost:'127.0.0.1';const rawWebHost=String(process.env.H3_WEB_HOST??'').trim();const webHost=rawWebHost.length?rawWebHost:'127.0.0.1';const parsed=Number.parseInt(String(process.env.H3_BRIDGE_PORT??''),10);const port=Number.isInteger(parsed)&&parsed>0&&parsed<=65535?parsed:8787;if (!/^[A-Za-z0-9._:-]+$/.test(host)||!/^[A-Za-z0-9._:-]+$/.test(webHost)) process.exit(2);const target=host==='0.0.0.0'?'127.0.0.1':host==='::'?'::1':host;const url='http://'+(target.includes(':')?'['+target+']':target)+':'+port;console.log(host,port,url,webHost)"') do (
   set "H3_BRIDGE_HOST_RESOLVED=%%H"
   set "H3_BRIDGE_PORT_RESOLVED=%%I"
   set "H3_BRIDGE_URL_RESOLVED=%%J"
+  set "H3_WEB_HOST_RESOLVED=%%K"
 )
 if not defined H3_BRIDGE_HOST_RESOLVED (
-  echo [ERRORE] H3_BRIDGE_HOST o H3_BRIDGE_PORT non validi.
+  echo [ERRORE] H3_BRIDGE_HOST, H3_BRIDGE_PORT o H3_WEB_HOST non validi.
   pause
   exit /b 1
 )
@@ -72,7 +74,7 @@ if "%H3_BRIDGE_REUSE%"=="0" (
 )
 
 echo [H3 Studio] Avvio interfaccia su http://localhost:3000
-start "H3 Studio - Web" cmd /k "cd /d ""%~dp0"" && node_modules\.bin\vinext.cmd dev --hostname 127.0.0.1"
+start "H3 Studio - Web" cmd /k "cd /d ""%~dp0"" && node_modules\.bin\vinext.cmd dev --hostname %H3_WEB_HOST_RESOLVED%"
 
 if /i "%H3_ENABLE_TAILSCALE%"=="1" (
   where tailscale.exe >nul 2>nul

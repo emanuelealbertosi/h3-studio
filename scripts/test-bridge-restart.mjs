@@ -226,9 +226,9 @@ function testLauncherWiring() {
     "Il launcher avvia sempre un secondo bridge",
   );
   assert.equal(
-    launcher.includes("vinext.cmd dev --hostname 127.0.0.1"),
+    launcher.includes("vinext.cmd dev --hostname %H3_WEB_HOST_RESOLVED%"),
     true,
-    "Il frontend non è vincolato esplicitamente al loopback IPv4",
+    "Il frontend non usa il binding configurabile risolto dal launcher",
   );
   assert.equal(
     launcher.includes("tailscale.exe serve --bg --yes --https=443 http://127.0.0.1:3000"),
