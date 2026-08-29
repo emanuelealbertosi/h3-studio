@@ -6,6 +6,7 @@ Aggiornamento: 29 agosto 2026
 
 - [x] Eseguito e superato
 - [ ] Da eseguire o da riconfermare dopo una modifica
+- 🟡 In esecuzione; esito qualitativo ancora da verificare
 - ⚠️ Eseguito, ma fallito o parziale
 
 ## Sessione automatica non-GUI — 29 agosto 2026
@@ -63,6 +64,12 @@ Non inclusi in questa sessione: interazioni browser/GUI, render GPU reali, valut
 - [ ] GPU: 2 shot T2V con raccordo fluido e output unico.
 - [ ] GPU: 3 shot Reference con una Picture attiva soltanto nello shot 2.
 - [ ] GPU: schedule Video/Audio per-shot verificato dal log `[H3Refs]`.
+- [x] Contratto automatico `Audio esatto + lip-sync`: soundtrack codificato nel latent AV, maschera denoise video=1/audio=0, start frame I2V e fallback standard senza PDD/Turbo.
+- [x] Contratto automatico `Solo voce/timbro`: I2V e Keyframes inoltrano `voice_ref`, conservano il nuovo dialogo del prompt e non copiano le parole della reference.
+- 🟡 GPU: I2V + audio esatto da 34,28 s instradato in 4 shot da circa 10 s; processo ComfyUI riavviato dopo il nodo aggiornato, modello Hybrid INT8, 0,5 MP, 8 step standard, nessun LoRA/PDD. Attendere output e valutazione visiva.
+- [ ] Sul render lungo verificare lip-sync percepibile, identità, continuità ai tre confini, audio senza tagli e durata finale uguale alla sorgente.
+- [ ] GPU rapido definitivo: I2V + parlato di circa 2 s, primo piano o mezzo busto frontale, per isolare e confermare il movimento labiale.
+- [ ] GPU `Solo voce/timbro`: I2V e Keyframes con reference vocale, battuta diversa scritta nel prompt, voce coerente e parole della reference assenti.
 - [ ] Stress test 6 e 12 shot con recupero dopo riavvio e misurazione VRAM/tempo.
 - [ ] A 15 secondi, 1 MP disabilitato e massimo 0,7 MP.
 - [ ] Seed random, base+1, bloccato e batch 1–4.
@@ -161,6 +168,7 @@ Non inclusi in questa sessione: interazioni browser/GUI, render GPU reali, valut
 - [ ] Chat: audio vocale + richiesta di canzone con «mia voce/mio timbro» instrada la conversione timbrica.
 - [x] Contratto Chat: immagine + audio + richiesta di parlato produce I2V, Audio 1 esatto, standard 8-step e Turbo/PDD disattivati.
 - [ ] Collaudo GPU Chat: Picture 1 coincide col frame iniziale e il soggetto segue correttamente il parlato allegato.
+- [ ] Collaudo GPU Chat/Studio con `Solo voce/timbro`: pronuncia il testo nuovo mantenendo soltanto l'identità vocale della reference.
 
 ## Upscale e Face
 
@@ -214,11 +222,13 @@ Non inclusi in questa sessione: interazioni browser/GUI, render GPU reali, valut
 
 1. Persistenza modello, CFG e step Anima/Nova.
 2. Persistenza dei job lasciando e riaprendo lo Studio.
-3. Parlato → brano da Libreria, con verifica durata, stereo e ducking.
-4. Apertura nello Studio del media corretto creato dalla Chat.
-5. Allineamento Assets/Libreria per Personaggi, Oggetti e Luoghi.
-6. Continue video senza stacco, duplicazione o perdita reference.
-7. Upscale 2 MP e Face sull'upscale.
-8. Eliminazione e gestione Montaggi.
-9. Audio stereo e rilascio VRAM.
-10. Smoke test completo in un progetto nuovo.
+3. Concludere e valutare il render I2V lip-sync da 34,28 s/4 shot; poi ripetere con audio di circa 2 s.
+4. Verificare `Solo voce/timbro` su I2V e Keyframes con un dialogo nuovo.
+5. Parlato → brano da Libreria, con verifica durata, stereo e ducking.
+6. Apertura nello Studio del media corretto creato dalla Chat.
+7. Allineamento Assets/Libreria per Personaggi, Oggetti e Luoghi.
+8. Continue video senza stacco, duplicazione o perdita reference.
+9. Upscale 2 MP e Face sull'upscale.
+10. Eliminazione e gestione Montaggi.
+11. Audio stereo e rilascio VRAM.
+12. Smoke test completo in un progetto nuovo.
