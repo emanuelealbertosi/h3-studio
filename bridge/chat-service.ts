@@ -12,7 +12,7 @@ import type { StudioJobService } from "./studio-job.js";
 type PlannedAction = {
   type: "generate_video" | "generate_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
   prompt: string;
-  videoMode?: "T2V" | "I2V" | "R2V" | "VIDEO EXTENSION" | "VIDEO EDITING";
+  videoMode?: "T2V" | "I2V" | "R2V" | "KEYFRAMES" | "VIDEO EXTENSION" | "VIDEO EDITING";
   aspect?: "16:9" | "9:16" | "1:1";
   durationSeconds?: number;
   instrumental?: boolean;
@@ -60,7 +60,7 @@ function normalizeAttachment(value: unknown): ChatAttachment {
   };
 }
 
-const MEDIA_RECALL_PATTERN = /(?:\b(?:questa|quella|questo|quello)\s+(?:immagine|foto|video|audio)\b|\b(?:(?:questa|quella|questo|quello)\s+)?(?:ultim[oa]?|precedente)\s+(?:immagine|foto|video|audio)\b|\b(?:l['’]?immagine|la\s+foto|il\s+video|l['’]?audio)\b|\b(?:modifical[ao]|edit(?:ala|alo)|animala|animalo|usala|usalo|continualo|estendilo|trasformala|trasformalo)\b|\bpartendo\s+da\s+(?:questa|quella|questo|quello)\b|\b(?:this|that|last|previous)\s+(?:image|picture|video|audio)\b|\b(?:edit|animate|use|continue|extend|transform)\s+it\b)/i;
+const MEDIA_RECALL_PATTERN = /(?:\b(?:questa|quella|questo|quello|queste|quelle)\s+(?:immagin[ei]|foto|video|audio)\b|\b(?:(?:questa|quella|questo|quello|queste|quelle)\s+)?(?:ultim[oaie]?|precedent[ei])\s+(?:immagin[ei]|foto|video|audio)\b|\b(?:l['’]?immagine|le\s+immagini|la\s+foto|le\s+foto|il\s+video|l['’]?audio)\b|\b(?:modifical[oa]|modificale|edit(?:ala|alo|ale)|animala|animalo|animale|usala|usalo|usale|continualo|estendilo|trasformala|trasformalo|trasformale)\b|\bpartendo\s+da\s+(?:questa|quella|questo|quello|queste|quelle)\b|\b(?:this|that|these|those|last|previous)\s+(?:images?|pictures?|videos?|audio)\b|\b(?:edit|animate|use|continue|extend|transform)\s+(?:it|them)\b)/i;
 
 export function shouldRecallMedia(content: string) {
   return MEDIA_RECALL_PATTERN.test(content);
@@ -97,6 +97,47 @@ export function resolveChatVideoTiming(requestedDuration?: number) {
 const I2V_INTENT_PATTERN = /(?:\b(?:anima(?:re|zione|la|lo)?|animate)\b.{0,100}\b(?:immagine|foto|image|picture)\b|\b(?:trasforma(?:re|la|lo)?|turn)\b.{0,100}\b(?:immagine|foto|image|picture)\b.{0,60}\b(?:video|filmato)\b|\b(?:video|filmato)\b.{0,100}\b(?:da|from|partendo\s+da|starting\s+from)\b.{0,100}\b(?:immagine|foto|image|picture)\b)/i;
 const REFERENCE_VIDEO_INTENT_PATTERN = /\b(?:come\s+(?:riferimento|reference)|as\s+(?:a\s+)?reference|reference|riferimento|ispirati\s+(?:a|alla|al))\b/i;
 const KEEP_SOURCE_ASPECT_PATTERN = /\b(?:mantieni|conserva|preserva)\s+(?:il\s+)?(?:formato|aspect\s+ratio|proporzioni)|\bkeep\s+(?:the\s+)?(?:aspect\s+ratio|format)\b/i;
+const KEYFRAME_INTENT_PATTERN = /\b(?:key[\s-]?frames?|fotogramm[io]\s+chiave|(?:primo|iniziale|ultimo|finale|intermedi(?:[oae])?)\s+(?:frame|fotogramm[io])|(?:frame|fotogramm[io])\s+(?:iniziale|finale|intermedi(?:[oae])?))\b/i;
+const FIRST_KEYFRAME_PATTERN = /\b(?:(?:primo|iniziale)\s+(?:frame|fotogramma)|(?:frame|fotogramma)\s+iniziale|first\s+(?:frame|keyframe))\b/i;
+const LAST_KEYFRAME_PATTERN = /\b(?:(?:ultimo|finale)\s+(?:frame|fotogramma)|(?:frame|fotogramma)\s+finale|last\s+(?:frame|keyframe)|end\s+frame)\b/i;
+const INTERMEDIATE_KEYFRAME_PATTERN = /\b(?:intermedi(?:[oae])?|intermediate|middle)\s*(?:frame|fotogramm[io]|key[\s-]?frames?)?|\b(?:frame|fotogramm[io]|key[\s-]?frames?)\s+intermedi(?:[oae])?\b/i;
+
+function formatKeyframePercent(value: number) {
+  const rounded = Math.round(Math.min(100, Math.max(0, value)) * 100) / 100;
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}%`;
+}
+
+export function resolveChatKeyframePositions(content: string, pictureCount: number, totalSeconds: number) {
+  const count = Math.max(0, Math.min(9, Math.trunc(pictureCount)));
+  if (count < 1) return "AUTO";
+  const text = String(content ?? "");
+  const defaults = count === 1
+    ? [FIRST_KEYFRAME_PATTERN.test(text) ? 0 : INTERMEDIATE_KEYFRAME_PATTERN.test(text) ? 50 : LAST_KEYFRAME_PATTERN.test(text) ? 100 : 0]
+    : Array.from({ length: count }, (_, index) => INTERMEDIATE_KEYFRAME_PATTERN.test(text)
+      ? ((index + 1) * 100) / (count + 1)
+      : (index * 100) / (count - 1));
+
+  const listedPercentages = [...text.matchAll(/(\d+(?:[.,]\d+)?)\s*%/g)]
+    .map((match) => Number(match[1].replace(",", ".")))
+    .filter(Number.isFinite);
+  if (listedPercentages.length === count) {
+    return listedPercentages.map(formatKeyframePercent).join(", ");
+  }
+
+  const positions = [...defaults];
+  const labeled = /(?:picture|immagine|foto)\s*([1-9])\s*(?:al|a|at|=|:)\s*(?:(secondo|second|time)\s*)?(\d+(?:[.,]\d+)?)\s*(%|s|sec(?:onds?)?|second[io])?/gi;
+  for (const match of text.matchAll(labeled)) {
+    const index = Number(match[1]) - 1;
+    if (index < 0 || index >= count) continue;
+    const value = Number(match[3].replace(",", "."));
+    if (!Number.isFinite(value)) continue;
+    const seconds = Boolean(match[2]) || Boolean(match[4] && match[4] !== "%");
+    positions[index] = seconds
+      ? totalSeconds > 0 ? (value / totalSeconds) * 100 : 0
+      : value;
+  }
+  return positions.map(formatKeyframePercent).join(", ");
+}
 
 export function resolveChatVideoMode(
   content: string,
@@ -108,6 +149,9 @@ export function resolveChatVideoMode(
   const requested = proposed ?? "T2V";
   if ((requested === "VIDEO EXTENSION" || requested === "VIDEO EDITING") && videoCount > 0) {
     return requested;
+  }
+  if (pictureCount > 0 && (requested === "KEYFRAMES" || KEYFRAME_INTENT_PATTERN.test(content))) {
+    return "KEYFRAMES" as const;
   }
   if (REFERENCE_VIDEO_INTENT_PATTERN.test(content) && pictureCount + videoCount + audioCount > 0) {
     return "R2V" as const;
@@ -122,6 +166,7 @@ export function resolveChatVideoMode(
     return pictureCount > 0 ? "I2V" as const : "T2V" as const;
   }
   if (requested === "I2V" && pictureCount === 0) return "T2V" as const;
+  if (requested === "KEYFRAMES" && pictureCount === 0) return "T2V" as const;
   return requested;
 }
 
@@ -155,6 +200,8 @@ function normalizeActionType(value: unknown): Pick<PlannedAction, "type" | "vide
     continue_video: { type: "generate_video", videoMode: "VIDEO EXTENSION" },
     image_to_video: { type: "generate_video", videoMode: "I2V" },
     reference_to_video: { type: "generate_video", videoMode: "R2V" },
+    keyframes: { type: "generate_video", videoMode: "KEYFRAMES" },
+    keyframe_video: { type: "generate_video", videoMode: "KEYFRAMES" },
     create_image: { type: "generate_image" },
     image_editing: { type: "edit_image" },
     generate_anime: { type: "generate_anima" },
@@ -180,7 +227,7 @@ export function normalizePlan(text: string): { reply: string; title: string | nu
   if (!normalizedType || prompt.length < 3 || prompt.length > 20_000) {
     throw new Error("LLM ha proposto un'azione non valida");
   }
-  const videoMode = ["T2V", "I2V", "R2V", "VIDEO EXTENSION", "VIDEO EDITING"].includes(String(parsed.action.videoMode))
+  const videoMode = ["T2V", "I2V", "R2V", "KEYFRAMES", "VIDEO EXTENSION", "VIDEO EDITING"].includes(String(parsed.action.videoMode))
     ? parsed.action.videoMode as PlannedAction["videoMode"]
     : normalizedType.videoMode;
   const aspect = parsed.action.aspect === "9:16" || parsed.action.aspect === "1:1"
@@ -294,12 +341,12 @@ const CHAT_SYSTEM_PROMPT = `You are H3 Studio, a concise Italian-speaking creati
 Always return exactly one JSON object and no markdown:
 {"reply":"natural Italian reply","title":"concise 3-7 word Italian conversation title","action":null}
 or
-{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1","durationSeconds":10,"instrumental":true,"lyrics":"exact requested words to sing or empty string"}}
+{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|KEYFRAMES|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1","durationSeconds":10,"instrumental":true,"lyrics":"exact requested words to sing or empty string"}}
 
 Only create an action when the user explicitly asks to generate, animate, continue or edit media. Questions and ordinary conversation use action:null.
 The title describes the main topic, never starts with "Chat" and never contains quotation marks.
 For video default to 10 seconds, one candidate, 0.5 MP and the FAST 8-step engine. When the user explicitly requests a total video duration, preserve it in durationSeconds; the server converts it into up to 12 H3 shots. Do not invent a duration that the user did not request.
-Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures. Use I2V when one attached picture is the start frame, R2V for broader references, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for editing one. Video editing and extension still use action type generate_video; never invent video_editing, edit_video or continue_video action types.
+Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures. Use I2V when one attached picture is the start frame, R2V for broader references, KEYFRAMES when attached pictures are requested as first, intermediate, final or timed frames, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING for editing one. Preserve Picture attachment order for KEYFRAMES; the server calculates percentages from explicit times or distributes them automatically. Video editing and extension still use action type generate_video; never invent video_editing, edit_video or continue_video action types.
 Use generate_tts when the user asks for speech, narration, dubbing, reading or voice cloning. For TTS, prompt is the exact text to speak in the requested language, not an English description. An attached Audio 1 is the voice reference and is transcribed automatically.
 For a video in which a visible subject must speak with an attached voice, use R2V. Define <Audio 1> as a voice-timbre reference, not copied signal or background music. If a picture or video defines the visible speaker, bind the audio to that actual <Subject N> and reuse its global speaker ID (S1). If no visual reference defines a subject, describe the visible target speaker and assign (S1) without inventing a <Subject N> reference label. Put the exact dialogue inside <d>[Italian] ...</d>, <d>[English] ...</d> or the correct language name, and state that the speaker physically speaks with natural lip synchronization and stops mouth motion when the line ends.
 Use generate_music when the user asks for a song, soundtrack, instrumental or music. Put the musical request in prompt, set durationSeconds when requested (default 30), and set instrumental:false whenever singing, a singer, a voice, vocals, lyrics or words to sing are requested. For a vocal song, copy every user-supplied lyric verbatim into lyrics, preserving its language and wording; never translate, summarize or omit quoted words. Use lyrics:"" only for instrumental music or when the user did not supply exact words.
@@ -681,6 +728,9 @@ export class ChatService {
           requestText, plan.videoMode, pictures.length, videos.length, audios.length,
         );
         const mediaState = generationMode === "T2V" ? [] : attachments;
+        const keyframePositions = generationMode === "KEYFRAMES"
+          ? resolveChatKeyframePositions(requestText, pictures.length, timing.totalSeconds)
+          : "AUTO";
         const job = await this.studioJobs.submit({
           projectId,
           prompt: plan.prompt,
@@ -690,7 +740,7 @@ export class ChatService {
           megapixels: 0.5,
           generationMode,
           aspectFormat:
-            generationMode === "I2V" && KEEP_SOURCE_ASPECT_PATTERN.test(requestText)
+            (generationMode === "I2V" || generationMode === "KEYFRAMES") && KEEP_SOURCE_ASPECT_PATTERN.test(requestText)
               ? "keep source aspect"
               : plan.aspect === "9:16"
                 ? "9:16 portrait"
@@ -702,7 +752,7 @@ export class ChatService {
           turboEnabled: true,
           mediaState: JSON.stringify(mediaState),
           referenceRoles: "AUTO",
-          keyframePositions: "AUTO",
+          keyframePositions,
           sourceVideoAudio: "AUTO",
           muteDiegetic: false,
           muteNonDiegetic: false,

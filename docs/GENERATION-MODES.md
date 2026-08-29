@@ -10,7 +10,7 @@ Questo documento descrive il mapping verificato tra H3 Studio e il workflow
 | Text to video | `T2V` | Nessuno | Il Media Loader viene svuotato intenzionalmente. |
 | Image to video | `I2V` | Picture 1 | Picture 1 diventa il frame iniziale; il planner resta text-only. |
 | Reference | `R2V` | Almeno un'immagine, video o audio | Gli asset seguono l'ordine del Media Loader e i ruoli dichiarati. |
-| Keyframes | `KEYFRAMES` | Almeno Picture 1 | Picture 1..N diventano anchor sulla timeline globale; posizioni `AUTO` o percentuali esplicite. |
+| Keyframes | `KEYFRAMES` | Almeno Picture 1 | Picture 1..N diventano anchor sulla timeline globale; Studio e Chat accettano distribuzione automatica, percentuali o secondi espliciti. |
 | Continue video | `VIDEO EXTENSION` | Video 1, massimo 15 secondi nello Studio | Il router continua dall'ultimo frame decodificato. |
 | Edit video | `VIDEO EDITING` | Video 1, massimo 15 secondi nello Studio | Video 1 è la sorgente diretta. |
 

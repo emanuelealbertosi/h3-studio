@@ -11,6 +11,7 @@ import {
   musicInstrumentalIntent,
   normalizePlan,
   preserveMusicIntent,
+  resolveChatKeyframePositions,
   resolveChatVideoMode,
   resolveChatVideoTiming,
   routeAction,
@@ -138,6 +139,7 @@ try {
   assert.equal(shouldRecallMedia("Crea una animazione partendo da questa immagine"), true);
   assert.equal(shouldRecallMedia("crea un video da questa ultim immagine"), true);
   assert.equal(shouldRecallMedia("anima l'immagine precedente"), true);
+  assert.equal(shouldRecallMedia("usa le immagini precedenti come keyframe"), true);
   assert.equal(shouldRecallMedia("Parliamo di regia cinematografica"), false);
   assert.deepEqual(resolveChatVideoTiming(), {
     shotCount: 1, durationSeconds: 10, totalSeconds: 10,
@@ -160,6 +162,27 @@ try {
   assert.equal(resolveChatVideoMode("crea un video da questa ultima immagine", "T2V", 1, 0, 0), "I2V");
   assert.equal(resolveChatVideoMode("usa questa immagine come riferimento", "I2V", 1, 0, 0), "R2V");
   assert.equal(resolveChatVideoMode("falla parlare con questa voce", "I2V", 1, 0, 1), "R2V");
+  assert.equal(resolveChatVideoMode("usa questa immagine come ultimo frame", "I2V", 1, 0, 0), "KEYFRAMES");
+  assert.equal(resolveChatVideoMode("usa le tre immagini come keyframe intermedi", "T2V", 3, 0, 0), "KEYFRAMES");
+  assert.equal(resolveChatVideoMode("usa come keyframe", "KEYFRAMES", 0, 0, 0), "T2V");
+  assert.equal(resolveChatKeyframePositions("usa questa immagine come ultimo frame", 1, 10), "100%");
+  assert.equal(resolveChatKeyframePositions("usa questa immagine come primo frame", 1, 10), "0%");
+  assert.equal(resolveChatKeyframePositions("usa questa immagine come frame intermedio", 1, 10), "50%");
+  assert.equal(resolveChatKeyframePositions("usa le immagini come keyframe", 2, 10), "0%, 100%");
+  assert.equal(resolveChatKeyframePositions("usa le tre immagini come keyframe intermedi", 3, 10), "25%, 50%, 75%");
+  assert.equal(resolveChatKeyframePositions("keyframe alle posizioni 10%, 40%, 90%", 3, 10), "10%, 40%, 90%");
+  assert.equal(resolveChatKeyframePositions("Picture 1 al secondo 2 e Picture 2 al secondo 8", 2, 10), "20%, 80%");
+  const keyframePlan = normalizePlan(JSON.stringify({
+    reply: "Creo il video con i fotogrammi indicati",
+    title: "Keyframe ordinati",
+    action: {
+      type: "generate_video",
+      prompt: "A continuous cinematic transition through Picture 1, Picture 2 and Picture 3.",
+      videoMode: "KEYFRAMES",
+      durationSeconds: 10,
+    },
+  }));
+  assert.equal(keyframePlan.action?.videoMode, "KEYFRAMES");
 
   const [server, service, audioService, panel, dialog, styles, node, installer, manifest, page, imagePanel, audioPanel] = await Promise.all([
     readFile("bridge/server.ts", "utf8"),
@@ -202,6 +225,8 @@ try {
   assert.match(service, /natural lip synchronization/);
   assert.match(service, /resolveChatVideoMode\(/);
   assert.match(service, /KEEP_SOURCE_ASPECT_PATTERN\.test\(requestText\)/);
+  assert.match(service, /resolveChatKeyframePositions\(requestText, pictures\.length, timing\.totalSeconds\)/);
+  assert.match(service, /T2V\|I2V\|R2V\|KEYFRAMES\|VIDEO EXTENSION\|VIDEO EDITING/);
   assert.match(service, /audioStudio\.planMusic/);
   assert.match(service, /preserveMusicIntent/);
   assert.match(service, /lyrics: plan\.lyrics/);

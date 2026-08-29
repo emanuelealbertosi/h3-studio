@@ -15,7 +15,9 @@ La voce **Chat** aggiunge un assistente LLM Vision locale con conversazioni
 multiple raggruppate per progetto, titoli automatici modificabili e memoria
 indipendente. Può conversare, analizzare fino a quattro immagini della Libreria e,
 su richiesta esplicita, avviare Video H3, immagini Krea, edit Flux.2 Klein o
-immagini Anima. I video avviati dalla Chat usano il profilo rapido controllato
+immagini Anima. Le immagini allegate possono inoltre diventare keyframe iniziali,
+intermedi o finali, con posizioni automatiche, percentuali o tempi espliciti. I
+video avviati dalla Chat usano il profilo rapido controllato
 dal server: 10 secondi, un candidato, 0,5 MP e FAST 8-step. Il modello resta
 caricato fra i messaggi, ma viene scaricato automaticamente prima di ogni render
 per restituire VRAM a ComfyUI. I riferimenti impliciti come “modificala” usano

@@ -26,6 +26,13 @@ di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
   immagine** o **trasformala in video** forzano I2V e recuperano il media più
   recente. **Usala come riferimento/reference** forza invece R2V. Scrivendo
   **mantieni il formato** in I2V viene conservato anche l'aspect ratio sorgente.
+- **Usa questa immagine come ultimo frame** attiva Keyframes al `100%`.
+  Con più Picture, **usale come keyframe** le distribuisce nell'ordine di
+  allegato da `0%` a `100%`; aggiungendo **intermedi** le colloca solo fra gli
+  estremi. Puoi anche scrivere una lista come `10%, 40%, 90%` oppure
+  `Picture 1 al secondo 2, Picture 2 al secondo 8`. I secondi vengono convertiti
+  sulla durata complessiva, anche nei video multishot. La Chat può usare fino a
+  otto immagini come keyframe, pur mostrandone al massimo quattro al planner Vision.
 - Sopra il campo di testo scegli **Auto, Video H3, Krea, Anima o Edit**. La
   scelta esplicita prevale sempre sul router del modello LLM, ma non avvia nulla finché
   il testo non contiene una richiesta esplicita di generazione. Se vuoi essere
@@ -89,6 +96,9 @@ verrà usato. Per esempio, dopo aver creato un'immagine si può scrivere
 “modificala rendendo il gatto blu” senza allegarla di nuovo: l'edit userà
 automaticamente quell'output. Un nuovo allegato o un nuovo output diventa il
 riferimento più recente.
+
+Anche le forme plurali, per esempio “usa le immagini precedenti come keyframe”,
+recuperano insieme gli allegati dell'ultimo messaggio che conteneva media.
 
 Questo meccanismo non consuma continuamente il contesto Vision: al massimo
 quattro immagini vengono inviate al modello e soltanto nel turno che le usa;

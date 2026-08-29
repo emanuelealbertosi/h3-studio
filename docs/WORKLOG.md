@@ -1,5 +1,11 @@
 # Worklog
 
+### 29 agosto 2026 — Keyframes multipli dalla Chat
+
+- Frasi su frame iniziali, intermedi o finali instradano deterministicamente le Picture al modo `KEYFRAMES`, senza confonderle con I2V o Reference.
+- Le immagini seguono l'ordine di allegato e possono essere distribuite su tutta la timeline, soltanto negli intervalli interni oppure posizionate con percentuali e secondi espliciti; il calcolo usa la durata globale anche in multishot.
+- Esteso il recupero della memoria alle forme plurali e aggiunte regressioni per 1, 2 e N immagini, italiano/inglese, tempi, percentuali e Keep Aspect.
+
 ### 29 agosto 2026 — Planner I2V compatibile con GGUF text-only
 
 - Rimossa Picture 1 dall'input del planner LLM dopo che il backend DaSiWa/llama.cpp ha rifiutato il modello GGUF in modalità Vision.
