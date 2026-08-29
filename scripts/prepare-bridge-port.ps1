@@ -202,7 +202,7 @@ function Test-PathWithin([string]$Candidate, [string]$Root) {
 function Test-H3BridgeCommandLine(
   [string]$CommandLine,
   [string]$ExpectedServerPath,
-  [string]$ExpectedTsxRoot
+  [string]$ExpectedNodeModulesRoot
 ) {
   try {
     $arguments = @([H3CommandLineParser]::Parse($CommandLine))
@@ -215,8 +215,13 @@ function Test-H3BridgeCommandLine(
   foreach ($argument in $arguments) {
     $fullPath = Convert-ArgumentToFullPath $argument
     if ($null -ne $fullPath) {
-      if (Test-PathWithin $fullPath $ExpectedTsxRoot) {
-        $hasProjectTsxReference = $true
+      if (Test-PathWithin $fullPath $ExpectedNodeModulesRoot) {
+        $relativeModulePath = $fullPath.Substring(
+          $ExpectedNodeModulesRoot.Length
+        ).TrimStart('\', '/')
+        if ($relativeModulePath -match '(^|[\\/])tsx(?:@[^\\/]+)?([\\/]|$)') {
+          $hasProjectTsxReference = $true
+        }
       }
       if (Test-PathEquals $fullPath $ExpectedServerPath) {
         $hasExactEntrypoint = $true
@@ -260,8 +265,8 @@ $requestIsWildcard = @(
 $expectedServerPath = [System.IO.Path]::GetFullPath(
   (Join-Path $resolvedProjectRoot "bridge\server.ts")
 ).TrimEnd('\', '/')
-$expectedTsxRoot = [System.IO.Path]::GetFullPath(
-  (Join-Path $resolvedProjectRoot "node_modules\tsx")
+$expectedNodeModulesRoot = [System.IO.Path]::GetFullPath(
+  (Join-Path $resolvedProjectRoot "node_modules")
 ).TrimEnd('\', '/')
 
 try {
@@ -299,7 +304,7 @@ $isNode = $owner.Name -ieq "node.exe"
 $isExpectedBridge = Test-H3BridgeCommandLine `
   $owner.CommandLine `
   $expectedServerPath `
-  $expectedTsxRoot
+  $expectedNodeModulesRoot
 
 if (-not ($isNode -and $isExpectedBridge)) {
   Write-Failure (
@@ -326,6 +331,40 @@ if (
 ) {
   Write-Failure "Il processo proprietario è cambiato durante la verifica; avvio annullato."
   exit 22
+}
+
+$normalizedProbeHost = $HostAddress.Trim().TrimStart('[').TrimEnd(']')
+if ($normalizedProbeHost -eq '0.0.0.0') {
+  $normalizedProbeHost = '127.0.0.1'
+} elseif ($normalizedProbeHost -eq '::') {
+  $normalizedProbeHost = '::1'
+}
+$probeHost = if ($normalizedProbeHost.Contains(':')) {
+  "[$normalizedProbeHost]"
+} else {
+  $normalizedProbeHost
+}
+$healthUri = "http://${probeHost}:$Port/api/health"
+
+try {
+  $health = Invoke-RestMethod `
+    -Uri $healthUri `
+    -Method Get `
+    -TimeoutSec 3 `
+    -ErrorAction Stop
+  if ($health.bridge.status -eq 'online') {
+    Write-Output (
+      "[H3 Studio] Bridge del progetto già attivo (PID $ownerPid): riuso " +
+      "l'istanza esistente."
+    )
+    # Exit 25 is an intentional launcher contract: keep this healthy bridge.
+    exit 25
+  }
+} catch {
+  Write-Output (
+    "[H3 Studio] Il bridge PID $ownerPid non risponde correttamente; " +
+    "verrà sostituito."
+  )
 }
 
 Write-Output "[H3 Studio] Arresto bridge precedente PID $ownerPid..."

@@ -116,9 +116,14 @@ async function createListenerFixture(
     serverPath,
     [
       "const fs = require('node:fs');",
+      "const http = require('node:http');",
       "const net = require('node:net');",
       "const markerPath = process.argv[2];",
-      "const server = net.createServer();",
+      "const healthy = process.argv[4] === 'healthy';",
+      "const server = healthy ? http.createServer((request, response) => {",
+      "  response.setHeader('content-type', 'application/json');",
+      "  response.end(JSON.stringify({ bridge: { status: 'online' } }));",
+      "}) : net.createServer();",
       "server.listen(0, process.argv[3], () => {",
       "  fs.writeFileSync(markerPath, String(server.address().port));",
       "});",
@@ -210,6 +215,16 @@ function testLauncherWiring() {
     false,
     "Il launcher conserva ancora una console bridge orfana con cmd /k",
   );
+  assert.equal(
+    launcher.includes('if "%H3_BRIDGE_PREFLIGHT_EXIT%"=="25" set "H3_BRIDGE_REUSE=1"'),
+    true,
+    "Il launcher non riusa un bridge sano già attivo",
+  );
+  assert.equal(
+    launcher.includes('if "%H3_BRIDGE_REUSE%"=="0" ('),
+    true,
+    "Il launcher avvia sempre un secondo bridge",
+  );
 }
 
 async function testStaleListenerCleanup() {
@@ -249,6 +264,29 @@ async function testStaleListenerCleanup() {
     `Il preflight ha ignorato un listener wildcard in conflitto:\n${wildcardResult.stdout}\n${wildcardResult.stderr}`,
   );
   await waitForExit(wildcard.child, 2_000, "listener wildcard");
+
+  const healthyProjectRoot = path.join(temporaryDirectory, "healthy-project");
+  const healthy = await createListenerFixture(
+    healthyProjectRoot,
+    "healthy-port.txt",
+    { extraArguments: ["healthy"] },
+  );
+  const reuse = await runPortPreparationHelper(
+    healthyProjectRoot,
+    healthy.port,
+  );
+  assert.equal(
+    reuse.code,
+    25,
+    `Il preflight non ha riusato il bridge sano:\n${reuse.stdout}\n${reuse.stderr}`,
+  );
+  assert.equal(
+    healthy.child.exitCode,
+    null,
+    "Il preflight ha terminato un bridge sano",
+  );
+  healthy.child.kill();
+  await waitForExit(healthy.child, 2_000, "listener sano");
 
   const claimedProjectRoot = path.join(temporaryDirectory, "claimed-project");
   await mkdir(path.join(claimedProjectRoot, "bridge"), { recursive: true });

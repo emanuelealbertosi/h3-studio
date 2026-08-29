@@ -54,15 +54,22 @@ if not defined H3_BRIDGE_HOST_RESOLVED (
 
 echo [H3 Studio] Verifica bridge precedente su %H3_BRIDGE_HOST_RESOLVED%:%H3_BRIDGE_PORT_RESOLVED%...
 "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%CD%\scripts\prepare-bridge-port.ps1" -ProjectRoot "%CD%" -HostAddress "%H3_BRIDGE_HOST_RESOLVED%" -Port %H3_BRIDGE_PORT_RESOLVED%
-if errorlevel 1 (
+set "H3_BRIDGE_PREFLIGHT_EXIT=%ERRORLEVEL%"
+set "H3_BRIDGE_REUSE=0"
+if "%H3_BRIDGE_PREFLIGHT_EXIT%"=="25" set "H3_BRIDGE_REUSE=1"
+if not "%H3_BRIDGE_PREFLIGHT_EXIT%"=="0" if not "%H3_BRIDGE_PREFLIGHT_EXIT%"=="25" (
   echo [ERRORE] L'endpoint bridge non puo essere preparato in sicurezza.
   echo Chiudi il processo indicato sopra oppure verifica la configurazione H3_BRIDGE_HOST/H3_BRIDGE_PORT.
   pause
   exit /b 1
 )
 
-echo [H3 Studio] Avvio bridge su %H3_BRIDGE_URL_RESOLVED%
-start "H3 Studio - Bridge" cmd /c "cd /d ""%~dp0"" && node --env-file-if-exists=.env node_modules\tsx\dist\cli.mjs bridge\server.ts"
+if "%H3_BRIDGE_REUSE%"=="0" (
+  echo [H3 Studio] Avvio bridge su %H3_BRIDGE_URL_RESOLVED%
+  start "H3 Studio - Bridge" cmd /c "cd /d ""%~dp0"" && node --env-file-if-exists=.env node_modules\tsx\dist\cli.mjs bridge\server.ts"
+) else (
+  echo [H3 Studio] Bridge gia attivo: avvio soltanto l'interfaccia.
+)
 
 echo [H3 Studio] Avvio interfaccia su http://localhost:3000
 start "H3 Studio - Web" cmd /k "cd /d ""%~dp0"" && node_modules\.bin\vinext.cmd dev"
