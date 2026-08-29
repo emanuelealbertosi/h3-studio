@@ -140,6 +140,7 @@ const studioJobs = new StudioJobService(
   runtimeSettings,
   progressTracker,
   jobRepository,
+  installSettings.comfyOutputDir,
 );
 const audioStudio = new AudioStudioService(
   comfy,

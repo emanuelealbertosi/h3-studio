@@ -14,6 +14,20 @@ Questo documento descrive il mapping verificato tra H3 Studio e il workflow
 | Continue video | `VIDEO EXTENSION` | Video 1, fino a 180 secondi nello Studio | Il router continua dall'ultimo frame decodificato e salva soltanto il nuovo segmento. |
 | Edit video | `VIDEO EDITING` | Video 1, fino a 180 secondi nello Studio | Il video viene suddiviso automaticamente in blocchi H3 contigui e ricomposto alla durata sorgente. Il massimo effettivo dipende dalla durata blocco scelta; per sorgenti oltre circa 121 secondi usare blocchi da 15 secondi. |
 
+## Edit video: H3 creativo e Bernini fedele
+
+In **Edit video** lo Studio espone due motori distinti:
+
+- **H3 creativo** è il default e usa il normale workflow MiniMax H3 Hybrid;
+- **Bernini fedele** usa Bernini-R Preview 1.3B con il video sorgente come canvas,
+  audio sorgente conservato, circa 480p, 20 step e una durata massima di 15 secondi.
+
+Bernini è pensato per sostituzioni e correzioni locali conservative. Il modello
+1.3B è una preview leggera: sugli edit complessi con molto moto o molte reference
+può essere meno stabile del modello Bernini completo. Nella Chat viene attivato
+soltanto da una richiesta esplicita (`Bernini`, `edit fedele`, `modifica fedele`);
+gli edit generici restano su H3.
+
 ## Multishot 1–12
 
 Il controllo **Shot** sceglie esattamente da 1 a 12 clip generate nello stesso

@@ -24,6 +24,13 @@ per restituire VRAM a ComfyUI. I riferimenti impliciti come “modificala” usa
 l'ultimo media generato o allegato nella conversazione; **Rigenera** permette di
 correggere il prompt in un popup e avviare una variante con seed nuovo.
 
+Per gli edit video sono disponibili due motori. **H3 creativo** resta il default
+in Studio e Chat; **Bernini fedele Preview 1.3B** usa invece il video sorgente
+come canvas per modifiche locali più conservative, conserva l'audio originale e
+lavora con un profilo fisso da circa 480p/20 step. Nella Chat Bernini viene scelto
+solo con richieste esplicite come “modifica questo video con Bernini” o “fai un
+edit fedele”; un normale “modifica il video” continua a usare H3.
+
 ## Stato
 
 Fase attuale: **Milestone 4 — montaggio locale, Continue/Edit e workflow multimodali**.

@@ -591,4 +591,12 @@ export const JOB_DATABASE_MIGRATIONS = [
        CHECK (shot_count BETWEEN 1 AND 12)`,
     ],
   },
+  {
+    version: 24,
+    statements: [
+      `ALTER TABLE jobs
+       ADD COLUMN video_edit_engine TEXT NOT NULL DEFAULT 'h3'
+       CHECK (video_edit_engine IN ('h3', 'bernini'))`,
+    ],
+  },
 ] as const;

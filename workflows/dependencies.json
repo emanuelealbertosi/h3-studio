@@ -19,6 +19,46 @@
       "requiredFor": ["video", "fast"]
     },
     {
+      "id": "bernini-core",
+      "label": "ComfyUI core Bernini-R",
+      "kind": "custom_node",
+      "requiredClasses": [
+        "BerniniConditioning",
+        "LoadImageOutput"
+      ],
+      "url": "https://github.com/Comfy-Org/ComfyUI",
+      "notes": "Aggiorna ComfyUI se BerniniConditioning non è disponibile. H3 Studio usa VideoHelperSuite per normalizzare il video sorgente a 24 fps.",
+      "requiredFor": ["video_edit_bernini"]
+    },
+    {
+      "id": "bernini-preview-model",
+      "label": "Bernini-R Preview 1.3B FP16",
+      "kind": "model",
+      "folder": "diffusion_models",
+      "filenames": ["wan2.1_bernini_1.3B_fp16.safetensors"],
+      "url": "https://huggingface.co/Comfy-Org/Bernini-R/blob/main/diffusion_models/wan2.1_bernini_1.3B_fp16.safetensors",
+      "notes": "Profilo leggero a 480p per edit fedeli su GPU da 4-12 GB. È meno capace del Bernini-R 14B dual-expert.",
+      "requiredFor": ["video_edit_bernini"]
+    },
+    {
+      "id": "bernini-text-encoder",
+      "label": "Bernini UMT5 XXL FP8",
+      "kind": "model",
+      "folder": "text_encoders",
+      "filenames": ["umt5_xxl_fp8_e4m3fn_scaled.safetensors"],
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+      "requiredFor": ["video_edit_bernini"]
+    },
+    {
+      "id": "bernini-vae",
+      "label": "Bernini Wan 2.1 VAE",
+      "kind": "model",
+      "folder": "vae",
+      "filenames": ["wan_2.1_vae.safetensors"],
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+      "requiredFor": ["video_edit_bernini"]
+    },
+    {
       "id": "h3-studio-chat-node",
       "label": "H3 Studio Gemma 4 Vision Chat (incluso)",
       "kind": "custom_node",
@@ -62,9 +102,9 @@
       "id": "video-helper-suite",
       "label": "ComfyUI VideoHelperSuite",
       "kind": "custom_node",
-      "requiredClasses": ["VHS_LoadVideoPath", "VHS_VideoCombine"],
+      "requiredClasses": ["VHS_LoadVideo", "VHS_LoadVideoPath", "VHS_VideoCombine"],
       "url": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite",
-      "requiredFor": ["face", "upscale"]
+      "requiredFor": ["face", "upscale", "video_edit_bernini"]
     },
     {
       "id": "pdd-acc",
