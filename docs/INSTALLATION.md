@@ -26,7 +26,11 @@ cd H3-Studio
 ```
 
 Il primo BAT chiede la cartella `ComfyUI`, installa il nodo H3 Studio incluso e
-clona i custom node esterni mancanti. Se trova già `ComfyUI-H3-Multishot`,
+clona i custom node esterni mancanti, incluso `ComfyUI-SAM3` per l'inpaint video.
+Per SAM3 fissa inoltre una versione `comfy-kitchen` compatibile con il core
+ComfyUI e instrada le attention mascherate direttamente su PyTorch SDPA: questo
+evita sia il crash `int8_attention_is_available` sia la ripetizione dei warning
+Flash Attention sulle maschere. Se trova già `ComfyUI-H3-Multishot`,
 crea prima un archivio recuperabile in
 `custom_nodes/_h3_studio_backups/`. Non sovrascrive né scarica i pesi.
 

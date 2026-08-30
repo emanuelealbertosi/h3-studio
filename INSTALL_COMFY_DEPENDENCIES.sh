@@ -55,6 +55,7 @@ if [[ $SKIP_EXTERNAL -eq 0 ]]; then
   clone_if_missing Rebalance-Pack https://github.com/nova452/Rebalance-Pack.git
   clone_if_missing ComfyUI-H3-FaceRefine https://github.com/Carasibana/ComfyUI-H3-FaceRefine.git
   clone_if_missing Comfyui_Minimax_h3_latent_Upscaler https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git
+  clone_if_missing comfyui-sam3 https://github.com/1038lab/ComfyUI-SAM3.git
   SOURCE_ROOT="$CUSTOM_NODES/_h3_studio_sources"; mkdir -p "$SOURCE_ROOT"
   NATIVE_REPO="$SOURCE_ROOT/MiniMax-H3-NativeAudio-MusicVideo-Workflow"
   [[ -d "$NATIVE_REPO" ]] || git clone --depth 1 https://github.com/Shrek3OnVH5/MiniMax-H3-NativeAudio-MusicVideo-Workflow.git "$NATIVE_REPO"
@@ -62,6 +63,11 @@ if [[ $SKIP_EXTERNAL -eq 0 ]]; then
   [[ -f "$NATIVE_SOURCE/__init__.py" ]] || { printf '[ERRORE] NativeAudioLock non trovato.\n' >&2; exit 1; }
   mkdir -p "$CUSTOM_NODES/ComfyUI-H3-NativeAudioLock"; cp -a "$NATIVE_SOURCE/." "$CUSTOM_NODES/ComfyUI-H3-NativeAudioLock/"
   INSTALLED+=("$CUSTOM_NODES/ComfyUI-H3-NativeAudioLock")
+fi
+
+if [[ -d "$CUSTOM_NODES/comfyui-sam3" ]]; then
+  command -v node >/dev/null 2>&1 || { printf '[ERRORE] Node.js serve per applicare la compatibilità SAM3.\n' >&2; exit 1; }
+  node "$ROOT/scripts/patch-sam3-compat.mjs" "$CUSTOM_NODES/comfyui-sam3"
 fi
 
 if [[ $INSTALL_REQUIREMENTS -eq 1 ]]; then

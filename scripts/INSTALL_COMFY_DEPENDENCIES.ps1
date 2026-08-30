@@ -99,7 +99,8 @@ if (-not $SkipExternalNodes) {
     @{ Name = "ComfyUI-MiniMax-H3-PDD-Acc"; Url = "https://github.com/Jalen-Brunson/ComfyUI-MiniMax-H3-PDD-Acc.git" },
     @{ Name = "Rebalance-Pack"; Url = "https://github.com/nova452/Rebalance-Pack.git" },
     @{ Name = "ComfyUI-H3-FaceRefine"; Url = "https://github.com/Carasibana/ComfyUI-H3-FaceRefine.git" },
-    @{ Name = "Comfyui_Minimax_h3_latent_Upscaler"; Url = "https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git" }
+    @{ Name = "Comfyui_Minimax_h3_latent_Upscaler"; Url = "https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git" },
+    @{ Name = "comfyui-sam3"; Url = "https://github.com/1038lab/ComfyUI-SAM3.git" }
   )
   foreach ($repo in $repositories) {
     Install-GitRepository -Name $repo.Name -Url $repo.Url
@@ -123,6 +124,18 @@ if (-not $SkipExternalNodes) {
   Copy-Item -Path (Join-Path $nativeSource "*") -Destination $nativeTarget -Recurse -Force
   $installedRepos.Add($nativeTarget)
   Write-Host "Installato ComfyUI-H3-NativeAudioLock" -ForegroundColor Green
+}
+
+$sam3Root = Join-Path $customNodes "comfyui-sam3"
+if (Test-Path -LiteralPath $sam3Root -PathType Container) {
+  $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+  if (-not $nodeCommand) {
+    throw "Node.js non disponibile: serve per applicare la compatibilita SAM3."
+  }
+  & $nodeCommand.Source (Join-Path $projectRoot "scripts\patch-sam3-compat.mjs") $sam3Root
+  if ($LASTEXITCODE -ne 0) {
+    throw "Patch di compatibilita SAM3 fallita."
+  }
 }
 
 if ($InstallPythonRequirements) {
