@@ -997,7 +997,9 @@ export function publicDryRun(
 }
 
 export class StudioJobService {
+  private readonly samPromptIds = new Set<string>();
   private readonly releasedSamPrompts = new Set<string>();
+  private samReleaseQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly comfy: ComfyClient,
@@ -1007,7 +1009,55 @@ export class StudioJobService {
     private readonly progressTracker: ComfyProgressTracker,
     private readonly jobs: JobRepository,
     private readonly samRuntime?: SamRuntimeControl,
-  ) {}
+  ) {
+    this.progressTracker.onTerminal(({ promptId }) => {
+      if (this.samPromptIds.has(promptId)) {
+        return this.releaseSamPrompt(promptId);
+      }
+    });
+  }
+
+  private promptUsesSam(prompt: ComfyApiPrompt) {
+    return Object.values(prompt).some((node) =>
+      /^(?:LoadSAM3Model|SAM3VideoSegmentation|SAM3Propagate|SAM3VideoOutput)$/i
+        .test(node.class_type)
+    );
+  }
+
+  private registerSamPrompt(promptId: string, prompt: ComfyApiPrompt) {
+    if (!this.promptUsesSam(prompt)) return;
+    this.samPromptIds.add(promptId);
+    this.releasedSamPrompts.delete(promptId);
+  }
+
+  private async releaseSamPrompt(promptId: string) {
+    if (
+      !this.samRuntime ||
+      !this.samPromptIds.has(promptId) ||
+      this.releasedSamPrompts.has(promptId)
+    ) {
+      return;
+    }
+
+    const release = this.samReleaseQueue.catch(() => undefined).then(async () => {
+      if (this.releasedSamPrompts.has(promptId)) return;
+
+      const queue = await this.comfy.queueState().catch(() => null);
+      const anotherSamPromptIsRunning = queue
+        ? [...queue.runningPromptIds].some(
+            (runningId) =>
+              runningId !== promptId && this.samPromptIds.has(runningId),
+          )
+        : false;
+
+      if (!anotherSamPromptIsRunning) {
+        await this.samRuntime?.release();
+      }
+      this.releasedSamPrompts.add(promptId);
+    });
+    this.samReleaseQueue = release;
+    await release;
+  }
 
   async prepare(
     rawRequest: unknown,
@@ -1219,6 +1269,7 @@ export class StudioJobService {
           `h3-studio-${prepared.jobId}`,
         );
         this.progressTracker.register(queued.promptId, candidate.prompt);
+        this.registerSamPrompt(queued.promptId, candidate.prompt);
         this.jobs.markQueued(
           prepared.jobId,
           candidate.index,
@@ -1264,23 +1315,27 @@ export class StudioJobService {
           : null;
       const output = entry ? findVideoOutput(entry.outputs) : candidate.output;
       const liveProgress = this.progressTracker.get(candidate.promptId);
+      const currentNodeClass = this.progressTracker.nodeClass(
+        candidate.promptId,
+        liveProgress?.currentNode,
+      );
       if (
-        job.request.generationMode === "VIDEO EDITING" &&
+        this.samPromptIds.has(candidate.promptId) &&
         (
-          liveProgress?.phase === "sampling" ||
+          currentNodeClass === "H3ReferenceMemorySampler" ||
           liveProgress?.phase === "completed" ||
           liveProgress?.phase === "failed" ||
           statusString === "success" ||
           statusString === "error"
-        ) &&
-        !this.releasedSamPrompts.has(candidate.promptId)
+        )
       ) {
-        this.releasedSamPrompts.add(candidate.promptId);
-        void this.samRuntime?.release().catch(() => undefined);
+        void this.releaseSamPrompt(candidate.promptId).catch(() => undefined);
       }
       let status = candidate.status;
       if (statusString === "success" && output) status = "ready";
-      else if (statusString === "error") status = "failed";
+      else if (statusString === "error" || liveProgress?.phase === "failed") {
+        status = "failed";
+      }
       else if (queue.runningPromptIds.has(candidate.promptId)) status = "rendering";
       else if (queue.pendingPromptIds.has(candidate.promptId)) status = "queued";
 
@@ -1353,6 +1408,13 @@ export class StudioJobService {
         job.candidates.some((candidate) => candidate.status === "ready") ? "partial" : "failed",
       );
     }
+    await Promise.all(
+      active.flatMap((candidate) =>
+        candidate.promptId && this.samPromptIds.has(candidate.promptId)
+          ? [this.releaseSamPrompt(candidate.promptId)]
+          : []
+      ),
+    );
     return this.get(jobId);
   }
 
@@ -1362,6 +1424,7 @@ export class StudioJobService {
       try {
         const prompt = JSON.parse(candidate.api_prompt_json) as ComfyApiPrompt;
         this.progressTracker.register(candidate.prompt_id, prompt);
+        this.registerSamPrompt(candidate.prompt_id, prompt);
         recovered += 1;
       } catch {
         // A malformed historical snapshot must not prevent bridge startup.

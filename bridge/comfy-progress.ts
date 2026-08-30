@@ -18,6 +18,15 @@ export type ComfyPromptProgress = {
   updatedAt: string;
 };
 
+export type ComfyPromptTerminalEvent = {
+  promptId: string;
+  outcome: "completed" | "failed";
+};
+
+type TerminalListener = (
+  event: ComfyPromptTerminalEvent,
+) => void | Promise<void>;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -31,6 +40,7 @@ export class ComfyProgressTracker {
   private readonly progress = new Map<string, ComfyPromptProgress>();
   private readonly nodeClasses = new Map<string, Map<string, string>>();
   private readonly mediaKinds = new Map<string, "video" | "image" | "audio">();
+  private readonly terminalListeners = new Set<TerminalListener>();
   private socket: WebSocket | null = null;
   private socketConnected = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -70,6 +80,18 @@ export class ComfyProgressTracker {
 
   get(promptId: string) {
     return this.progress.get(promptId) ?? null;
+  }
+
+  nodeClass(promptId: string, nodeId?: string | null) {
+    const resolvedNodeId = nodeId ?? this.progress.get(promptId)?.currentNode;
+    return resolvedNodeId
+      ? this.nodeClasses.get(promptId)?.get(resolvedNodeId) ?? null
+      : null;
+  }
+
+  onTerminal(listener: TerminalListener) {
+    this.terminalListeners.add(listener);
+    return () => this.terminalListeners.delete(listener);
   }
 
   get connected() {
@@ -123,6 +145,16 @@ export class ComfyProgressTracker {
       ...value,
       updatedAt: new Date().toISOString(),
     });
+  }
+
+  private emitTerminal(event: ComfyPromptTerminalEvent) {
+    for (const listener of this.terminalListeners) {
+      try {
+        void Promise.resolve(listener(event)).catch(() => undefined);
+      } catch {
+        // Cleanup listeners must never break ComfyUI progress handling.
+      }
+    }
   }
 
   private classifyNode(promptId: string, nodeId: string) {
@@ -208,6 +240,7 @@ export class ComfyProgressTracker {
         progress: 100,
         exact: true,
       });
+      this.emitTerminal({ promptId, outcome: "completed" });
       return;
     }
 
@@ -218,6 +251,7 @@ export class ComfyProgressTracker {
         progress: null,
         exact: false,
       });
+      this.emitTerminal({ promptId, outcome: "failed" });
     }
   }
 }

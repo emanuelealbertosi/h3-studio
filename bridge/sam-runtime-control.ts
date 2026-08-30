@@ -71,6 +71,7 @@ export class SamRuntimeControl {
       });
       return { stdout: result.stdout, stderr: result.stderr };
     },
+    private readonly settleDelayMs = 500,
   ) {}
 
   async processes() {
@@ -102,20 +103,34 @@ export class SamRuntimeControl {
 
   async release() {
     const before = await this.processes();
-    for (const worker of before) {
-      try {
-        if (this.platform === "win32") {
-          await this.run("taskkill.exe", ["/PID", String(worker.pid), "/T", "/F"]);
-        } else if (this.platform === "linux") {
-          await this.run("kill", ["-TERM", String(worker.pid)]);
+    let remaining = before;
+    for (let attempt = 0; attempt < 3 && remaining.length > 0; attempt += 1) {
+      for (const worker of remaining) {
+        try {
+          if (this.platform === "win32") {
+            await this.run("taskkill.exe", ["/PID", String(worker.pid), "/T", "/F"]);
+          } else if (this.platform === "linux") {
+            await this.run("kill", [
+              attempt === 0 ? "-TERM" : "-KILL",
+              String(worker.pid),
+            ]);
+          }
+        } catch {
+          // The worker may already have exited between discovery and termination.
         }
-      } catch {
-        // A worker may already have exited after ComfyUI moved its model to CPU.
       }
+      if (this.settleDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, this.settleDelayMs));
+      }
+      remaining = await this.processes();
     }
-    if (before.length > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
+    if (remaining.length > 0) {
+      throw new Error(
+        `Worker SAM3 ancora attivo dopo il cleanup: PID ${remaining
+          .map((worker) => worker.pid)
+          .join(", ")}`,
+      );
     }
-    return { before, after: await this.processes() };
+    return { before, after: remaining };
   }
 }
