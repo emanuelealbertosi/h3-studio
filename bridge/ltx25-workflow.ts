@@ -40,9 +40,16 @@ function sourceRatio(request: StudioJobRequest) {
   const picture = mediaItems(request).find((item) => item.kind === "picture");
   const width = Number(picture?.width);
   const height = Number(picture?.height);
-  return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
-    ? width / height
-    : 16 / 9;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return 16 / 9;
+  }
+  const ratio = width / height;
+  if (ratio < 0.4 || ratio > 2.5) {
+    throw new Error(
+      "LTX 2.5 non supporta il rapporto estremo dell'immagine sorgente; scegli un formato esplicito.",
+    );
+  }
+  return ratio;
 }
 
 export function ltx25Dimensions(request: StudioJobRequest) {
@@ -93,7 +100,9 @@ export function buildLtx25Prompt(
     "17": { class_type: "ManualSigmas", inputs: { sigmas: DISTILLED_SIGMAS } },
     "18": { class_type: "SamplerCustomAdvanced", inputs: { noise: ["14", 0], guider: ["15", 0], sampler: ["16", 0], sigmas: ["17", 0], latent_image: ["10", 0] } },
     "19": { class_type: "LTXVSeparateAVLatent", inputs: { av_latent: ["18", 0] } },
-    "20": { class_type: "VAEDecodeTiled", inputs: { samples: ["19", 0], vae: ["3", 0], tile_size: 512, overlap: 64, temporal_size: 64, temporal_overlap: 8 } },
+    // Official LTX 2.5 low-memory decode profile. The wider temporal overlap
+    // avoids visible joins without requiring a full-frame VAE decode.
+    "20": { class_type: "VAEDecodeTiled", inputs: { samples: ["19", 0], vae: ["3", 0], tile_size: 512, overlap: 64, temporal_size: 128, temporal_overlap: 32 } },
     "21": { class_type: "LTXVAudioVAEDecode", inputs: { samples: ["19", 1], audio_vae: ["4", 0] } },
     "22": { class_type: "CreateVideo", inputs: { images: ["20", 0], audio: ["21", 0], fps: FPS, bit_depth: 8 } },
     "23": { class_type: "SaveVideo", inputs: { video: ["22", 0], filename_prefix: filenamePrefix, format: "auto", codec: "auto" } },
@@ -103,9 +112,9 @@ export function buildLtx25Prompt(
     prompt["12"] = { class_type: "LTXVPreprocess", inputs: { image: ["11", 0], img_compression: 18 } };
     prompt["13"] = {
       class_type: "LTXVImgToVideoInplace",
-      inputs: { vae: ["3", 0], image: ["12", 0], latent: ["10", 0], strength: 0.7, bypass: false },
+      inputs: { vae: ["3", 0], image: ["12", 0], latent: ["8", 0], strength: 0.7, bypass: false },
     };
-    prompt["18"].inputs.latent_image = ["13", 0];
+    prompt["10"].inputs.video_latent = ["13", 0];
   }
   return prompt;
 }

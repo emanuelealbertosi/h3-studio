@@ -50,6 +50,7 @@ type JobRow = {
   turbo_enabled: number;
   engine_profile: "standard" | "fast";
   video_engine: "h3" | "ltx25";
+  ltx_profile_json: string | null;
   pdd_file: string | null;
   media_state: string;
   reference_roles: string;
@@ -83,6 +84,15 @@ type CandidateRow = {
   error: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type LtxProfileSnapshot = {
+  model: string;
+  encoder: string;
+  videoVae: string;
+  audioVae: string;
+  cfg: number;
+  sampler: "euler_ancestral" | "euler";
 };
 
 function displayName(value: unknown) {
@@ -131,6 +141,127 @@ function engineLorasFromRow(value: string, legacyStrength: number): EngineLoraSe
   } catch {
     return value ? [{ name: value, strength: legacyStrength }] : [];
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function partialLtxProfile(value: unknown): Partial<LtxProfileSnapshot> {
+  if (!isRecord(value)) return {};
+  const sampler = value.sampler === "euler" || value.sampler === "euler_ancestral"
+    ? value.sampler
+    : undefined;
+  const cfg = typeof value.cfg === "number" &&
+      Number.isFinite(value.cfg) &&
+      value.cfg >= 0.5 &&
+      value.cfg <= 3
+    ? value.cfg
+    : undefined;
+  return {
+    ...(typeof value.model === "string" && value.model.trim()
+      ? { model: value.model }
+      : {}),
+    ...(typeof value.encoder === "string" && value.encoder.trim()
+      ? { encoder: value.encoder }
+      : {}),
+    ...(typeof value.videoVae === "string" && value.videoVae.trim()
+      ? { videoVae: value.videoVae }
+      : {}),
+    ...(typeof value.audioVae === "string" && value.audioVae.trim()
+      ? { audioVae: value.audioVae }
+      : {}),
+    ...(cfg === undefined ? {} : { cfg }),
+    ...(sampler ? { sampler } : {}),
+  };
+}
+
+function ltxProfileFromPrompt(row: CandidateRow | undefined): Partial<LtxProfileSnapshot> {
+  if (!row) return {};
+  let prompt: ComfyApiPrompt;
+  try {
+    prompt = JSON.parse(row.api_prompt_json) as ComfyApiPrompt;
+  } catch {
+    return {};
+  }
+  if (!isRecord(prompt)) return {};
+  const nodes = Object.values(prompt);
+  const input = (classType: string, name: string) =>
+    nodes.find((node) => node.class_type === classType)?.inputs[name];
+  const textInput = (classType: string, name: string) => {
+    const value = input(classType, name);
+    return typeof value === "string" && value.trim() ? value : undefined;
+  };
+  const referencedVae = (classType: string, name: string) => {
+    const reference = input(classType, name);
+    if (!Array.isArray(reference) || typeof reference[0] !== "string") return undefined;
+    const value = prompt[reference[0]]?.inputs.vae_name;
+    return typeof value === "string" && value.trim() ? value : undefined;
+  };
+  const cfgValue = input("CFGGuider", "cfg");
+  const cfg = typeof cfgValue === "number" &&
+      Number.isFinite(cfgValue) &&
+      cfgValue >= 0.5 &&
+      cfgValue <= 3
+    ? cfgValue
+    : undefined;
+  const samplerValue = textInput("KSamplerSelect", "sampler_name");
+  const sampler = samplerValue === "euler" || samplerValue === "euler_ancestral"
+    ? samplerValue
+    : undefined;
+  return {
+    ...(textInput("UNETLoader", "unet_name")
+      ? { model: textInput("UNETLoader", "unet_name")! }
+      : {}),
+    ...(textInput("CLIPLoader", "clip_name")
+      ? { encoder: textInput("CLIPLoader", "clip_name")! }
+      : {}),
+    ...(referencedVae("VAEDecodeTiled", "vae")
+      ? { videoVae: referencedVae("VAEDecodeTiled", "vae")! }
+      : {}),
+    ...((referencedVae("LTXVAudioVAEDecode", "audio_vae") ??
+      referencedVae("LTXVEmptyLatentAudio", "audio_vae"))
+      ? {
+          audioVae: (referencedVae("LTXVAudioVAEDecode", "audio_vae") ??
+            referencedVae("LTXVEmptyLatentAudio", "audio_vae"))!,
+        }
+      : {}),
+    ...(cfg === undefined ? {} : { cfg }),
+    ...(sampler ? { sampler } : {}),
+  };
+}
+
+function ltxProfileFromRow(
+  job: JobRow,
+  candidate: CandidateRow | undefined,
+): LtxProfileSnapshot {
+  let persisted: Partial<LtxProfileSnapshot> = {};
+  try {
+    persisted = partialLtxProfile(JSON.parse(job.ltx_profile_json ?? "null"));
+  } catch {
+    // Old or manually edited databases can contain no usable snapshot.
+  }
+  const prompt = ltxProfileFromPrompt(candidate);
+  return {
+    model: persisted.model ?? prompt.model ?? job.model,
+    encoder: persisted.encoder ?? prompt.encoder ?? "",
+    videoVae: persisted.videoVae ?? prompt.videoVae ?? "",
+    audioVae: persisted.audioVae ?? prompt.audioVae ?? "",
+    cfg: persisted.cfg ?? prompt.cfg ?? 1,
+    sampler: persisted.sampler ?? prompt.sampler ?? "euler",
+  };
+}
+
+function ltxProfileJson(settings: ResolvedEngineSettings) {
+  if (settings.family !== "ltx25") return null;
+  return JSON.stringify({
+    model: settings.model,
+    encoder: settings.encoder,
+    videoVae: settings.videoVae,
+    audioVae: settings.audioVae,
+    cfg: settings.cfg,
+    sampler: settings.sampler,
+  } satisfies LtxProfileSnapshot);
 }
 
 export class JobRepository {
@@ -294,6 +425,7 @@ export class JobRepository {
         pdd_file TEXT,
         video_engine TEXT NOT NULL DEFAULT 'h3'
           CHECK (video_engine IN ('h3', 'ltx25'))
+        ,ltx_profile_json TEXT
         ,inpaint_target TEXT NOT NULL DEFAULT ''
         ,inpaint_mask_grow INTEGER NOT NULL DEFAULT 8
           CHECK (inpaint_mask_grow BETWEEN 0 AND 96)
@@ -309,7 +441,8 @@ export class JobRepository {
         selected_candidate_index, seed_mode, media_state, reference_roles,
         keyframe_positions, source_video_audio, project_id, source_job_id,
         mute_diegetic, mute_non_diegetic, quality_mode, turbo_enabled,
-        engine_profile, pdd_file, video_engine, inpaint_target, inpaint_mask_grow,
+        engine_profile, pdd_file, video_engine, ltx_profile_json,
+        inpaint_target, inpaint_mask_grow,
         inpaint_start_seconds, inpaint_end_seconds
       ) SELECT
         id, status, created_at, updated_at, prompt, candidate_count,
@@ -318,7 +451,8 @@ export class JobRepository {
         selected_candidate_index, seed_mode, media_state, reference_roles,
         keyframe_positions, source_video_audio, project_id, source_job_id,
         mute_diegetic, mute_non_diegetic, quality_mode, turbo_enabled,
-        engine_profile, pdd_file, COALESCE(video_engine, 'h3'), inpaint_target, inpaint_mask_grow,
+        engine_profile, pdd_file, COALESCE(video_engine, 'h3'), ltx_profile_json,
+        inpaint_target, inpaint_mask_grow,
         inpaint_start_seconds, inpaint_end_seconds
       FROM jobs`);
       this.database.exec("DROP TABLE jobs");
@@ -352,8 +486,8 @@ export class JobRepository {
             inpaint_target, inpaint_mask_grow,
             inpaint_start_seconds, inpaint_end_seconds,
             quality_mode, turbo_enabled, engine_profile, pdd_file, video_engine,
-            model, lora, lora_strength, steps
-          ) VALUES (?, 'prepared', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ltx_profile_json, model, lora, lora_strength, steps
+          ) VALUES (?, 'prepared', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           prepared.jobId,
@@ -385,6 +519,7 @@ export class JobRepository {
           settings.profile,
           settings.pddFile,
           prepared.request.videoEngine,
+          ltxProfileJson(settings),
           settings.model,
           JSON.stringify(settings.loras),
           settings.loraStrength,
@@ -519,6 +654,27 @@ export class JobRepository {
       )
       .all(jobId) as unknown as CandidateRow[];
     const engineLoras = engineLorasFromRow(job.lora, job.lora_strength);
+    const engine: ResolvedEngineSettings = job.video_engine === "ltx25"
+      ? {
+          family: "ltx25",
+          profile: "standard",
+          pddFile: null,
+          ...ltxProfileFromRow(job, candidates[0]),
+          loras: [],
+          lora: "",
+          loraStrength: 0,
+          steps: job.steps,
+        }
+      : {
+          family: "h3",
+          profile: job.engine_profile,
+          pddFile: job.pdd_file,
+          model: job.model,
+          loras: engineLoras,
+          lora: engineLoras[0]?.name ?? "",
+          loraStrength: engineLoras[0]?.strength ?? 0,
+          steps: job.steps,
+        };
     return {
       id: job.id,
       projectId: job.project_id,
@@ -527,16 +683,7 @@ export class JobRepository {
       status: job.status,
       createdAt: job.created_at,
       selectedCandidateIndex: job.selected_candidate_index,
-      engine: {
-        family: job.video_engine === "ltx25" ? "ltx25" : "h3",
-        profile: job.engine_profile,
-        pddFile: job.pdd_file,
-        model: job.model,
-        loras: engineLoras,
-        lora: engineLoras[0]?.name ?? "",
-        loraStrength: engineLoras[0]?.strength ?? 0,
-        steps: job.steps,
-      },
+      engine,
       request: {
         videoEngine: job.video_engine === "ltx25" ? "ltx25" : "h3",
         prompt: job.prompt,

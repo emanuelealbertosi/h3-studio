@@ -270,7 +270,13 @@ function normalizeRequest(value: unknown): StudioJobRequest {
     throw new Error("A 15 secondi la risoluzione massima supportata è 0.7 MP");
   }
 
-  const videoEngine: VideoEngine = value.videoEngine === "ltx25" ? "ltx25" : "h3";
+  let videoEngine: VideoEngine;
+  if (value.videoEngine === undefined) videoEngine = "h3";
+  else if (value.videoEngine === "h3" || value.videoEngine === "ltx25") {
+    videoEngine = value.videoEngine;
+  } else {
+    throw new Error("videoEngine deve essere h3 oppure ltx25");
+  }
   const generationMode =
     typeof value.generationMode === "string"
       ? value.generationMode.toUpperCase()
@@ -724,6 +730,11 @@ function resolveLtx25EngineSettings(
     family: "ltx25",
     profile: "standard",
     model: runtimeSettings.ltx25.model,
+    encoder: runtimeSettings.ltx25.encoder,
+    videoVae: runtimeSettings.ltx25.videoVae,
+    audioVae: runtimeSettings.ltx25.audioVae,
+    cfg: runtimeSettings.ltx25.cfg,
+    sampler: runtimeSettings.ltx25.sampler,
     pddFile: null,
     loras: [],
     lora: "",
@@ -1150,12 +1161,17 @@ export class StudioJobService {
       throw new Error("Il prompt video deve contenere da 3 a 20.000 caratteri");
     }
     const currentSettings = await this.runtimeSettings.get();
-    const preservedSettings: RuntimeSettings = original.request.videoEngine === "ltx25"
+    const preservedSettings: RuntimeSettings = original.engine.family === "ltx25"
       ? {
           ...currentSettings,
           ltx25: {
-            ...currentSettings.ltx25,
-            model: original.engine.model,
+            model: original.engine.model || currentSettings.ltx25.model,
+            encoder: original.engine.encoder || currentSettings.ltx25.encoder,
+            videoVae: original.engine.videoVae || currentSettings.ltx25.videoVae,
+            audioVae: original.engine.audioVae || currentSettings.ltx25.audioVae,
+            steps: 8,
+            cfg: original.engine.cfg,
+            sampler: original.engine.sampler,
           },
         }
       : original.engine.profile === "fast"

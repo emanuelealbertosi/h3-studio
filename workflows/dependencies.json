@@ -28,17 +28,33 @@
     },
     {
       "id": "ltx-video-nodes",
-      "label": "LTX Video 2.5 nodes",
+      "label": "LTX 2.5 / ComfyUI core nodes",
       "kind": "custom_node",
       "requiredClasses": [
+        "UNETLoader",
+        "CLIPLoader",
+        "VAELoader",
+        "CLIPTextEncode",
         "LTXVConditioning",
+        "EmptyLTXVLatentVideo",
         "LTXVEmptyLatentAudio",
         "LTXVConcatAVLatent",
-        "LTXVImgToVideoInplace",
-        "LTXVAudioVAEDecode"
+        "RandomNoise",
+        "CFGGuider",
+        "KSamplerSelect",
+        "ManualSigmas",
+        "SamplerCustomAdvanced",
+        "LTXVSeparateAVLatent",
+        "VAEDecodeTiled",
+        "LTXVAudioVAEDecode",
+        "CreateVideo",
+        "SaveVideo",
+        "LoadImage",
+        "LTXVPreprocess",
+        "LTXVImgToVideoInplace"
       ],
-      "url": "https://github.com/Lightricks/ComfyUI-LTXVideo",
-      "notes": "Motore video alternativo esplicito; H3 resta predefinito. Riavvia ComfyUI dopo installazione o aggiornamento.",
+      "url": "https://github.com/Comfy-Org/ComfyUI",
+      "notes": "Le classi LTX 2.5 usate da T2V e I2V sono incluse nel core ComfyUI recente. Se una verifica object_info fallisce, aggiorna ComfyUI e riavvialo; H3 resta predefinito.",
       "requiredFor": ["video_ltx25"]
     },
     {

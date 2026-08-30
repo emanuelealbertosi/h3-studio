@@ -116,7 +116,7 @@ export type RuntimeSettings = {
   voiceConversion: VoiceConversionEngineSettings;
 };
 
-export type ResolvedEngineSettings = H3EngineSettings & {
+type ResolvedEngineSettingsBase = H3EngineSettings & {
   family: "h3" | "ltx25";
   profile: "standard" | "fast";
   pddFile: string | null;
@@ -124,6 +124,15 @@ export type ResolvedEngineSettings = H3EngineSettings & {
   lora: string;
   loraStrength: number;
 };
+
+export type ResolvedEngineSettings =
+  | (ResolvedEngineSettingsBase & { family: "h3" })
+  | (ResolvedEngineSettingsBase &
+    Omit<Ltx25EngineSettings, "model" | "steps"> & {
+      family: "ltx25";
+      profile: "standard";
+      pddFile: null;
+    });
 
 export function isFlux2KleinModelFilename(value: string) {
   return /(?:flux.*2.*klein|klein.*flux|unstable.*f2k|snofs)/i.test(value);
@@ -156,7 +165,7 @@ export const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
     audioVae: "ltx-2.5-audio-vae-bf16.safetensors",
     steps: 8,
     cfg: 1,
-    sampler: "euler_ancestral",
+    sampler: "euler",
   },
   krea: {
     model: "krea2TurboFP8_krea2TURBO.safetensors",
@@ -337,6 +346,9 @@ function validateSettings(value: unknown): RuntimeSettings {
   const ltx25VideoVae = typeof ltx25.videoVae === "string" ? ltx25.videoVae.trim() : "";
   const ltx25AudioVae = typeof ltx25.audioVae === "string" ? ltx25.audioVae.trim() : "";
   const ltx25Cfg = Number(ltx25.cfg);
+  const ltx25Sampler = ltx25.sampler === "euler" || ltx25.sampler === "euler_ancestral"
+    ? ltx25.sampler
+    : null;
   const kreaModel = typeof value.krea.model === "string" ? value.krea.model.trim() : "";
   const encoder = typeof value.krea.encoder === "string" ? value.krea.encoder.trim() : "";
   const vae = typeof value.krea.vae === "string" ? value.krea.vae.trim() : "";
@@ -399,6 +411,9 @@ function validateSettings(value: unknown): RuntimeSettings {
   }
   if (!Number.isFinite(ltx25Cfg) || ltx25Cfg < 0.5 || ltx25Cfg > 3) {
     throw new Error("Il CFG LTX 2.5 deve essere compreso fra 0,5 e 3");
+  }
+  if (!ltx25Sampler) {
+    throw new Error("Il sampler LTX 2.5 deve essere euler oppure euler_ancestral");
   }
   if (!kreaModel) throw new Error("Seleziona un modello Krea");
   if (!encoder) throw new Error("Seleziona il text encoder Krea");
@@ -511,7 +526,7 @@ function validateSettings(value: unknown): RuntimeSettings {
       audioVae: ltx25AudioVae,
       steps: 8,
       cfg: ltx25Cfg,
-      sampler: ltx25.sampler === "euler" ? "euler" : "euler_ancestral",
+      sampler: ltx25Sampler,
     },
     krea: {
       model: kreaModel,

@@ -23,6 +23,7 @@ import { PostprocessService } from "./postprocess-service.js";
 import { FastWorkflowStore } from "./fast-workflow-store.js";
 import { AdminAuthService } from "./admin-auth.js";
 import { pddModelCompatibility } from "./pdd-compatibility.js";
+import { assertLtx25AssetCompatibility } from "./ltx25-compatibility.js";
 import {
   ImageJobRepository,
   type ImageProjectTag,
@@ -1895,6 +1896,8 @@ async function saveEngineSettings(
     const fast = (body as { fast?: unknown }).fast;
     const krea = (body as { krea?: unknown }).krea;
     const currentSettings = await runtimeSettings.get();
+    const ltx25 =
+      (body as { ltx25?: unknown }).ltx25 ?? currentSettings.ltx25;
     const imageEdit =
       (body as { imageEdit?: unknown }).imageEdit ?? currentSettings.imageEdit;
     const anima =
@@ -1908,6 +1911,7 @@ async function saveEngineSettings(
     if (
       typeof h3 !== "object" || h3 === null || Array.isArray(h3) ||
       typeof fast !== "object" || fast === null || Array.isArray(fast) ||
+      typeof ltx25 !== "object" || ltx25 === null || Array.isArray(ltx25) ||
       typeof krea !== "object" || krea === null || Array.isArray(krea) ||
       typeof imageEdit !== "object" || imageEdit === null || Array.isArray(imageEdit) ||
       typeof anima !== "object" || anima === null || Array.isArray(anima)
@@ -1916,8 +1920,9 @@ async function saveEngineSettings(
       || typeof music !== "object" || music === null || Array.isArray(music)
       || typeof voiceConversion !== "object" || voiceConversion === null || Array.isArray(voiceConversion)
     ) {
-      return reply.status(400).send({ ok: false, error: "Configurazione H3, FAST, Krea, Anima o Chat mancante" });
+      return reply.status(400).send({ ok: false, error: "Configurazione H3, FAST, LTX 2.5, Krea, Anima o Chat mancante" });
     }
+    assertLtx25AssetCompatibility(ltx25);
     const [models, loras, pddFiles, textEncoders, vaes, llmFiles, chatRuntime] = await Promise.all([
       comfy.models("diffusion_models"),
       comfy.models("loras"),

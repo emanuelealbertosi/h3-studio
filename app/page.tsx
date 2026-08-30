@@ -14,6 +14,7 @@ import {
   isOfficialFastPddModel,
   preferredPddFileForModel,
 } from "../bridge/pdd-compatibility";
+import { compatibleEngineOptions } from "./engine-options";
 
 type CandidateStatus =
   | "idle"
@@ -479,17 +480,6 @@ type EngineLoraSlot = {
 
 function isFastCreativeLora(name: string) {
   return !/(?:turbo|distill|pdd|acc[-_ ]?8)/i.test(name);
-}
-
-function compatibleEngineOptions(
-  values: string[],
-  current: string,
-  pattern: RegExp,
-) {
-  const compatible = values.filter((value) => pattern.test(value));
-  const options = compatible.length > 0 ? [...compatible] : [...values];
-  if (current && !options.includes(current)) options.unshift(current);
-  return options;
 }
 
 function preferredFlux2Encoder(model: string, encoders: string[], fallback: string) {
@@ -3917,17 +3907,24 @@ function AdminPanel() {
       )
     : [];
   const ltx25Models = data
-    ? compatibleEngineOptions(data.capabilities.models, data.settings.ltx25.model, /ltx.*2[._-]?5|redgraft/i)
+    ? compatibleEngineOptions(data.capabilities.models, data.settings.ltx25.model, /ltx.*2[._-]?5|redgraft/i, "strict")
     : [];
   const ltx25Encoders = data
-    ? compatibleEngineOptions(data.capabilities.textEncoders, data.settings.ltx25.encoder, /ltx.*2[._-]?5/i)
+    ? compatibleEngineOptions(data.capabilities.textEncoders, data.settings.ltx25.encoder, /ltx.*2[._-]?5/i, "strict")
     : [];
   const ltx25Vaes = data
-    ? compatibleEngineOptions(data.capabilities.vaes, data.settings.ltx25.videoVae, /ltx.*2[._-]?5.*video.*vae/i)
+    ? compatibleEngineOptions(data.capabilities.vaes, data.settings.ltx25.videoVae, /ltx.*2[._-]?5.*video.*vae/i, "strict")
     : [];
   const ltx25AudioVaes = data
-    ? compatibleEngineOptions(data.capabilities.vaes, data.settings.ltx25.audioVae, /ltx.*2[._-]?5.*audio.*vae/i)
+    ? compatibleEngineOptions(data.capabilities.vaes, data.settings.ltx25.audioVae, /ltx.*2[._-]?5.*audio.*vae/i, "strict")
     : [];
+  const ltx25CompatibleAssetsAvailable = Boolean(
+    data &&
+    ltx25Models.includes(data.settings.ltx25.model) &&
+    ltx25Encoders.includes(data.settings.ltx25.encoder) &&
+    ltx25Vaes.includes(data.settings.ltx25.videoVae) &&
+    ltx25AudioVaes.includes(data.settings.ltx25.audioVae),
+  );
   const kreaModels = data
     ? compatibleEngineOptions(
         data.capabilities.models,
@@ -4241,7 +4238,10 @@ function AdminPanel() {
                 <label><span>Audio VAE</span><select value={data.settings.ltx25.audioVae} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, audioVae: event.target.value } } })}>{ltx25AudioVaes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
                 <label><span>CFG</span><input min="0.5" max="3" step="0.1" type="number" value={data.settings.ltx25.cfg} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, cfg: Number(event.target.value) } } })} /></label>
                 <label><span>Sampler</span><select value={data.settings.ltx25.sampler} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, sampler: event.target.value as "euler" | "euler_ancestral" } } })}><option value="euler_ancestral">Euler ancestral</option><option value="euler">Euler</option></select></label>
-                <p className="image-edit-profile-note">RedGraft INT8 · T2V/I2V con audio nativo · H3 resta sempre il motore predefinito.</p>
+                {!ltx25CompatibleAssetsAvailable && (
+                  <p className="image-edit-profile-note">Nessun fallback automatico: installa o seleziona checkpoint, encoder, Video VAE e Audio VAE LTX 2.5 compatibili prima di usare il motore.</p>
+                )}
+                <p className="image-edit-profile-note">RedGraft INT8 · T2V/I2V con audio nativo · H3 resta sempre il motore predefinito. Su GPU da 16 GB richiede l’offload aggressivo di ComfyUI (`--disable-smart-memory`).</p>
               </div>
             </article>
 
@@ -4925,8 +4925,13 @@ function StudioApp() {
     [candidateCount, duration, effectiveSteps, megapixels, modeConfig.factor, shotCount],
   );
   const estimatedSeconds = useMemo(
-    () =>
-      Math.round(
+    () => {
+      if (videoEngine === "ltx25") {
+        return Math.round(
+          95 * (duration / 5) * (megapixels / 0.5) * candidateCount,
+        );
+      }
+      return Math.round(
         28 +
           172 *
             (duration / 5) *
@@ -4934,8 +4939,9 @@ function StudioApp() {
             (megapixels / 0.5) *
             (effectiveSteps / 8) *
             candidateCount,
-      ),
-    [candidateCount, duration, effectiveSteps, megapixels, shotCount],
+      );
+    },
+    [candidateCount, duration, effectiveSteps, megapixels, shotCount, videoEngine],
   );
   const estimatedTimeLabel = useMemo(() => {
     const minimumMinutes = Math.max(1, Math.round((estimatedSeconds * 0.85) / 60));
@@ -5326,6 +5332,19 @@ function StudioApp() {
     const generationMode = generationModeByUi[mode];
     const pictureCount = mediaAssets.filter((asset) => asset.kind === "picture").length;
     const videoCount = mediaAssets.filter((asset) => asset.kind === "video").length;
+    if (videoEngine === "ltx25") {
+      const validT2v = generationMode === "T2V" && mediaAssets.length === 0;
+      const validI2v =
+        generationMode === "I2V" &&
+        mediaAssets.length === 1 &&
+        pictureCount === 1;
+      if (!validT2v && !validI2v) {
+        setRunMessage(
+          "LTX 2.5 accetta T2V senza allegati oppure I2V con una sola immagine. Rimuovi gli altri media o usa MiniMax H3.",
+        );
+        return;
+      }
+    }
     if (
       (generationMode === "I2V" || generationMode === "KEYFRAMES") &&
       pictureCount === 0
@@ -5594,7 +5613,7 @@ function StudioApp() {
         uid: crypto.randomUUID(),
       }));
       setMediaAssets((current) => [...current, ...additions].slice(0, 18));
-      if (videoEngine === "ltx25" && additions.length > 1) {
+      if (videoEngine === "ltx25" && mediaAssets.length + additions.length > 1) {
         setVideoEngine("h3");
         setMode("reference");
       } else if (mode === "t2v") {
@@ -5790,7 +5809,24 @@ function StudioApp() {
         }
         return next.slice(0, 18);
       });
-      setRunMessage(`${uploaded.length} asset caricati e salvati in Libreria come Esterni`);
+      const combined = [...mediaAssets, ...uploaded];
+      const ltxCompatible =
+        combined.length <= 1 && combined.every((asset) => asset.kind === "picture");
+      if (videoEngine === "ltx25") {
+        if (ltxCompatible) {
+          setMode(combined.length === 1 ? "i2v" : "t2v");
+        } else {
+          setVideoEngine("h3");
+          setMode("reference");
+        }
+      } else if (mode === "t2v" && uploaded.length > 0) {
+        setMode("reference");
+      }
+      setRunMessage(
+        videoEngine === "ltx25" && !ltxCompatible
+          ? `${uploaded.length} asset caricati; sono incompatibili con LTX, quindi ho ripristinato MiniMax H3 Reference.`
+          : `${uploaded.length} asset caricati e salvati in Libreria come Esterni`,
+      );
     } catch (error) {
       setRunMessage(error instanceof Error ? error.message : "Upload fallito");
     } finally {
@@ -6550,13 +6586,24 @@ function StudioApp() {
                   value={videoEngine}
                   onChange={(event) => {
                     const nextEngine = event.target.value as VideoEngine;
-                    setVideoEngine(nextEngine);
                     if (nextEngine === "ltx25") {
-                      if (mode !== "t2v" && mode !== "i2v") setMode("t2v");
+                      const ltxCompatible =
+                        mediaAssets.length <= 1 &&
+                        mediaAssets.every((asset) => asset.kind === "picture");
+                      if (!ltxCompatible) {
+                        setRunMessage(
+                          "Per selezionare LTX 2.5 rimuovi video/audio e lascia al massimo una sola immagine.",
+                        );
+                        return;
+                      }
+                      setVideoEngine(nextEngine);
+                      setMode(mediaAssets.length === 1 ? "i2v" : "t2v");
                       setShotCount(1);
                       setQualityMode("fast");
                       setTurboEnabled(false);
                       setRunMessage("LTX 2.5 selezionato · motore rapido 8 step, T2V/I2V");
+                    } else {
+                      setVideoEngine(nextEngine);
                     }
                   }}
                 >

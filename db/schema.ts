@@ -618,4 +618,10 @@ export const JOB_DATABASE_MIGRATIONS = [
        CHECK (video_engine IN ('h3', 'ltx25'))`,
     ],
   },
+  {
+    version: 27,
+    statements: [
+      `ALTER TABLE jobs ADD COLUMN ltx_profile_json TEXT`,
+    ],
+  },
 ] as const;

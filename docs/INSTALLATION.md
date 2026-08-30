@@ -103,8 +103,10 @@ HTTP-only della durata di 12 ore.
 - `workflows/studio-anima.api.json`: generazione anime Anima con profilo separato.
 - LTX 2.5 viene composto dal bridge con nodi core/LTX aggiornati, senza duplicare
   un grande workflow JSON. `scripts/download-ltx25-models.ps1` scarica encoder e
-  VAE opzionali in un model store separato; il checkpoint RedGraft resta un
-  download distinto da Civitai.
+  VAE opzionali nella cartella indicata esplicitamente con `-ModelRoot`; non usa
+  mai un disco predefinito. Indicare la cartella `models` della ComfyUI collegata
+  oppure un model store già dichiarato in `extra_model_paths.yaml`. Il checkpoint
+  RedGraft resta un download distinto da Civitai.
 - `workflows/catalog.json`: ruoli e associazioni disponibili.
 - `workflows/dependencies.json`: nodi e modelli richiesti.
 

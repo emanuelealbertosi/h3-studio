@@ -145,6 +145,34 @@ try {
     preserveLtx25Intent({ type: "generate_video", prompt: "A runner" }, "crea rapidamente un video")?.videoEngine,
     "h3",
   );
+  for (const request of [
+    "crea un video ma non usare LTX 2.5",
+    "crea un video senza RedGraft",
+    "crea un video, non voglio usare LTX",
+    "create a video but don't use LTX 2.5",
+    "create a video without using RedGraft",
+  ]) {
+    assert.equal(
+      preserveLtx25Intent({ type: "generate_video", prompt: "A runner" }, request)?.videoEngine,
+      "h3",
+      `La negazione LTX deve mantenere H3: ${request}`,
+    );
+  }
+  assert.equal(
+    preserveLtx25Intent(
+      { type: "generate_video", prompt: "A runner" },
+      "non usare H3, usa LTX 2.5",
+    )?.videoEngine,
+    "ltx25",
+  );
+  assert.equal(
+    preserveLtx25Intent(
+      { type: "generate_video", prompt: "A runner" },
+      "non usare LTX 2.5",
+      "ltx25",
+    )?.videoEngine,
+    "ltx25",
+  );
   assert.equal(preserveMiniMaxImageIntent(proposedImage, "usa MiniMax per questa immagine")?.type, "generate_minimax_image");
   assert.equal(preserveMiniMaxImageIntent(proposedImage, "crea una foto generica")?.type, "generate_image");
   assert.equal(preserveMiniMaxImageIntent(proposedImage, "crea una foto generica", "minimax")?.type, "generate_minimax_image");

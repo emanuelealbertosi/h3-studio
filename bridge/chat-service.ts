@@ -498,7 +498,15 @@ function routeInstruction(route: ChatRoute) {
   return `ROUTE_OVERRIDE=${route}. If and only if the user explicitly requests media creation, use action type ${action}. The selector alone never authorizes a render.${engineRule}`;
 }
 
-const EXPLICIT_LTX25_PATTERN = /\b(?:usa(?:re)?|usando|con|tramite|motore)?\s*(?:ltx(?:\s*2[.,]?5)?|redgraft)\b/i;
+const LTX25_ENGINE_PATTERN = String.raw`(?:ltx(?:\s*2[.,]?5)?|redgraft)`;
+const EXPLICIT_LTX25_PATTERN = new RegExp(
+  String.raw`\b(?:usa(?:re)?|usando|con|tramite|motore)?\s*${LTX25_ENGINE_PATTERN}\b`,
+  "i",
+);
+const NEGATED_LTX25_PATTERN = new RegExp(
+  String.raw`\b(?:non\s+(?:usa(?:re)?|utilizza(?:re)?|scegli(?:ere)?|seleziona(?:re)?|(?:voglio|desidero)(?:\s+usa(?:re)?)?)|senza(?:\s+usa(?:re)?)?|evita(?:re)?|esclud(?:i|ere)|niente|no|(?:do\s+not|don['’]?t|never)(?:\s+(?:use|select|choose))?|without(?:\s+using)?|avoid(?:\s+using)?|exclude|not)\s+(?:(?:il|lo|the)\s+)?(?:(?:motore|engine)\s+)?${LTX25_ENGINE_PATTERN}\b`,
+  "i",
+);
 
 export function preserveLtx25Intent(action: PlannedAction | null, request: string, route: ChatRoute = "auto") {
   if (!action || action.type !== "generate_video") return action;
@@ -506,7 +514,12 @@ export function preserveLtx25Intent(action: PlannedAction | null, request: strin
   if (route === "video") return { ...action, videoEngine: "h3" } as PlannedAction;
   return {
     ...action,
-    videoEngine: route === "auto" && EXPLICIT_LTX25_PATTERN.test(request) ? "ltx25" : "h3",
+    videoEngine:
+      route === "auto" &&
+      !NEGATED_LTX25_PATTERN.test(request) &&
+      EXPLICIT_LTX25_PATTERN.test(request)
+        ? "ltx25"
+        : "h3",
   } as PlannedAction;
 }
 

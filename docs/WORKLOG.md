@@ -401,10 +401,24 @@
 # 30 agosto 2026 — Motore video opzionale LTX 2.5
 
 - Integrato LTX 2.5 RedGraft INT8 come engine video alternativo esplicito in Studio e Chat; H3 resta il default.
-- Aggiunto workflow API single-stage costruito dal bridge: T2V/I2V, 24 fps, 8 step distilled, CFG 1, Euler ancestral e audio nativo.
-- Aggiunti profilo Admin persistente, dipendenze, model store esterno, download riprendibile, migrazione SQLite `video_engine` e rigenerazione fedele all'engine originale.
+- Aggiunto workflow API single-stage costruito dal bridge: T2V/I2V, 24 fps, 8 step distilled, CFG 1, Euler e audio nativo.
+- Aggiunti profilo Admin persistente, dipendenze core verificate da `object_info`, model store esterno e download riprendibile/atomico senza disco predefinito.
+- La migrazione SQLite `27` salva per ogni job lo snapshot completo LTX (checkpoint,
+  encoder, due VAE, CFG e sampler): Rigenera non può cambiare profilo se in seguito
+  vengono modificate le impostazioni Admin. I job precedenti recuperano il profilo
+  dal prompt API candidato già salvato.
 - Bloccati con errore leggibile i flussi non supportati (Reference, Keyframes, Continue, Edit, audio allegato, più Picture e multishot).
 - Aggiunti test dedicati LTX, controlli Chat non ambigui e build di produzione.
+- Corretto il percorso I2V prima del primo render reale: l'immagine viene codificata
+  nel solo latent video e l'audio viene concatenato dopo, come nel template
+  ufficiale; applicarlo al `NestedTensor` AV avrebbe causato errore prima del sampling.
+- Allineato il decode tiled al profilo ufficiale `512/64/128/32` e resi atomici
+  i download di encoder/VAE tramite file `.part` verificato prima del rename.
+- Documentato l'offload aggressivo obbligatorio sulle GPU da 16 GB.
+- La UI non ignora più allegati in modo silenzioso: LTX accetta solo T2V senza media
+  oppure I2V con una Picture. Combinazioni incompatibili vengono bloccate o riportate
+  esplicitamente su H3 Reference. Aggiunte inoltre stima tempi dedicata, validazione
+  di sampler e asset, rapporti I2V estremi e negazioni Chat italiane/inglesi.
 
 # 30 agosto 2026 — Isolamento SAM3 e protezione dei target
 
