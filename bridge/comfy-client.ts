@@ -272,7 +272,7 @@ export class ComfyClient {
     }
   }
 
-  async models(folder: "diffusion_models" | "loras") {
+  async models(folder: "diffusion_models" | "loras" | "text_encoders" | "vae") {
     const models = await this.requestJson<unknown>(`/models/${folder}`);
     if (!Array.isArray(models)) return [];
     return models.filter((item): item is string => typeof item === "string");

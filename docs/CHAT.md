@@ -41,7 +41,7 @@ di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
   `Picture 1 al secondo 2, Picture 2 al secondo 8`. I secondi vengono convertiti
   sulla durata complessiva, anche nei video multishot. La Chat può usare fino a
   otto immagini come keyframe, pur mostrandone al massimo quattro al planner Vision.
-- Sopra il campo di testo scegli **Auto, Video H3, Krea, MiniMax, Anima o Edit**. La
+- Sopra il campo di testo scegli **Auto, Video H3, LTX 2.5, Krea, MiniMax, Anima o Edit**. La
   scelta esplicita prevale sempre sul router del modello LLM, ma non avvia nulla finché
   il testo non contiene una richiesta esplicita di generazione. Se vuoi essere
   certo di ottenere un disegno, seleziona **Anima**; se vuoi una fotografia o
@@ -49,10 +49,15 @@ di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
   una still H3: nessun allegato crea T2I, una Picture crea I2I e da due a nove
   Picture attivano Reference. In Auto funziona anche una richiesta esplicita
   come “usa MiniMax per questa immagine”.
+- **LTX 2.5** è un motore video rapido opzionale e non viene mai scelto soltanto
+  perché nel testo compare “fast”, “rapido” o “preview”. Seleziona il bottone
+  oppure scrivi esplicitamente “usa LTX 2.5”. Questa prima integrazione accetta
+  T2V o I2V con una sola Picture, un solo segmento da 5/10/15 secondi e nessun
+  Video/Audio allegato; per Reference, Keyframes, Continue, Edit e lip-sync usa H3.
 - In **Auto**, anime, manga, disegno, illustrazione e cartoon vengono instradati
   ad Anima; le immagini fotografiche o generiche usano Krea.
-- Una richiesta video senza durata usa 10 secondi, un candidato, 0,5 MP e FAST
-  8-step. Se indichi la durata totale, la Chat attiva automaticamente il
+- Una richiesta video H3 senza durata usa 10 secondi, un candidato, 0,5 MP e
+  8 step standard senza PDD. Se indichi la durata totale, la Chat attiva automaticamente il
   multishot: per esempio 30 secondi diventano `3 × 10 s`. Sono supportati fino
   a 12 shot; oltre 120 secondi usa chunk da 15 secondi, fino a un massimo di
   180 secondi. Per cambiare gli altri parametri apri poi il job nello Studio.
@@ -142,3 +147,14 @@ In Admin, **LLM Vision Chat** mostra `PRONTO`, `CARICATO` oppure `SETUP`.
 `SETUP` indica che manca il nodo, il runtime, il GGUF o il projector. Dopo aver
 installato/aggiornato il nodo occorre riavviare ComfyUI; non serve avviare LM
 Studio. Il test di contratto del repository è `npm run test:chat`.
+
+## Edit video con e senza SAM3
+
+SAM3 è indicato per isolare **un solo elemento** per generazione, per esempio
+“cambia il vestito in blu”. Per trasformazioni globali o più elementi distinti,
+scrivi “usa il video come riferimento, senza SAM” oppure scegli Reference / Remix
+H3 nello Studio. In Chat una richiesta SAM con più bersagli viene convertita
+automaticamente nel percorso Reference / Remix, evitando una maschera parziale.
+
+Il worker SAM3 viene scaricato automaticamente appena H3 inizia il sampling; non
+deve restare in RAM durante il planner o la generazione successiva.

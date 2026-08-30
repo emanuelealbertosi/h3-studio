@@ -27,6 +27,21 @@
       "requiredFor": ["chat"]
     },
     {
+      "id": "ltx-video-nodes",
+      "label": "LTX Video 2.5 nodes",
+      "kind": "custom_node",
+      "requiredClasses": [
+        "LTXVConditioning",
+        "LTXVEmptyLatentAudio",
+        "LTXVConcatAVLatent",
+        "LTXVImgToVideoInplace",
+        "LTXVAudioVAEDecode"
+      ],
+      "url": "https://github.com/Lightricks/ComfyUI-LTXVideo",
+      "notes": "Motore video alternativo esplicito; H3 resta predefinito. Riavvia ComfyUI dopo installazione o aggiornamento.",
+      "requiredFor": ["video_ltx25"]
+    },
+    {
       "id": "fantastic-h3-media",
       "label": "Fantastic MiniMax H3 Prompt Builder",
       "kind": "custom_node",
@@ -424,6 +439,43 @@
       "filenames": ["qwen_image_vae.safetensors"],
       "url": "https://huggingface.co/circlestone-labs/Anima",
       "requiredFor": ["image_anima"]
+    },
+    {
+      "id": "ltx25-redgraft-model",
+      "label": "LTX 2.5 RedGraft Fast 2K INT8",
+      "kind": "model",
+      "folder": "diffusion_models",
+      "filenames": ["redgraftLTX25Fast2K_ltx25RedgraftNSFW.safetensors"],
+      "url": "https://civitai.com/api/download/models/3250230?fileId=3133376",
+      "notes": "Checkpoint alternativo selezionabile esplicitamente; circa 15,85 GiB.",
+      "requiredFor": ["video_ltx25"]
+    },
+    {
+      "id": "ltx25-text-encoder",
+      "label": "LTX 2.5 text encoder INT8 ConvRot",
+      "kind": "model",
+      "folder": "text_encoders",
+      "filenames": ["gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors"],
+      "url": "https://huggingface.co/PulpCut/LTX-2.5-INT8-ConvRot-safetensors/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "requiredFor": ["video_ltx25"]
+    },
+    {
+      "id": "ltx25-video-vae",
+      "label": "LTX 2.5 Video VAE Conv BF16",
+      "kind": "model",
+      "folder": "vae",
+      "filenames": ["ltx-2.5-video-vae-conv-bf16.safetensors"],
+      "url": "https://huggingface.co/PulpCut/LTX-2.5-INT8-ConvRot-safetensors/resolve/main/vae/ltx-2.5-video-vae-conv-bf16.safetensors",
+      "requiredFor": ["video_ltx25"]
+    },
+    {
+      "id": "ltx25-audio-vae",
+      "label": "LTX 2.5 Audio VAE BF16",
+      "kind": "model",
+      "folder": "vae",
+      "filenames": ["ltx-2.5-audio-vae-bf16.safetensors"],
+      "url": "https://huggingface.co/PulpCut/LTX-2.5-INT8-ConvRot-safetensors/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors",
+      "requiredFor": ["video_ltx25"]
     }
   ]
 }

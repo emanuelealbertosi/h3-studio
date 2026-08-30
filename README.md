@@ -14,11 +14,12 @@ Il prodotto organizza prompt, personaggi, asset, candidati e continuazioni. Comf
 La voce **Chat** aggiunge un assistente LLM Vision locale con conversazioni
 multiple raggruppate per progetto, titoli automatici modificabili e memoria
 indipendente. Può conversare, analizzare fino a quattro immagini della Libreria e,
-su richiesta esplicita, avviare Video H3, immagini Krea, still MiniMax H3
+su richiesta esplicita, avviare Video H3, il motore video opzionale LTX 2.5, immagini Krea, still MiniMax H3
 (T2I/I2I/Reference), edit Flux.2 Klein o immagini Anima. Le immagini allegate possono inoltre diventare keyframe iniziali,
 intermedi o finali, con posizioni automatiche, percentuali o tempi espliciti. I
-video avviati dalla Chat usano il profilo rapido controllato
-dal server: 10 secondi, un candidato, 0,5 MP e FAST 8-step. Il modello resta
+video H3 avviati dalla Chat usano il profilo standard controllato
+dal server: 10 secondi, un candidato, 0,5 MP e 8 step senza PDD. LTX 2.5 parte
+solo dal selettore dedicato o quando viene nominato esplicitamente. Il modello LLM resta
 caricato fra i messaggi, ma viene scaricato automaticamente prima di ogni render
 per restituire VRAM a ComfyUI. I riferimenti impliciti come “modificala” usano
 l'ultimo media generato o allegato nella conversazione; **Rigenera** permette di
@@ -64,6 +65,11 @@ sigmas PDD, Euler e shift 12/3. I quattro preset numerici usano invece il
 workflow H3 standard senza forzare il motore FAST. Modello, file PDD e fino a
 tre LoRA creativi del FAST si configurano nell'Admin separatamente dallo stack
 H3 standard.
+
+Come alternativa esplicita, lo Studio e la Chat espongono **LTX 2.5 RedGraft
+INT8** in modalità single-stage a 8 step, con audio nativo. Supporta T2V e I2V
+con una sola immagine, segmenti da 5/10/15 secondi e gli stessi formati e livelli
+di risoluzione dello Studio; H3 rimane sempre il motore predefinito.
 
 Il tab **Assets/Libreria** gestisce ora personaggi e oggetti persistenti,
 reference multiple tramite drag-and-drop e character/object sheet con Krea 2.

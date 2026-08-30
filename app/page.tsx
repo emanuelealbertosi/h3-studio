@@ -71,6 +71,7 @@ type SeedMode = "random" | "base" | "fixed";
 type QualityMode = "fast" | "min" | "med" | "max";
 type GenerationPreset = "fast" | "8" | "12" | "20" | "30";
 type Megapixels = 0.5 | 0.7 | 0.98;
+type VideoEngine = "h3" | "ltx25";
 
 type BridgeHealthPayload = {
   bridge?: { status?: string; postprocessContract?: number };
@@ -97,7 +98,7 @@ const bridgeUrl =
 const modes = [
   { value: "t2v", label: "Text to video", factor: 1 },
   { value: "i2v", label: "Image to video", factor: 1.05 },
-  { value: "reference", label: "Reference", factor: 1.15 },
+  { value: "reference", label: "Reference / Remix H3", factor: 1.15 },
   { value: "keyframes", label: "Keyframes", factor: 1.15 },
   { value: "continue", label: "Continue video", factor: 1.2 },
   { value: "edit", label: "Inpaint video", factor: 1.2 },
@@ -530,6 +531,15 @@ type EngineAdminResponse = {
       loras: EngineLoraSlot[];
       steps: 8;
     };
+    ltx25: {
+      model: string;
+      encoder: string;
+      videoVae: string;
+      audioVae: string;
+      steps: 8;
+      cfg: number;
+      sampler: "euler_ancestral" | "euler";
+    };
     krea: {
       model: string;
       encoder: string;
@@ -672,6 +682,7 @@ type RemoteJob = {
     steps: number;
   };
   request: {
+    videoEngine?: VideoEngine;
     prompt: string;
     promptLength: number;
     candidateCount: 1 | 2 | 3 | 4;
@@ -3905,6 +3916,18 @@ function AdminPanel() {
         /h3|fl2va|ref2va/i,
       )
     : [];
+  const ltx25Models = data
+    ? compatibleEngineOptions(data.capabilities.models, data.settings.ltx25.model, /ltx.*2[._-]?5|redgraft/i)
+    : [];
+  const ltx25Encoders = data
+    ? compatibleEngineOptions(data.capabilities.textEncoders, data.settings.ltx25.encoder, /ltx.*2[._-]?5/i)
+    : [];
+  const ltx25Vaes = data
+    ? compatibleEngineOptions(data.capabilities.vaes, data.settings.ltx25.videoVae, /ltx.*2[._-]?5.*video.*vae/i)
+    : [];
+  const ltx25AudioVaes = data
+    ? compatibleEngineOptions(data.capabilities.vaes, data.settings.ltx25.audioVae, /ltx.*2[._-]?5.*audio.*vae/i)
+    : [];
   const kreaModels = data
     ? compatibleEngineOptions(
         data.capabilities.models,
@@ -4203,6 +4226,22 @@ function AdminPanel() {
                     />
                   </div>
                 ))}
+              </div>
+            </article>
+
+            <article className="engine-config-card ltx-engine-card">
+              <div className="engine-config-heading">
+                <div><span>ALT VIDEO ENGINE</span><h3>LTX 2.5</h3></div>
+                <b>8 STEP · SINGLE STAGE</b>
+              </div>
+              <div className="admin-form image-edit-engine-form">
+                <label><span>Modello LTX 2.5</span><select value={data.settings.ltx25.model} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, model: event.target.value } } })}>{ltx25Models.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+                <label><span>Text encoder LTX</span><select value={data.settings.ltx25.encoder} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, encoder: event.target.value } } })}>{ltx25Encoders.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+                <label><span>Video VAE</span><select value={data.settings.ltx25.videoVae} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, videoVae: event.target.value } } })}>{ltx25Vaes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+                <label><span>Audio VAE</span><select value={data.settings.ltx25.audioVae} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, audioVae: event.target.value } } })}>{ltx25AudioVaes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+                <label><span>CFG</span><input min="0.5" max="3" step="0.1" type="number" value={data.settings.ltx25.cfg} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, cfg: Number(event.target.value) } } })} /></label>
+                <label><span>Sampler</span><select value={data.settings.ltx25.sampler} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, sampler: event.target.value as "euler" | "euler_ancestral" } } })}><option value="euler_ancestral">Euler ancestral</option><option value="euler">Euler</option></select></label>
+                <p className="image-edit-profile-note">RedGraft INT8 · T2V/I2V con audio nativo · H3 resta sempre il motore predefinito.</p>
               </div>
             </article>
 
@@ -4660,6 +4699,7 @@ function StudioApp() {
   const [inpaintStartSeconds, setInpaintStartSeconds] = useState(0);
   const [inpaintEndSeconds, setInpaintEndSeconds] = useState(0);
   const [qualityMode, setQualityMode] = useState<QualityMode>("fast");
+  const [videoEngine, setVideoEngine] = useState<VideoEngine>("h3");
   const [turboEnabled, setTurboEnabled] = useState(true);
   const [candidateCount, setCandidateCount] = useState(4);
   const [shotCount, setShotCount] = useState(1);
@@ -4840,7 +4880,9 @@ function StudioApp() {
   }, [mediaAssets, mediaExternalAssets, mediaGeneratedImages, mediaLibraryAssets, mediaRecentJobs, mentionState?.query]);
   const modeConfig = modes.find((item) => item.value === mode) ?? modes[0];
   const effectiveSteps =
-    qualityMode === "fast"
+    videoEngine === "ltx25"
+      ? 8
+      : qualityMode === "fast"
       ? fastSteps
       : qualityMode === "min"
         ? 12
@@ -4848,7 +4890,9 @@ function StudioApp() {
           ? 20
           : 30;
   const generationPreset: GenerationPreset =
-    qualityMode === "fast"
+    videoEngine === "ltx25"
+      ? "8"
+      : qualityMode === "fast"
       ? turboEnabled ? "fast" : "8"
       : qualityMode === "min"
         ? "12"
@@ -4960,6 +5004,7 @@ function StudioApp() {
     setIsRunning(false);
     setSelected(null);
     setPrompt("");
+    setVideoEngine("h3");
     setMediaAssets([]);
     setReferenceRoles("AUTO");
     setKeyframePositions("AUTO");
@@ -4983,6 +5028,7 @@ function StudioApp() {
     setStudioMediaMode("video");
     setPendingUpscaleRequest(null);
     setCurrentJobId(job.id);
+    setVideoEngine(job.request.videoEngine === "ltx25" ? "ltx25" : "h3");
     setPrompt(job.request.prompt);
     setCandidateCount(job.request.candidateCount);
     setShotCount(job.request.shotCount ?? 1);
@@ -5334,6 +5380,7 @@ function StudioApp() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          videoEngine,
           prompt: resolvePromptMentions(prompt, mediaAssets),
           candidateCount,
           shotCount,
@@ -5547,7 +5594,12 @@ function StudioApp() {
         uid: crypto.randomUUID(),
       }));
       setMediaAssets((current) => [...current, ...additions].slice(0, 18));
-      if (mode === "t2v") setMode("reference");
+      if (videoEngine === "ltx25" && additions.length > 1) {
+        setVideoEngine("h3");
+        setMode("reference");
+      } else if (mode === "t2v") {
+        setMode(videoEngine === "ltx25" ? "i2v" : "reference");
+      }
       insertPromptMention(mention);
       setMediaPickerOpen(false);
       setRunMessage(`${additions.length} viste di “${summary.name}” collegate senza nuovo upload`);
@@ -5582,7 +5634,12 @@ function StudioApp() {
         uid: crypto.randomUUID(),
       },
     ].slice(0, 18));
-    if (mode === "t2v") setMode("reference");
+    if (videoEngine === "ltx25" && mediaAssets.length > 0) {
+      setVideoEngine("h3");
+      setMode("reference");
+    } else if (mode === "t2v") {
+      setMode(videoEngine === "ltx25" ? "i2v" : "reference");
+    }
     insertPromptMention(mention);
     setMediaPickerOpen(false);
     setRunMessage(
@@ -5616,7 +5673,12 @@ function StudioApp() {
         uid: crypto.randomUUID(),
       },
     ].slice(0, 18));
-    if (mode === "t2v") setMode("reference");
+    if (videoEngine === "ltx25") {
+      setVideoEngine("h3");
+      setMode("reference");
+    } else if (mode === "t2v") {
+      setMode("reference");
+    }
     insertPromptMention(mention);
     setMediaPickerOpen(false);
     setActiveView("studio");
@@ -5664,7 +5726,12 @@ function StudioApp() {
         uid: crypto.randomUUID(),
       },
     ].slice(0, 18));
-    if (mode === "t2v") setMode("reference");
+    if (videoEngine === "ltx25" && (asset.kind !== "picture" || mediaAssets.length > 0)) {
+      setVideoEngine("h3");
+      setMode("reference");
+    } else if (mode === "t2v") {
+      setMode(videoEngine === "ltx25" ? "i2v" : "reference");
+    }
     insertPromptMention(mention);
     setMediaPickerOpen(false);
     setActiveView("studio");
@@ -6478,6 +6545,28 @@ function StudioApp() {
 
             <div className="control-grid">
               <label className="select-control">
+                <span>Motore video</span>
+                <select
+                  value={videoEngine}
+                  onChange={(event) => {
+                    const nextEngine = event.target.value as VideoEngine;
+                    setVideoEngine(nextEngine);
+                    if (nextEngine === "ltx25") {
+                      if (mode !== "t2v" && mode !== "i2v") setMode("t2v");
+                      setShotCount(1);
+                      setQualityMode("fast");
+                      setTurboEnabled(false);
+                      setRunMessage("LTX 2.5 selezionato · motore rapido 8 step, T2V/I2V");
+                    }
+                  }}
+                >
+                  <option value="h3">MiniMax H3 · predefinito</option>
+                  <option value="ltx25">LTX 2.5 · rapido</option>
+                </select>
+                <small>{videoEngine === "ltx25" ? "RedGraft INT8 · audio nativo · 8 step" : "Tutte le modalità H3"}</small>
+              </label>
+
+              <label className="select-control">
                 <span>Modalità</span>
                 <select
                   value={mode}
@@ -6495,7 +6584,11 @@ function StudioApp() {
                   }}
                 >
                   {modes.map((item) => (
-                    <option key={item.value} value={item.value}>
+                    <option
+                      disabled={videoEngine === "ltx25" && item.value !== "t2v" && item.value !== "i2v"}
+                      key={item.value}
+                      value={item.value}
+                    >
                       {item.label}
                     </option>
                   ))}
@@ -6538,6 +6631,7 @@ function StudioApp() {
               <label className="select-control">
                 <span>Shot (clip concatenate)</span>
                 <select
+                  disabled={videoEngine === "ltx25"}
                   onChange={(event) => setShotCount(Number(event.target.value))}
                   value={shotCount}
                 >
@@ -6547,7 +6641,7 @@ function StudioApp() {
                     </option>
                   ))}
                 </select>
-                <small>{shotCount > 1 ? `Durata totale indicativa: ${shotCount * duration}s` : "Il workflow standard genera un solo shot."}</small>
+                <small>{videoEngine === "ltx25" ? "LTX genera un singolo segmento per job." : shotCount > 1 ? `Durata totale indicativa: ${shotCount * duration}s` : "Il workflow standard genera un solo shot."}</small>
               </label>
 
               <fieldset className="segmented-control">
@@ -6613,11 +6707,13 @@ function StudioApp() {
                   ].map((item) => (
                     <button
                       className={generationPreset === item.value ? "selected" : ""}
-                      disabled={mode === "edit" && item.value === "fast"}
+                      disabled={videoEngine === "ltx25" || (mode === "edit" && item.value === "fast")}
                       key={item.value}
                       onClick={() => selectGenerationPreset(item.value as GenerationPreset)}
                       title={
-                        mode === "edit" && item.value === "fast"
+                        videoEngine === "ltx25"
+                          ? "LTX 2.5 usa il proprio profilo single-stage fisso a 8 step"
+                          : mode === "edit" && item.value === "fast"
                           ? "Edit usa il modello H3 standard/Hybrid; PDD FAST non è disponibile"
                           : undefined
                       }
@@ -7031,7 +7127,7 @@ function StudioApp() {
             <div className="composer-footer">
               <div className="preset-note">
                 <span className="fast-badge">{generationPreset === "fast" ? "FAST" : `${effectiveSteps} STEP`}</span>
-                {generationPreset === "fast" ? "Alibaba PDD-Acc · 8 step" : `H3 standard · ${effectiveSteps} step`} · {shotCount > 1 ? `${shotCount} shot × ${duration}s ≈ ${shotCount * duration}s` : `${duration}s`} · {formatMegapixels(megapixels)} MP
+                {videoEngine === "ltx25" ? "LTX 2.5 RedGraft · single-stage" : generationPreset === "fast" ? "Alibaba PDD-Acc · 8 step" : `H3 standard · ${effectiveSteps} step`} · {shotCount > 1 ? `${shotCount} shot × ${duration}s ≈ ${shotCount * duration}s` : `${duration}s`} · {formatMegapixels(megapixels)} MP
               </div>
               <div className="generation-cta">
                 <div>

@@ -23,6 +23,16 @@ export type FastEngineSettings = {
   steps: 8;
 };
 
+export type Ltx25EngineSettings = {
+  model: string;
+  encoder: string;
+  videoVae: string;
+  audioVae: string;
+  steps: 8;
+  cfg: number;
+  sampler: "euler_ancestral" | "euler";
+};
+
 export type KreaEngineSettings = {
   model: string;
   encoder: string;
@@ -96,6 +106,7 @@ export type VoiceConversionEngineSettings = {
 export type RuntimeSettings = {
   h3: H3EngineSettings;
   fast: FastEngineSettings;
+  ltx25: Ltx25EngineSettings;
   krea: KreaEngineSettings;
   imageEdit: ImageEditEngineSettings;
   anima: AnimaEngineSettings;
@@ -106,6 +117,7 @@ export type RuntimeSettings = {
 };
 
 export type ResolvedEngineSettings = H3EngineSettings & {
+  family: "h3" | "ltx25";
   profile: "standard" | "fast";
   pddFile: string | null;
   /** Legacy summary fields kept for existing job records and clients. */
@@ -136,6 +148,15 @@ export const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
     pddFile: FAST_PDD_PAIRS[0].pddFile,
     loras: [],
     steps: 8,
+  },
+  ltx25: {
+    model: "redgraftLTX25Fast2K_ltx25RedgraftNSFW.safetensors",
+    encoder: "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+    videoVae: "ltx-2.5-video-vae-conv-bf16.safetensors",
+    audioVae: "ltx-2.5-audio-vae-bf16.safetensors",
+    steps: 8,
+    cfg: 1,
+    sampler: "euler_ancestral",
   },
   krea: {
     model: "krea2TurboFP8_krea2TURBO.safetensors",
@@ -209,6 +230,7 @@ function cloneDefaults(): RuntimeSettings {
       ...DEFAULT_RUNTIME_SETTINGS.fast,
       loras: DEFAULT_RUNTIME_SETTINGS.fast.loras.map((slot) => ({ ...slot })),
     },
+    ltx25: { ...DEFAULT_RUNTIME_SETTINGS.ltx25 },
     krea: {
       ...DEFAULT_RUNTIME_SETTINGS.krea,
       loras: DEFAULT_RUNTIME_SETTINGS.krea.loras.map((slot) => ({ ...slot })),
@@ -276,6 +298,7 @@ function migrateLegacySettings(value: Record<string, unknown>): RuntimeSettings 
       steps: validateStepCount(value.steps ?? defaults.h3.steps, "H3"),
     },
     fast: defaults.fast,
+    ltx25: defaults.ltx25,
     krea: defaults.krea,
     imageEdit: defaults.imageEdit,
     anima: defaults.anima,
@@ -296,6 +319,7 @@ function validateSettings(value: unknown): RuntimeSettings {
 
   const defaults = cloneDefaults();
   const fast = isRecord(value.fast) ? value.fast : defaults.fast;
+  const ltx25 = isRecord(value.ltx25) ? value.ltx25 : defaults.ltx25;
   const imageEdit = isRecord(value.imageEdit) ? value.imageEdit : defaults.imageEdit;
   const anima = isRecord(value.anima) ? value.anima : defaults.anima;
   const chat = isRecord(value.chat) ? value.chat : defaults.chat;
@@ -308,6 +332,11 @@ function validateSettings(value: unknown): RuntimeSettings {
   const h3Model = typeof value.h3.model === "string" ? value.h3.model.trim() : "";
   const fastModel = typeof fast.model === "string" ? fast.model.trim() : "";
   const pddFile = typeof fast.pddFile === "string" ? fast.pddFile.trim() : "";
+  const ltx25Model = typeof ltx25.model === "string" ? ltx25.model.trim() : "";
+  const ltx25Encoder = typeof ltx25.encoder === "string" ? ltx25.encoder.trim() : "";
+  const ltx25VideoVae = typeof ltx25.videoVae === "string" ? ltx25.videoVae.trim() : "";
+  const ltx25AudioVae = typeof ltx25.audioVae === "string" ? ltx25.audioVae.trim() : "";
+  const ltx25Cfg = Number(ltx25.cfg);
   const kreaModel = typeof value.krea.model === "string" ? value.krea.model.trim() : "";
   const encoder = typeof value.krea.encoder === "string" ? value.krea.encoder.trim() : "";
   const vae = typeof value.krea.vae === "string" ? value.krea.vae.trim() : "";
@@ -363,6 +392,14 @@ function validateSettings(value: unknown): RuntimeSettings {
   if (!h3Model) throw new Error("Seleziona un modello H3");
   if (!fastModel) throw new Error("Seleziona un modello FAST H3");
   if (!pddFile) throw new Error("Seleziona l'acceleratore PDD Alibaba per FAST");
+  if (!ltx25Model) throw new Error("Seleziona un modello LTX 2.5");
+  if (!ltx25Encoder) throw new Error("Seleziona il text encoder LTX 2.5");
+  if (!ltx25VideoVae || !ltx25AudioVae) {
+    throw new Error("Seleziona entrambe le VAE LTX 2.5");
+  }
+  if (!Number.isFinite(ltx25Cfg) || ltx25Cfg < 0.5 || ltx25Cfg > 3) {
+    throw new Error("Il CFG LTX 2.5 deve essere compreso fra 0,5 e 3");
+  }
   if (!kreaModel) throw new Error("Seleziona un modello Krea");
   if (!encoder) throw new Error("Seleziona il text encoder Krea");
   if (!vae) throw new Error("Seleziona la VAE Krea");
@@ -467,6 +504,15 @@ function validateSettings(value: unknown): RuntimeSettings {
       loras: validateLoras(fast.loras, "FAST"),
       steps: 8,
     },
+    ltx25: {
+      model: ltx25Model,
+      encoder: ltx25Encoder,
+      videoVae: ltx25VideoVae,
+      audioVae: ltx25AudioVae,
+      steps: 8,
+      cfg: ltx25Cfg,
+      sampler: ltx25.sampler === "euler" ? "euler" : "euler_ancestral",
+    },
     krea: {
       model: kreaModel,
       encoder,
@@ -558,6 +604,7 @@ export class RuntimeSettingsStore {
       ? validateSettings({
           ...value,
           imageEdit: isRecord(value.imageEdit) ? value.imageEdit : current.imageEdit,
+          ltx25: isRecord(value.ltx25) ? value.ltx25 : current.ltx25,
           anima: isRecord(value.anima) ? value.anima : current.anima,
           chat: isRecord(value.chat) ? value.chat : current.chat,
           tts: isRecord(value.tts) ? value.tts : current.tts,

@@ -16,7 +16,7 @@ type ChatConversation = {
   createdAt: string;
   updatedAt: string;
 };
-type ChatRoute = "auto" | "video" | "krea" | "minimax" | "anima" | "edit" | "tts" | "music";
+type ChatRoute = "auto" | "video" | "ltx25" | "krea" | "minimax" | "anima" | "edit" | "tts" | "music";
 type ChatMemory = { active: boolean; summarizedMessages: number; summary: string };
 type ChatTrackedCandidate = {
   index: number;
@@ -59,6 +59,7 @@ type ChatMessage = {
   action: null | {
     type: "generate_video" | "generate_image" | "generate_minimax_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
     prompt: string;
+    videoEngine?: "h3" | "ltx25";
     jobId?: string;
     status: "started" | "failed";
     error?: string;
@@ -98,8 +99,8 @@ function annotated(output: { filename: string; subfolder: string; type: string }
   return `${path} [${output.type}]`;
 }
 
-function actionLabel(type: NonNullable<ChatMessage["action"]>["type"]) {
-  if (type === "generate_video") return "Video H3";
+function actionLabel(type: NonNullable<ChatMessage["action"]>["type"], videoEngine?: "h3" | "ltx25") {
+  if (type === "generate_video") return videoEngine === "ltx25" ? "Video LTX 2.5" : "Video H3";
   if (type === "generate_anima") return "Immagine Anima";
   if (type === "generate_minimax_image") return "Image H3";
   if (type === "edit_image") return "Edit Flux.2 Klein";
@@ -583,7 +584,7 @@ export default function ChatPanel({
       setAttachments([]);
       const last = payload.messages.at(-1);
       setNotice(last?.action?.status === "started"
-        ? `${actionLabel(last.action.type)} avviato${payload.reusedAttachments ? " · media recuperato dalla memoria" : ""} · il modello LLM è stato scaricato dalla memoria`
+        ? `${actionLabel(last.action.type, last.action.videoEngine)} avviato${payload.reusedAttachments ? " · media recuperato dalla memoria" : ""} · il modello LLM è stato scaricato dalla memoria`
         : last?.status === "failed" ? last.error ?? "Risposta fallita" : "Chat pronta");
       setRuntime((current) => current ? { ...current, loaded: !last?.action } : current);
     } catch (error) {
@@ -647,6 +648,7 @@ export default function ChatPanel({
   const routes: Array<{ id: ChatRoute; label: string; help: string }> = [
     { id: "auto", label: "Auto", help: "LLM sceglie in base alla richiesta" },
     { id: "video", label: "Video H3", help: "Forza la generazione video" },
+    { id: "ltx25", label: "LTX 2.5", help: "Motore video rapido opzionale: solo T2V/I2V, max 15s; H3 resta il default" },
     { id: "krea", label: "Krea", help: "Forza una immagine fotografica/generale" },
     { id: "minimax", label: "MiniMax", help: "T2I, I2I o Reference H3 fino a 9 immagini" },
     { id: "anima", label: "Anima", help: "Forza disegno, anime, manga o illustrazione" },
@@ -771,7 +773,7 @@ export default function ChatPanel({
                 {action && <div className={`chat-action-card ${failed ? "failed" : action.status}`}>
                   <div className="chat-action-heading">
                     <div>
-                      <strong>{actionLabel(action.type)}</strong>
+                      <strong>{actionLabel(action.type, action.videoEngine)}</strong>
                       <small>{action.jobId ? `Job ${action.jobId.slice(0, 8)} · ${tracked?.fetchError ?? candidate?.error ?? trackedStatus(candidate)}` : action.error}</small>
                     </div>
                     <div className="chat-action-buttons">
@@ -798,7 +800,7 @@ export default function ChatPanel({
                       ? <audio controls preload="metadata" src={mediaUrl} />
                       : tracked?.kind === "video"
                         ? <video controls playsInline preload="metadata" src={mediaUrl} />
-                        : <a href={mediaUrl} rel="noreferrer" target="_blank"><img alt={candidate?.output?.filename ?? actionLabel(action.type)} src={mediaUrl} /></a>
+                        : <a href={mediaUrl} rel="noreferrer" target="_blank"><img alt={candidate?.output?.filename ?? actionLabel(action.type, action.videoEngine)} src={mediaUrl} /></a>
                       : <>
                         <div className="video-noise" />
                         <div className="video-blur" />

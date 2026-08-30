@@ -8,9 +8,11 @@ import { ChatRepository } from "../bridge/chat-repository.js";
 import {
   extractRequestedVideoDuration,
   extractRequestedLyrics,
+  inpaintTargetCount,
   musicInstrumentalIntent,
   normalizePlan,
   preserveMiniMaxImageIntent,
+  preserveLtx25Intent,
   preserveMusicIntent,
   resolveChatImageAspect,
   resolveChatImageH3Settings,
@@ -97,7 +99,7 @@ try {
   assert.equal(chat.memoryStatus(project!.id, primary.id).active, false);
   assert.equal(chat.deleteConversation(secondary.id).deleted, true);
   const migration = new DatabaseSync(jobs.databasePath, { readOnly: true });
-  assert.ok(migration.prepare("SELECT version FROM schema_migrations WHERE version = 25").get());
+  assert.ok(migration.prepare("SELECT version FROM schema_migrations WHERE version = 26").get());
   const jobColumns = new Set(
     (migration.prepare("PRAGMA table_info(jobs)").all() as Array<{ name: string }>).map(
       (column) => column.name,
@@ -108,6 +110,7 @@ try {
     "inpaint_mask_grow",
     "inpaint_start_seconds",
     "inpaint_end_seconds",
+    "video_engine",
   ]) {
     assert.ok(jobColumns.has(column), `missing jobs.${column}`);
   }
@@ -127,11 +130,21 @@ try {
   assert.equal(routeAction(proposedImage, "anima")?.type, "generate_anima");
   assert.equal(routeAction({ ...proposedImage, type: "generate_anima" }, "krea")?.type, "generate_image");
   assert.equal(routeAction(proposedImage, "video")?.type, "generate_video");
+  assert.equal(routeAction(proposedImage, "video")?.videoEngine, "h3");
+  assert.equal(routeAction(proposedImage, "ltx25")?.videoEngine, "ltx25");
   assert.equal(routeAction(proposedImage, "edit")?.type, "edit_image");
   assert.equal(routeAction(proposedImage, "tts")?.type, "generate_tts");
   assert.equal(routeAction(proposedImage, "music")?.type, "generate_music");
   assert.equal(routeAction(proposedImage, "minimax")?.type, "generate_minimax_image");
   assert.equal(routeAction(proposedImage, "auto")?.type, "generate_image");
+  assert.equal(
+    preserveLtx25Intent({ type: "generate_video", prompt: "A runner" }, "usa LTX 2.5")?.videoEngine,
+    "ltx25",
+  );
+  assert.equal(
+    preserveLtx25Intent({ type: "generate_video", prompt: "A runner" }, "crea rapidamente un video")?.videoEngine,
+    "h3",
+  );
   assert.equal(preserveMiniMaxImageIntent(proposedImage, "usa MiniMax per questa immagine")?.type, "generate_minimax_image");
   assert.equal(preserveMiniMaxImageIntent(proposedImage, "crea una foto generica")?.type, "generate_image");
   assert.equal(preserveMiniMaxImageIntent(proposedImage, "crea una foto generica", "minimax")?.type, "generate_minimax_image");
@@ -226,8 +239,18 @@ try {
   assert.equal(extractRequestedVideoDuration("crea un video di 2 minuti"), 120);
   assert.equal(extractRequestedVideoDuration("crea un video fantasy"), null);
   assert.equal(resolveChatVideoMode("anima l'immagine precedente", "R2V", 1, 0, 0), "I2V");
+  assert.equal(inpaintTargetCount("vestito della donna"), 1);
+  assert.equal(inpaintTargetCount("dress, background, and glasses"), 3);
   assert.equal(resolveChatVideoMode("crea un video da questa ultima immagine", "T2V", 1, 0, 0), "I2V");
   assert.equal(resolveChatVideoMode("usa questa immagine come riferimento", "I2V", 1, 0, 0), "R2V");
+  assert.equal(
+    resolveChatVideoMode("reinterpretalo come riferimento, senza SAM", "VIDEO EDITING", 0, 1, 0),
+    "R2V",
+  );
+  assert.equal(
+    resolveChatVideoMode("remix H3 del video, no inpaint", "VIDEO EDITING", 0, 1, 0),
+    "R2V",
+  );
   assert.equal(resolveChatVideoMode("falla parlare con questa voce", "I2V", 1, 0, 1), "I2V");
   assert.equal(resolveChatVideoMode("falla parlare con questa voce", "R2V", 0, 0, 1), "R2V");
   assert.equal(resolveChatVideoMode("usa questa immagine come riferimento e questa voce", "I2V", 1, 0, 1), "R2V");
@@ -341,7 +364,8 @@ try {
   assert.match(panel, /\(\^\|\\s\)@\$/);
   assert.match(panel, /chat-picker-grid/);
   assert.match(panel, /Crea con/);
-  assert.match(panel, /"auto" \| "video" \| "krea" \| "minimax" \| "anima" \| "edit"/);
+  assert.match(panel, /"auto" \| "video" \| "ltx25" \| "krea" \| "minimax" \| "anima" \| "edit"/);
+  assert.match(panel, /label: "LTX 2\.5"/);
   assert.match(panel, /trackedActions/);
   assert.match(panel, /Connessione temporaneamente persa · nuovo tentativo automatico/);
   assert.match(panel, /if \(job\.fetchError\) return true/);

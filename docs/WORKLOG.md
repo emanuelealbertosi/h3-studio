@@ -398,3 +398,22 @@
 - Il planner tratta ora Audio 1 esclusivamente come identità vocale: le parole della reference non vengono copiate e il nuovo dialogo resta quello scritto nel prompt, con sintassi H3 e lip-sync generato.
 - La Chat distingue richieste di audio esatto da richieste di sola voce/timbro e disattiva FAST/PDD per entrambe le modalità sensibili al parlato.
 - Lo Studio mostra una spiegazione contestuale sotto il selettore; aggiunte regressioni I2V e Keyframes sul cablaggio di start frame, voice_ref e piano keyframe.
+# 30 agosto 2026 — Motore video opzionale LTX 2.5
+
+- Integrato LTX 2.5 RedGraft INT8 come engine video alternativo esplicito in Studio e Chat; H3 resta il default.
+- Aggiunto workflow API single-stage costruito dal bridge: T2V/I2V, 24 fps, 8 step distilled, CFG 1, Euler ancestral e audio nativo.
+- Aggiunti profilo Admin persistente, dipendenze, model store esterno, download riprendibile, migrazione SQLite `video_engine` e rigenerazione fedele all'engine originale.
+- Bloccati con errore leggibile i flussi non supportati (Reference, Keyframes, Continue, Edit, audio allegato, più Picture e multishot).
+- Aggiunti test dedicati LTX, controlli Chat non ambigui e build di produzione.
+
+# 30 agosto 2026 — Isolamento SAM3 e protezione dei target
+
+- Il worker isolato di SAM3 viene ora terminato appena la sua maschera è stata
+  consegnata e il sampler H3 entra in esecuzione. Il modello SAM non resta quindi
+  residente durante il planner o il job successivo e non forza RAM/pagefile a
+  lavorare in swap.
+- VIDEO EDITING accetta un solo bersaglio semantico per passata: richieste come
+  `dress, background, and glasses` producevano in pratica una maschera minuscola
+  e parziale. Lo Studio mostra ora un errore esplicito; la Chat passa invece al
+  normale Reference / Remix H3 quando riconosce più bersagli indipendenti.
+- Aggiunti controllo runtime Windows/Linux e test dedicato `test:sam-runtime`.

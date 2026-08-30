@@ -611,4 +611,11 @@ export const JOB_DATABASE_MIGRATIONS = [
     version: 25,
     statements: [],
   },
+  {
+    version: 26,
+    statements: [
+      `ALTER TABLE jobs ADD COLUMN video_engine TEXT NOT NULL DEFAULT 'h3'
+       CHECK (video_engine IN ('h3', 'ltx25'))`,
+    ],
+  },
 ] as const;

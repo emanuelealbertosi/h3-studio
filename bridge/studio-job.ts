@@ -10,6 +10,8 @@ import { assertPddModelCompatibility } from "./pdd-compatibility.js";
 import type { FastWorkflowStore } from "./fast-workflow-store.js";
 import type { ComfyProgressTracker } from "./comfy-progress.js";
 import type { JobRepository } from "./job-repository.js";
+import { buildLtx25Prompt } from "./ltx25-workflow.js";
+import type { SamRuntimeControl } from "./sam-runtime-control.js";
 
 const MAX_SEED = 9_007_199_254_740_000;
 const BASE_SECONDS_5S_05MP = 172;
@@ -61,8 +63,10 @@ export type GenerationMode = (typeof GENERATION_MODES)[number];
 export type SeedMode = "random" | "base" | "fixed";
 export type QualityMode = "fast" | "min" | "med" | "max";
 export type AudioRoutingRole = (typeof AUDIO_ROUTING_ROLES)[number];
+export type VideoEngine = "h3" | "ltx25";
 
 export type StudioJobRequest = {
+  videoEngine: VideoEngine;
   prompt: string;
   candidateCount: 1 | 2 | 3 | 4;
   shotCount: number;
@@ -266,6 +270,7 @@ function normalizeRequest(value: unknown): StudioJobRequest {
     throw new Error("A 15 secondi la risoluzione massima supportata è 0.7 MP");
   }
 
+  const videoEngine: VideoEngine = value.videoEngine === "ltx25" ? "ltx25" : "h3";
   const generationMode =
     typeof value.generationMode === "string"
       ? value.generationMode.toUpperCase()
@@ -422,6 +427,27 @@ function normalizeRequest(value: unknown): StudioJobRequest {
   ) {
     throw new Error("La fine dell'inpaint deve essere successiva all'inizio");
   }
+  if (generationMode === "VIDEO EDITING" && inpaintTargetCount(inpaintTarget) > 1) {
+    throw new Error(
+      "SAM3 può modificare un solo bersaglio per volta. Indica un elemento solo oppure usa Reference / Remix H3 senza SAM per più trasformazioni.",
+    );
+  }
+  if (
+    videoEngine === "ltx25" &&
+    generationMode !== "T2V" &&
+    generationMode !== "I2V"
+  ) {
+    throw new Error("LTX 2.5 supporta per ora Text to video e Image to video");
+  }
+  if (videoEngine === "ltx25") {
+    if (shotCount !== 1) throw new Error("LTX 2.5 genera un solo segmento per job");
+    if (generationMode === "I2V" && (media.pictures !== 1 || media.videos > 0 || media.audios > 0)) {
+      throw new Error("I2V LTX 2.5 richiede esattamente una Picture e nessun Video/Audio");
+    }
+    if (generationMode === "T2V" && media.pictures + media.videos + media.audios > 0) {
+      throw new Error("T2V LTX 2.5 non usa media allegati");
+    }
+  }
   const normalizeOptionalId = (input: unknown) => {
     if (input === undefined || input === null || input === "") return null;
     if (typeof input !== "string" || input.trim().length > 80) {
@@ -431,6 +457,7 @@ function normalizeRequest(value: unknown): StudioJobRequest {
   };
 
   return {
+    videoEngine,
     prompt,
     candidateCount: candidateCount as 1 | 2 | 3 | 4,
     shotCount,
@@ -521,6 +548,15 @@ function attachH3Inpaint(
   sampler.inputs.studio_inpaint_grow = request.inpaintMaskGrow;
   sampler.inputs.studio_inpaint_start_seconds = request.inpaintStartSeconds;
   sampler.inputs.studio_inpaint_end_seconds = request.inpaintEndSeconds;
+}
+
+function inpaintTargetCount(target: string) {
+  return target
+    .replace(/\band\b|\be\b/gi, ",")
+    .split(/[,;]+/)
+    .map((item) => item.replace(/^(?:and|e)\s+/i, "").trim())
+    .filter(Boolean)
+    .length;
 }
 
 function audioPolicyPrompt(request: StudioJobRequest) {
@@ -649,6 +685,7 @@ function resolveEngineSettings(
     );
     const loras = runtimeSettings.fast.loras.map((slot) => ({ ...slot }));
     return {
+      family: "h3",
       profile: "fast",
       model: runtimeSettings.fast.model,
       pddFile: runtimeSettings.fast.pddFile,
@@ -669,6 +706,7 @@ function resolveEngineSettings(
   const loras = runtimeSettings.h3.loras.map((slot) => ({ ...slot }));
   const firstLora = loras[0];
   return {
+    family: "h3",
     profile: "standard",
     model: runtimeSettings.h3.model,
     pddFile: null,
@@ -679,14 +717,58 @@ function resolveEngineSettings(
   };
 }
 
+function resolveLtx25EngineSettings(
+  runtimeSettings: RuntimeSettings,
+): ResolvedEngineSettings {
+  return {
+    family: "ltx25",
+    profile: "standard",
+    model: runtimeSettings.ltx25.model,
+    pddFile: null,
+    loras: [],
+    lora: "",
+    loraStrength: 0,
+    steps: 8,
+  };
+}
+
 export function prepareStudioJob(
   sourcePrompt: ComfyApiPrompt,
   rawRequest: unknown,
   runtimeSettings: RuntimeSettings,
-  jobId = randomUUID(),
+  jobId: string = randomUUID(),
   excludedSeeds: ReadonlySet<number> = new Set(),
 ) {
   const request = normalizeRequest(rawRequest);
+  if (request.videoEngine === "ltx25") {
+    const engineSettings = resolveLtx25EngineSettings(runtimeSettings);
+    const baseSeed = request.seed ?? randomSeed();
+    const randomSeeds = new Set<number>();
+    const candidates: PreparedCandidate[] = [];
+    for (let index = 1; index <= request.candidateCount; index += 1) {
+      let candidateSeed: number;
+      if (request.seedMode === "fixed") candidateSeed = baseSeed;
+      else if (request.seedMode === "base") candidateSeed = (baseSeed + index - 1) % MAX_SEED;
+      else {
+        do candidateSeed = randomSeed();
+        while (randomSeeds.has(candidateSeed) || excludedSeeds.has(candidateSeed));
+        randomSeeds.add(candidateSeed);
+      }
+      const filenamePrefix = `video/H3_STUDIO_LTX25/${jobId}/candidate_${index}`;
+      candidates.push({
+        index,
+        seed: candidateSeed,
+        filenamePrefix,
+        prompt: buildLtx25Prompt(
+          request,
+          runtimeSettings.ltx25,
+          candidateSeed,
+          filenamePrefix,
+        ),
+      });
+    }
+    return { jobId, request, candidates, engineSettings };
+  }
   const resolvedEngine = resolveEngineSettings(request, runtimeSettings);
   const baseSeed = request.seed ?? randomSeed();
   const randomSeeds = new Set<number>();
@@ -822,6 +904,17 @@ export function estimateExecutionTime(
   request: StudioJobRequest,
   engineSettings: ResolvedEngineSettings,
 ) {
+  if (request.videoEngine === "ltx25") {
+    const centralSeconds = Math.round(
+      95 * (request.durationSeconds / 5) * (request.megapixels / 0.5) * request.candidateCount,
+    );
+    return {
+      centralSeconds,
+      minimumSeconds: Math.max(45, Math.round(centralSeconds * 0.75)),
+      maximumSeconds: Math.round(centralSeconds * 1.5),
+      basis: "ltx25-initial-estimate" as const,
+    };
+  }
   const centralSeconds = Math.round(
     PLANNER_COLD_SECONDS +
       BASE_SECONDS_5S_05MP *
@@ -851,6 +944,7 @@ export function publicDryRun(
     ok: true,
     dryRun: true,
     jobId: prepared.jobId,
+    videoEngine: prepared.request.videoEngine,
     preset: prepared.request.qualityMode.toUpperCase(),
     generationMode: prepared.request.generationMode,
     durationSeconds: prepared.request.durationSeconds,
@@ -874,11 +968,12 @@ export function publicDryRun(
     audioRoutingRole: audioRoutingFromMediaState(prepared.request.mediaState).role,
     muteDiegetic: prepared.request.muteDiegetic,
     muteNonDiegetic: prepared.request.muteNonDiegetic,
-    continuationOnly: prepared.candidates.every(
-      (candidate) =>
-        uniqueNode(candidate.prompt, "H3SaveContinuation").inputs
-          .prepend_source_video === false,
-    ),
+    continuationOnly: prepared.request.videoEngine === "h3" &&
+      prepared.candidates.every(
+        (candidate) =>
+          uniqueNode(candidate.prompt, "H3SaveContinuation").inputs
+            .prepend_source_video === false,
+      ),
     promptLength: prepared.request.prompt.length,
     estimatedExecution,
     candidates: prepared.candidates.map((candidate) => ({
@@ -891,6 +986,8 @@ export function publicDryRun(
 }
 
 export class StudioJobService {
+  private readonly releasedSamPrompts = new Set<string>();
+
   constructor(
     private readonly comfy: ComfyClient,
     private readonly workflowStore: WorkflowStore,
@@ -898,6 +995,7 @@ export class StudioJobService {
     private readonly runtimeSettings: RuntimeSettingsStore,
     private readonly progressTracker: ComfyProgressTracker,
     private readonly jobs: JobRepository,
+    private readonly samRuntime?: SamRuntimeControl,
   ) {}
 
   async prepare(
@@ -906,6 +1004,7 @@ export class StudioJobService {
     runtimeOverride?: RuntimeSettings,
   ) {
     const wantsInpaint = isRecord(rawRequest) &&
+      rawRequest.videoEngine !== "ltx25" &&
       rawRequest.generationMode === "VIDEO EDITING";
     if (wantsInpaint) {
       const requiredClasses = [
@@ -960,6 +1059,7 @@ export class StudioJobService {
       }
     }
     const wantsFast = isRecord(rawRequest) &&
+      rawRequest.videoEngine !== "ltx25" &&
       rawRequest.qualityMode !== "min" &&
       rawRequest.qualityMode !== "med" &&
       rawRequest.qualityMode !== "max" &&
@@ -984,7 +1084,9 @@ export class StudioJobService {
       }
     }
     const [sourcePrompt, runtimeSettings] = await Promise.all([
-      wantsFast
+      isRecord(rawRequest) && rawRequest.videoEngine === "ltx25"
+        ? Promise.resolve({} as ComfyApiPrompt)
+        : wantsFast
         ? this.fastWorkflowStore.loadApiPrompt()
         : this.workflowStore.loadApiPrompt(),
       runtimeOverride ?? this.runtimeSettings.get(),
@@ -995,6 +1097,20 @@ export class StudioJobService {
         throw new Error(
           `Modello FAST non installato: ${runtimeSettings.fast.model}. Installalo dalla pagina Dipendenze/Admin e riavvia ComfyUI.`,
         );
+      }
+    }
+    if (isRecord(rawRequest) && rawRequest.videoEngine === "ltx25") {
+      const installedModels = await this.comfy.models("diffusion_models");
+      const installedEncoders = await this.comfy.models("text_encoders");
+      const installedVaes = await this.comfy.models("vae");
+      const missing = [
+        installedModels.includes(runtimeSettings.ltx25.model) ? null : runtimeSettings.ltx25.model,
+        installedEncoders.includes(runtimeSettings.ltx25.encoder) ? null : runtimeSettings.ltx25.encoder,
+        installedVaes.includes(runtimeSettings.ltx25.videoVae) ? null : runtimeSettings.ltx25.videoVae,
+        installedVaes.includes(runtimeSettings.ltx25.audioVae) ? null : runtimeSettings.ltx25.audioVae,
+      ].filter((item): item is string => Boolean(item));
+      if (missing.length) {
+        throw new Error(`LTX 2.5 non pronto: mancano ${missing.join(", ")}`);
       }
     }
     return {
@@ -1034,7 +1150,15 @@ export class StudioJobService {
       throw new Error("Il prompt video deve contenere da 3 a 20.000 caratteri");
     }
     const currentSettings = await this.runtimeSettings.get();
-    const preservedSettings: RuntimeSettings = original.engine.profile === "fast"
+    const preservedSettings: RuntimeSettings = original.request.videoEngine === "ltx25"
+      ? {
+          ...currentSettings,
+          ltx25: {
+            ...currentSettings.ltx25,
+            model: original.engine.model,
+          },
+        }
+      : original.engine.profile === "fast"
       ? {
           ...currentSettings,
           fast: {
@@ -1124,6 +1248,20 @@ export class StudioJobService {
           : null;
       const output = entry ? findVideoOutput(entry.outputs) : candidate.output;
       const liveProgress = this.progressTracker.get(candidate.promptId);
+      if (
+        job.request.generationMode === "VIDEO EDITING" &&
+        (
+          liveProgress?.phase === "sampling" ||
+          liveProgress?.phase === "completed" ||
+          liveProgress?.phase === "failed" ||
+          statusString === "success" ||
+          statusString === "error"
+        ) &&
+        !this.releasedSamPrompts.has(candidate.promptId)
+      ) {
+        this.releasedSamPrompts.add(candidate.promptId);
+        void this.samRuntime?.release().catch(() => undefined);
+      }
       let status = candidate.status;
       if (statusString === "success" && output) status = "ready";
       else if (statusString === "error") status = "failed";

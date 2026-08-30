@@ -110,6 +110,7 @@ try {
     if (!requestNode || !sampler || !size || !model) continue;
 
     const request: StudioJobRequest = {
+      videoEngine: "h3",
       prompt: String(requestNode.inputs.natural_prompt ?? "Imported Studio job"),
       candidateCount: Math.min(4, Math.max(1, candidates.length)) as 1 | 2 | 3 | 4,
       shotCount: Math.min(12, Math.max(1, Number(requestNode.inputs.shot_count) || 1)),
@@ -145,6 +146,7 @@ try {
       inpaintEndSeconds: 0,
     };
     const settings = {
+      family: "h3" as const,
       profile: "standard" as const,
       pddFile: null,
       model: String(model.inputs.model_name),

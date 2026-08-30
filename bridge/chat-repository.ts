@@ -16,6 +16,7 @@ export type ChatAttachment = {
 export type ChatActionRecord = {
   type: "generate_video" | "generate_image" | "generate_minimax_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
   prompt: string;
+  videoEngine?: "h3" | "ltx25";
   jobId?: string;
   status: "started" | "failed";
   error?: string;

@@ -49,6 +49,7 @@ type JobRow = {
   quality_mode: QualityMode;
   turbo_enabled: number;
   engine_profile: "standard" | "fast";
+  video_engine: "h3" | "ltx25";
   pdd_file: string | null;
   media_state: string;
   reference_roles: string;
@@ -290,7 +291,9 @@ export class JobRepository {
         turbo_enabled INTEGER NOT NULL DEFAULT 1 CHECK (turbo_enabled IN (0, 1)),
         engine_profile TEXT NOT NULL DEFAULT 'standard'
           CHECK (engine_profile IN ('standard', 'fast')),
-        pdd_file TEXT
+        pdd_file TEXT,
+        video_engine TEXT NOT NULL DEFAULT 'h3'
+          CHECK (video_engine IN ('h3', 'ltx25'))
         ,inpaint_target TEXT NOT NULL DEFAULT ''
         ,inpaint_mask_grow INTEGER NOT NULL DEFAULT 8
           CHECK (inpaint_mask_grow BETWEEN 0 AND 96)
@@ -306,7 +309,7 @@ export class JobRepository {
         selected_candidate_index, seed_mode, media_state, reference_roles,
         keyframe_positions, source_video_audio, project_id, source_job_id,
         mute_diegetic, mute_non_diegetic, quality_mode, turbo_enabled,
-        engine_profile, pdd_file, inpaint_target, inpaint_mask_grow,
+        engine_profile, pdd_file, video_engine, inpaint_target, inpaint_mask_grow,
         inpaint_start_seconds, inpaint_end_seconds
       ) SELECT
         id, status, created_at, updated_at, prompt, candidate_count,
@@ -315,7 +318,7 @@ export class JobRepository {
         selected_candidate_index, seed_mode, media_state, reference_roles,
         keyframe_positions, source_video_audio, project_id, source_job_id,
         mute_diegetic, mute_non_diegetic, quality_mode, turbo_enabled,
-        engine_profile, pdd_file, inpaint_target, inpaint_mask_grow,
+        engine_profile, pdd_file, COALESCE(video_engine, 'h3'), inpaint_target, inpaint_mask_grow,
         inpaint_start_seconds, inpaint_end_seconds
       FROM jobs`);
       this.database.exec("DROP TABLE jobs");
@@ -348,9 +351,9 @@ export class JobRepository {
             project_id, source_job_id, mute_diegetic, mute_non_diegetic,
             inpaint_target, inpaint_mask_grow,
             inpaint_start_seconds, inpaint_end_seconds,
-            quality_mode, turbo_enabled, engine_profile, pdd_file,
+            quality_mode, turbo_enabled, engine_profile, pdd_file, video_engine,
             model, lora, lora_strength, steps
-          ) VALUES (?, 'prepared', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, 'prepared', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           prepared.jobId,
@@ -381,6 +384,7 @@ export class JobRepository {
           prepared.request.turboEnabled ? 1 : 0,
           settings.profile,
           settings.pddFile,
+          prepared.request.videoEngine,
           settings.model,
           JSON.stringify(settings.loras),
           settings.loraStrength,
@@ -524,6 +528,7 @@ export class JobRepository {
       createdAt: job.created_at,
       selectedCandidateIndex: job.selected_candidate_index,
       engine: {
+        family: job.video_engine === "ltx25" ? "ltx25" : "h3",
         profile: job.engine_profile,
         pddFile: job.pdd_file,
         model: job.model,
@@ -533,6 +538,7 @@ export class JobRepository {
         steps: job.steps,
       },
       request: {
+        videoEngine: job.video_engine === "ltx25" ? "ltx25" : "h3",
         prompt: job.prompt,
         promptLength: job.prompt.length,
         candidateCount: job.candidate_count as 1 | 2 | 3 | 4,
