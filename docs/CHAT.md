@@ -41,14 +41,14 @@ di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
   `Picture 1 al secondo 2, Picture 2 al secondo 8`. I secondi vengono convertiti
   sulla durata complessiva, anche nei video multishot. La Chat può usare fino a
   otto immagini come keyframe, pur mostrandone al massimo quattro al planner Vision.
-- Sopra il campo di testo scegli **Auto, Video H3, LTX 2.5, Krea, MiniMax, Anima o Edit**. La
+- Sopra il campo di testo scegli **Auto, Video H3, LTX 2.5, Krea, Image H3, Anima o Edit**. La
   scelta esplicita prevale sempre sul router del modello LLM, ma non avvia nulla finché
   il testo non contiene una richiesta esplicita di generazione. Se vuoi essere
   certo di ottenere un disegno, seleziona **Anima**; se vuoi una fotografia o
-  un'immagine generale, seleziona **Krea**. Seleziona **MiniMax** per generare
+  un'immagine generale, seleziona **Krea**. Seleziona **Image H3** per generare
   una still H3: nessun allegato crea T2I, una Picture crea I2I e da due a nove
   Picture attivano Reference. In Auto funziona anche una richiesta esplicita
-  come “usa MiniMax per questa immagine”.
+  come “usa Image H3 per questa immagine”.
 - **LTX 2.5** è un motore video rapido opzionale e non viene mai scelto soltanto
   perché nel testo compare “fast”, “rapido” o “preview”. Seleziona il bottone
   oppure scrivi esplicitamente “usa LTX 2.5”. Questa prima integrazione accetta

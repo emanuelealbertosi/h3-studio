@@ -391,6 +391,8 @@ try {
   assert.match(panel, /Crea con/);
   assert.match(panel, /"auto" \| "video" \| "ltx25" \| "krea" \| "minimax" \| "anima" \| "edit"/);
   assert.match(panel, /label: "LTX 2\.5"/);
+  assert.match(panel, /label: "Image H3"/);
+  assert.doesNotMatch(panel, /label: "MiniMax"/);
   assert.match(panel, /trackedActions/);
   assert.match(panel, /Connessione temporaneamente persa · nuovo tentativo automatico/);
   assert.match(panel, /if \(job\.fetchError\) return true/);

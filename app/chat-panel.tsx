@@ -650,7 +650,7 @@ export default function ChatPanel({
     { id: "video", label: "Video H3", help: "Forza la generazione video" },
     { id: "ltx25", label: "LTX 2.5", help: "Motore video rapido opzionale: solo T2V/I2V, max 15s; H3 resta il default" },
     { id: "krea", label: "Krea", help: "Forza una immagine fotografica/generale" },
-    { id: "minimax", label: "MiniMax", help: "T2I, I2I o Reference H3 fino a 9 immagini" },
+    { id: "minimax", label: "Image H3", help: "T2I, I2I o Reference H3 fino a 9 immagini" },
     { id: "anima", label: "Anima", help: "Forza disegno, anime, manga o illustrazione" },
     { id: "edit", label: "Edit", help: "Forza Flux Klein sulle immagini allegate" },
     { id: "tts", label: "TTS", help: "Voce Higgs; un audio allegato diventa la reference da clonare" },
