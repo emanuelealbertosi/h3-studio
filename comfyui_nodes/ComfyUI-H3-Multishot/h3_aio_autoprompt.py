@@ -266,6 +266,14 @@ class H3AIOAutopromptRequest:
         policy = str(source_video_audio).upper()
         if policy not in _VIDEO_AUDIO_POLICIES:
             policy = "AUTO"
+        source_video_has_audio = bool(
+            video_audios and video_audios[0] is not None)
+        if (mode in ("VIDEO EXTENSION", "VIDEO EDITING")
+                and not source_video_has_audio):
+            # Do not advertise or inject an <Audio N> relationship when the
+            # source file has no decoded soundtrack. AUTO/REFERENCE/REUSE
+            # would otherwise create a formally invalid full-reference plan.
+            policy = "IGNORE"
         manifest = [
             "Generation mode: %s" % mode,
             "Detected pictures: %d" % len(pictures),
@@ -274,6 +282,8 @@ class H3AIOAutopromptRequest:
             bool(r2v_picture1_as_start),
             "Audio 1 routing role: %s" % audio_1_role,
             "Source video audio policy: %s" % policy,
+            "Source Video 1 synchronized audio available: %s" %
+            source_video_has_audio,
         ]
         if mode == "KEYFRAMES":
             manifest.append(
@@ -385,13 +395,23 @@ class H3AIOAutopromptRequest:
             "VIDEO EDITING": (
                 "The target is a direct edited version of Video 1. Preserve "
                 "its temporal order unless the user explicitly asks for "
-                "structural changes."),
+                "structural changes. Define <Video 1> as the direct editing "
+                "source and include it in retention_analysis. Mention "
+                "<Video 1> naturally in every generated clip. When no visual "
+                "tensor is available, never invent visible attributes from "
+                "the source: refer neutrally to the person, object, outfit or "
+                "environment visible in <Video 1> and require its exact "
+                "unspecified appearance to be preserved."),
         }
         media_rule = (
             "Inspect attached visuals conservatively in manifest order."
             if prepared else
             "No visual tensor is sent to LLM. Use text and role map only; "
-            "do not claim visual inspection.")
+            "do not claim visual inspection and do not infer age, gender, "
+            "face, hair, body, clothing, colors, setting, lighting, style or "
+            "object details that the user did not explicitly provide. For "
+            "unknown referenced content, use a neutral provenance definition "
+            "and instruct exact preservation of the visible source.")
         role = str(audio_1_role)
         if role == "music_video_lipsync":
             audio_rule = (

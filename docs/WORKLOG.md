@@ -1,5 +1,9 @@
 ### 30 agosto 2026 — Video Editing H3 nativo e completamento LTX 2.5
 
+- Allineato deterministicamente `VIDEO EDITING` al contratto full-reference ufficiale MiniMax: `<Video 1>` e l'eventuale `<Audio 1>` vengono definiti e coperti in `retention_analysis`, il prefisso del `summary` deriva dal router validato e ogni segmento cita la sorgente temporale.
+- Il planner text-only non può più dichiarare di aver osservato il video né inventare attributi non forniti; il prompt finale applica un source-video preservation lock a tutto ciò che non è richiesto di cambiare.
+- Se il video non possiede una traccia audio decodificata, AUTO/REFERENCE/REUSE vengono risolti in IGNORE e non viene inventata una relazione `<Audio N>` inesistente.
+
 - Rimossa dall'app l'iniezione SAM3/MaskVid: `VIDEO EDITING` usa ora direttamente
   il percorso nativo dell'Ultra AIO Composer con il modello H3 standard/Hybrid.
 - Studio e Chat distinguono l'editing temporale dal percorso `Reference / Remix H3`;

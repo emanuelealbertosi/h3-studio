@@ -205,8 +205,10 @@ def _summary_line(state, summary_override=None):
     summary = _strip_heading(
         state.get("summary") if summary_override is None else summary_override,
         "summary")
-    if summary.startswith("["):
-        return summary
+    # The task prefix is derived from validated router state, never trusted
+    # from LLM prose. This prevents an incorrect prefix from surviving after
+    # the parser has corrected task_types.
+    summary = re.sub(r"^\s*\[[^\]]+\]\s*", "", summary, count=1)
     selected = state.get("task_types")
     if not isinstance(selected, list):
         selected = []
@@ -215,6 +217,91 @@ def _summary_line(state, summary_override=None):
         selected = ["reference generation"]
     prefix = f"[{' + '.join(selected)}]"
     return f"{prefix} {summary}".rstrip()
+
+
+def _has_reference_entry(value, label):
+    return bool(re.search(
+        rf"(?i)(?:^|\s){re.escape(label)}(?:\s|\(|:)", str(value or "")))
+
+
+def _reference_lines(value):
+    """Normalize compact LLM prose to the official one-entry-per-line form."""
+    text = str(value or "").strip()
+    text = re.sub(
+        r"\s+(?=<(?:Subject|Picture|Video|Audio)\s+\d+>\s+(?:is|\())",
+        "\n", text, flags=re.IGNORECASE)
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def _append_reference_entry(value, label, entry, prepend=False):
+    lines = _reference_lines(value)
+    if not _has_reference_entry("\n".join(lines), label):
+        lines.insert(0, entry) if prepend else lines.append(entry)
+    return "\n".join(lines)
+
+
+def _editing_description(value):
+    text = str(value or "").strip()
+    if "<Video 1>" in text:
+        return text
+    marker = re.search(r"\[Shot\s+1\]", text, flags=re.IGNORECASE)
+    clause = (
+        " Using the exact corresponding temporal segment of <Video 1> as "
+        "the editing source, preserve its timing, motion, camera behavior, "
+        "spatial continuity and every unspecified visible attribute.")
+    if marker:
+        return text[:marker.end()] + clause + " " + text[marker.end():].lstrip()
+    return "[Shot 1]" + clause + " " + text
+
+
+def _official_reference_contract(state, subjects, retention, description):
+    """Fill mandatory full-reference relationships deterministically."""
+    task_types = set(state.get("task_types") or [])
+    if "video editing" in task_types:
+        subjects = _append_reference_entry(
+            subjects, "<Video 1>",
+            "<Video 1> is the source video for the target video edit.",
+            prepend=True)
+        retention = _append_reference_entry(
+            retention, "<Video 1>",
+            "<Video 1> (source timeline and temporal structure): "
+            "fully_preserved - preserve its timing, motion, cuts, camera "
+            "behavior and spatial continuity except for changes explicitly "
+            "requested by the user.",
+            prepend=True)
+        description = _editing_description(description)
+
+    if "video continuation" in task_types:
+        subjects = _append_reference_entry(
+            subjects, "<Video 1>",
+            "<Video 1> is the source video continued by the target video.",
+            prepend=True)
+        retention = _append_reference_entry(
+            retention, "<Video 1>",
+            "<Video 1> (final source state): fully_preserved - the target "
+            "continues from its exact ending state without restarting it.",
+            prepend=True)
+
+    if "audio reuse" in task_types:
+        subjects = _append_reference_entry(
+            subjects, "<Audio 1>",
+            "<Audio 1> is the synchronized audio track of <Video 1> and is "
+            "reused in the target video.")
+        retention = _append_reference_entry(
+            retention, "<Audio 1>",
+            "<Audio 1>: fully_copy - the synchronized source audio is reused "
+            "1:1 as the target video's complete final audio track.")
+    elif "audio reference" in task_types:
+        subjects = _append_reference_entry(
+            subjects, "<Audio 1>",
+            "<Audio 1> is the synchronized audio reference associated with "
+            "<Video 1>.")
+        retention = _append_reference_entry(
+            retention, "<Audio 1>",
+            "<Audio 1>: reference - its audible continuity guides the target "
+            "without copying the original signal.")
+
+    return subjects, retention, description
 
 
 def _reference_entries(value):
@@ -328,7 +415,17 @@ def _r2v_block(state, shot):
             _REF_DIRECTIVES[field]
             + (",".join(str(value) for value in media_selected) or "none"))
 
+    subjects, retention, raw_description = _official_reference_contract(
+        state, subjects, retention, raw_description)
     style = str(state.get("style") or "").strip()
+    if "video editing" in set(state.get("task_types") or []):
+        preservation_lock = (
+            "Source-video preservation lock: preserve exactly every visible "
+            "identity, face, body, wardrobe, prop, environment, lighting, "
+            "composition and camera attribute from the corresponding frame of "
+            "<Video 1> unless the user explicitly requests that attribute to "
+            "change; never reinterpret unspecified source details.")
+        style = " ".join(part for part in (preservation_lock, style) if part)
     description = _local_shot_description(raw_description)
     detail = "\n".join(part for part in (style, description) if part)
     soundscape = _strip_heading(

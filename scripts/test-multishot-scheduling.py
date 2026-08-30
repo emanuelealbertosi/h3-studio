@@ -82,3 +82,34 @@ assert "<Audio 1>" in clean
 assert "<Video 1>" not in clean
 
 print("H3 Studio 12-shot scheduling and physical reference filtering passed.")
+
+editing_state = {
+    "version": 1,
+    "kind": "r2v",
+    "subject_definitions": "<Subject 1> is the person visible in <Video 1>.",
+    "task_types": ["video editing", "audio reuse"],
+    "summary": "[reference generation] Change only the requested garment.",
+    "retention_analysis": "<Subject 1>: fully_preserved - preserve identity.",
+    "style": "Natural live-action footage.",
+    "shots": [{
+        "description": "[Shot 1] The garment changes while all other details remain stable.",
+        "soundscape": "The original synchronized soundtrack continues.",
+        "music": "N/A",
+        "active_ref_images": [],
+        "active_ref_videos": [1],
+        "active_ref_audios": [1],
+    }],
+}
+editing_script, editing_count = builders.build_r2v_script(
+    json.dumps(editing_state))
+assert editing_count == 1
+assert "[video editing + audio reuse]" in editing_script
+assert "[reference generation]" not in editing_script
+assert "<Video 1> is the source video for the target video edit." in editing_script
+assert "<Video 1> (source timeline and temporal structure): fully_preserved" in editing_script
+assert "<Audio 1> is the synchronized audio track of <Video 1>" in editing_script
+assert "<Audio 1>: fully_copy" in editing_script
+assert "Using the exact corresponding temporal segment of <Video 1>" in editing_script
+assert "Source-video preservation lock:" in editing_script
+
+print("H3 official full-reference editing contract hardening passed.")

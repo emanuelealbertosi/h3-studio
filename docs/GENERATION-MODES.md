@@ -25,6 +25,15 @@ Il modello è quello H3 standard configurato nell'Admin (Hybrid per default).
 PDD FAST resta escluso intenzionalmente dall'editing: con richieste strutturali
 il percorso standard è più prevedibile. Per usare invece il video soltanto come
 ispirazione o riferimento scegli `Reference / Remix H3`.
+### Contratto full-reference ufficiale
+
+Il formatter applica il contratto full-reference ufficiale anche quando il piano
+LLM è incompleto: definisce `<Video 1>`, corregge il tipo del `summary`, completa
+la retention della sorgente e, solo quando esiste davvero una traccia audio,
+definisce `<Audio 1>` con `fully_copy` o `reference`. Poiché il planner dello
+Studio è text-only, non gli è consentito inventare volto, abbigliamento, ambiente
+o altri attributi non esplicitati; il prompt finale conserva esattamente tutti
+gli elementi del fotogramma sorgente che l'utente non chiede di modificare.
 ## Multishot 1–12
 
 Il controllo **Shot** sceglie esattamente da 1 a 12 clip generate nello stesso
