@@ -12,26 +12,19 @@ Questo documento descrive il mapping verificato tra H3 Studio e il workflow
 | Reference | `R2V` | Almeno un'immagine, video o audio | Gli asset seguono l'ordine del Media Loader e i ruoli dichiarati. |
 | Keyframes | `KEYFRAMES` | Almeno Picture 1 | Picture 1..N diventano anchor sulla timeline globale; Studio e Chat accettano distribuzione automatica, percentuali o secondi espliciti. |
 | Continue video | `VIDEO EXTENSION` | Video 1, fino a 180 secondi nello Studio | Il router continua dall'ultimo frame decodificato e salva soltanto il nuovo segmento. |
-| Inpaint video | `VIDEO EDITING` | Video 1 e un elemento da tracciare, fino a 180 secondi nello Studio | SAM3 trova e segue nel tempo l'elemento scritto a parole. MaskVid converte la maschera nella griglia latent H3; Hybrid rigenera solo quella regione e mantiene il resto del video e l'audio sorgente. |
+| Video editing H3 | `VIDEO EDITING` | Video 1, fino a 180 secondi nello Studio | Video 1 resta la sorgente temporale; l'Ultra AIO Composer applica con H3 standard/Hybrid la trasformazione descritta nel prompt. |
 
-## Inpaint video con H3 Hybrid
+## Video editing nativo H3
 
-Questa modalità non usa il video come semplice reference. Il video sorgente viene
-codificato nel latent H3 e una noise mask limita il denoise alla regione tracciata.
-Il modello è quello H3 standard configurato nell'Admin (Hybrid per default): PDD
-FAST viene escluso intenzionalmente perché non è il percorso adatto a un edit
-strutturale conservativo.
+Questa modalità usa il percorso `VIDEO EDITING` già presente nell'Ultra AIO
+Composer. Il video sorgente rimane la base temporale da trasformare; il prompt
+descrive il risultato, gli eventi e gli elementi da preservare. Non vengono
+aggiunte maschere o dipendenze SAM/MaskVid.
 
-- **Elemento da modificare**: una frase breve rilevabile, per esempio `vestito della donna`, `automobile` o `cielo`.
-- **Prompt**: descrive il risultato e l'azione, per esempio `Quando schiocca le dita, il vestito diventa blu; conserva volto, posa, camera e sfondo`.
-- **Intervallo**: `0–0` abilita la maschera per tutta la clip. Per un cambio netto dopo un gesto è più affidabile impostare anche il secondo iniziale; il solo testo può anticipare o ritardare l'evento.
-- **Margine maschera**: `8 px` è il default conservativo. Aumentarlo solo se restano bordi del contenuto originale.
-
-Richiede `ComfyUI-SAM3`, il modello `sam3.safetensors`,
-`MaskVidExperiments` e la versione H3 Studio del nodo
-`H3ReferenceMemorySampler`. Il bridge rifiuta il job con un messaggio esplicito
-se ComfyUI non ha ancora caricato una di queste dipendenze.
-
+Il modello è quello H3 standard configurato nell'Admin (Hybrid per default).
+PDD FAST resta escluso intenzionalmente dall'editing: con richieste strutturali
+il percorso standard è più prevedibile. Per usare invece il video soltanto come
+ispirazione o riferimento scegli `Reference / Remix H3`.
 ## Multishot 1–12
 
 Il controllo **Shot** sceglie esattamente da 1 a 12 clip generate nello stesso

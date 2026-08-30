@@ -35,8 +35,6 @@
     "test:composer": "python scripts/test-composer-json-repair.py",
     "test:cancel": "tsx scripts/test-comfy-cancel.ts",
     "test:restart": "node scripts/test-bridge-restart.mjs",
-    "test:sam3-compat": "node scripts/test-sam3-compat.mjs",
-    "test:sam-runtime": "tsx scripts/test-sam-runtime.ts",
     "test:preview-layout": "node scripts/test-preview-layout.mjs",
     "test:postprocess": "tsx scripts/test-postprocess-variants.ts",
     "test:repair-processing-times": "tsx scripts/test-repair-processing-times.ts",

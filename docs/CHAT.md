@@ -148,13 +148,11 @@ In Admin, **LLM Vision Chat** mostra `PRONTO`, `CARICATO` oppure `SETUP`.
 installato/aggiornato il nodo occorre riavviare ComfyUI; non serve avviare LM
 Studio. Il test di contratto del repository è `npm run test:chat`.
 
-## Edit video con e senza SAM3
+## Video editing H3
 
-SAM3 è indicato per isolare **un solo elemento** per generazione, per esempio
-“cambia il vestito in blu”. Per trasformazioni globali o più elementi distinti,
-scrivi “usa il video come riferimento, senza SAM” oppure scegli Reference / Remix
-H3 nello Studio. In Chat una richiesta SAM con più bersagli viene convertita
-automaticamente nel percorso Reference / Remix, evitando una maschera parziale.
-
-Il worker SAM3 viene scaricato automaticamente appena H3 inizia il sampling; non
-deve restare in RAM durante il planner o la generazione successiva.
+Quando alleghi un video e chiedi di modificarlo, Chat usa `VIDEO EDITING`
+nativo del workflow Ultra AIO Composer: il video resta la sorgente temporale e
+H3 applica la trasformazione descritta. Per un remix creativo che usi la clip
+soltanto come riferimento, chiedi esplicitamente “usa il video come riferimento”
+oppure scegli `Reference / Remix H3` nello Studio. Non sono richiesti SAM3 o
+MaskVid.

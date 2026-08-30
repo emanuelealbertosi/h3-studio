@@ -102,7 +102,7 @@ const modes = [
   { value: "reference", label: "Reference / Remix H3", factor: 1.15 },
   { value: "keyframes", label: "Keyframes", factor: 1.15 },
   { value: "continue", label: "Continue video", factor: 1.2 },
-  { value: "edit", label: "Inpaint video", factor: 1.2 },
+  { value: "edit", label: "Video editing H3", factor: 1.2 },
 ] as const;
 
 type StudioMode = (typeof modes)[number]["value"];
@@ -4694,10 +4694,6 @@ function StudioApp() {
   const [sourceJobId, setSourceJobId] = useState<string | null>(null);
   const [muteDiegetic, setMuteDiegetic] = useState(false);
   const [muteNonDiegetic, setMuteNonDiegetic] = useState(false);
-  const [inpaintTarget, setInpaintTarget] = useState("");
-  const [inpaintMaskGrow, setInpaintMaskGrow] = useState(8);
-  const [inpaintStartSeconds, setInpaintStartSeconds] = useState(0);
-  const [inpaintEndSeconds, setInpaintEndSeconds] = useState(0);
   const [qualityMode, setQualityMode] = useState<QualityMode>("fast");
   const [videoEngine, setVideoEngine] = useState<VideoEngine>("h3");
   const [turboEnabled, setTurboEnabled] = useState(true);
@@ -5074,10 +5070,6 @@ function StudioApp() {
     setKeyframePositions(job.request.keyframePositions ?? "AUTO");
     setMuteDiegetic(Boolean(job.request.muteDiegetic));
     setMuteNonDiegetic(Boolean(job.request.muteNonDiegetic));
-    setInpaintTarget(job.request.inpaintTarget ?? "");
-    setInpaintMaskGrow(job.request.inpaintMaskGrow ?? 8);
-    setInpaintStartSeconds(job.request.inpaintStartSeconds ?? 0);
-    setInpaintEndSeconds(job.request.inpaintEndSeconds ?? 0);
     setSourceJobId(job.sourceJobId ?? job.request.sourceJobId ?? null);
     if (job.projectId ?? job.request.projectId) {
       setStudioProjectId((job.projectId ?? job.request.projectId)!);
@@ -5360,10 +5352,6 @@ function StudioApp() {
       setRunMessage("Scegli una clip o carica un video sorgente.");
       return;
     }
-    if (generationMode === "VIDEO EDITING" && !inpaintTarget.trim()) {
-      setRunMessage("Scrivi quale elemento SAM3 deve modificare, per esempio: vestito della donna.");
-      return;
-    }
     if (
       generationMode === "R2V" &&
       mediaAssets.length === 0
@@ -5420,10 +5408,10 @@ function StudioApp() {
           sourceJobId,
           muteDiegetic,
           muteNonDiegetic,
-          inpaintTarget,
-          inpaintMaskGrow,
-          inpaintStartSeconds,
-          inpaintEndSeconds,
+          inpaintTarget: "",
+          inpaintMaskGrow: 8,
+          inpaintStartSeconds: 0,
+          inpaintEndSeconds: 0,
         }),
       });
       const payload = (await response.json()) as {
@@ -6774,35 +6762,6 @@ function StudioApp() {
               </fieldset>
             </div>
 
-            {mode === "edit" && (
-              <fieldset className="audio-policy">
-                <legend>Maschera intelligente SAM3</legend>
-                <label>
-                  <span><strong>Elemento da modificare</strong><small>Descrivilo con poche parole: “vestito della donna”, “automobile”, “cielo”.</small></span>
-                  <input
-                    onChange={(event) => setInpaintTarget(event.target.value)}
-                    placeholder="vestito della donna"
-                    type="text"
-                    value={inpaintTarget}
-                  />
-                </label>
-                <label>
-                  <span><strong>Margine maschera</strong><small>8 px è il valore conservativo consigliato.</small></span>
-                  <select onChange={(event) => setInpaintMaskGrow(Number(event.target.value))} value={inpaintMaskGrow}>
-                    {[0, 4, 8, 12, 16, 24, 32].map((value) => <option key={value} value={value}>{value} px</option>)}
-                  </select>
-                </label>
-                <label>
-                  <span><strong>Intervallo opzionale</strong><small>0–0 modifica tutta la clip; imposta l’inizio per applicare il cambio dopo un gesto.</small></span>
-                  <span>
-                    <input min="0" onChange={(event) => setInpaintStartSeconds(Number(event.target.value))} step="0.1" type="number" value={inpaintStartSeconds} />
-                    <input min="0" onChange={(event) => setInpaintEndSeconds(Number(event.target.value))} step="0.1" type="number" value={inpaintEndSeconds} />
-                  </span>
-                </label>
-                <p>Il prompt descrive il risultato e il momento della trasformazione; SAM3 limita H3 alla regione tracciata.</p>
-              </fieldset>
-            )}
-
             <div className="seed-row">
               <fieldset className="segmented-control seed-mode-control">
                 <legend>Seed candidati</legend>
@@ -6874,7 +6833,7 @@ function StudioApp() {
                           : mode === "continue"
                             ? "Video 1 viene continuato; l’output contiene solo il nuovo segmento."
                             : mode === "edit"
-                              ? "Video 1 resta la sorgente: SAM3 traccia l’elemento indicato e H3 rigenera soltanto la maschera."
+                              ? "Video 1 resta la sorgente temporale: H3 applica al video la trasformazione descritta nel prompt."
                               : "Immagini, video e audio vengono usati come riferimenti."}
                     </span>
                   </div>

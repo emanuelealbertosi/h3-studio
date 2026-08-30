@@ -8,7 +8,6 @@ import { ChatRepository } from "../bridge/chat-repository.js";
 import {
   extractRequestedVideoDuration,
   extractRequestedLyrics,
-  inpaintTargetCount,
   musicInstrumentalIntent,
   normalizePlan,
   preserveMiniMaxImageIntent,
@@ -267,8 +266,6 @@ try {
   assert.equal(extractRequestedVideoDuration("crea un video di 2 minuti"), 120);
   assert.equal(extractRequestedVideoDuration("crea un video fantasy"), null);
   assert.equal(resolveChatVideoMode("anima l'immagine precedente", "R2V", 1, 0, 0), "I2V");
-  assert.equal(inpaintTargetCount("vestito della donna"), 1);
-  assert.equal(inpaintTargetCount("dress, background, and glasses"), 3);
   assert.equal(resolveChatVideoMode("crea un video da questa ultima immagine", "T2V", 1, 0, 0), "I2V");
   assert.equal(resolveChatVideoMode("usa questa immagine come riferimento", "I2V", 1, 0, 0), "R2V");
   assert.equal(
@@ -277,7 +274,7 @@ try {
   );
   assert.equal(
     resolveChatVideoMode("remix H3 del video, no inpaint", "VIDEO EDITING", 0, 1, 0),
-    "R2V",
+    "VIDEO EDITING",
   );
   assert.equal(resolveChatVideoMode("falla parlare con questa voce", "I2V", 1, 0, 1), "I2V");
   assert.equal(resolveChatVideoMode("falla parlare con questa voce", "R2V", 0, 0, 1), "R2V");

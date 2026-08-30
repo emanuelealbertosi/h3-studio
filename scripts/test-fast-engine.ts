@@ -19,12 +19,6 @@ function uniqueNode(prompt: ComfyApiPrompt, classType: string) {
   return nodes[0];
 }
 
-function uniqueNodeId(prompt: ComfyApiPrompt, classType: string) {
-  const entries = Object.entries(prompt).filter(([, node]) => node.class_type === classType);
-  assert.equal(entries.length, 1, `Atteso un solo nodo ${classType}`);
-  return entries[0][0];
-}
-
 const source = JSON.parse(
   await readFile(path.resolve("workflows", "studio-backend.api.json"), "utf8"),
 ) as ComfyApiPrompt;
@@ -143,10 +137,6 @@ const editWithStaleFastSampler = uniqueNode(
   editWithStaleFastFlags.candidates[0].prompt,
   "H3ReferenceMemorySampler",
 );
-const editSam3Segment = uniqueNode(
-  editWithStaleFastFlags.candidates[0].prompt,
-  "SAM3VideoSegmentation",
-);
 assert.equal(editWithStaleFastFlags.engineSettings.profile, "standard");
 assert.equal(
   editWithStaleFastFlags.engineSettings.model,
@@ -155,10 +145,12 @@ assert.equal(
 assert.equal(editWithStaleFastFlags.engineSettings.pddFile, null);
 assert.equal(editWithStaleFastFlags.engineSettings.steps, 8);
 assert.equal(editWithStaleFastSampler.inputs.pdd_acc_file, undefined);
-assert.equal(editSam3Segment.inputs.text_prompt, "vestito della donna");
-assert.deepEqual(
-  editWithStaleFastSampler.inputs.studio_inpaint_mask,
-  [uniqueNodeId(editWithStaleFastFlags.candidates[0].prompt, "SAM3VideoOutput"), 0],
+assert.equal(editWithStaleFastSampler.inputs.studio_inpaint_mask, undefined);
+assert.equal(
+  Object.values(editWithStaleFastFlags.candidates[0].prompt).some(
+    (node) => /^SAM3/i.test(node.class_type),
+  ),
+  false,
 );
 assert.equal(
   fast.engineSettings.model,

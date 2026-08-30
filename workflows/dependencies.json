@@ -66,29 +66,6 @@
       "requiredFor": ["video", "fast"]
     },
     {
-      "id": "sam3-video-inpaint",
-      "label": "SAM3 video tracking",
-      "kind": "custom_node",
-      "requiredClasses": [
-        "LoadSAM3Model",
-        "SAM3VideoSegmentation",
-        "SAM3Propagate",
-        "SAM3VideoOutput"
-      ],
-      "url": "https://github.com/1038lab/ComfyUI-SAM3",
-      "notes": "Traccia nel tempo il soggetto descritto con parole. Il modello SAM3 viene scaricato separatamente o al primo utilizzo.",
-      "requiredFor": ["video_inpaint"]
-    },
-    {
-      "id": "maskvid-experiments",
-      "label": "MaskVidExperiments H3 masks",
-      "kind": "custom_node",
-      "requiredClasses": ["MVEx_MaskToLatentSpace"],
-      "url": "https://github.com/drozbay/MaskVidExperiments",
-      "notes": "Converte le maschere video SAM3 nella griglia latent/token corretta di MiniMax H3.",
-      "requiredFor": ["video_inpaint"]
-    },
-    {
       "id": "dasiwa-llm",
       "label": "DaSiWa LLM/VLM nodes",
       "kind": "custom_node",
@@ -227,17 +204,7 @@
       "kind": "model",
       "folder": "diffusion_models",
       "filenames": ["minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors"],
-      "requiredFor": ["video", "image_minimax", "video_inpaint"]
-    },
-    {
-      "id": "sam3-model",
-      "label": "SAM3 segmentation model",
-      "kind": "model",
-      "folder": "sam3",
-      "filenames": ["sam3.safetensors"],
-      "url": "https://huggingface.co/apozz/sam3-safetensors/blob/main/sam3.safetensors",
-      "notes": "Opzionale finché non usi Inpaint video (circa 3,45 GB). H3 Studio richiede l'installazione esplicita per evitare un download nascosto al primo render.",
-      "requiredFor": ["video_inpaint"]
+      "requiredFor": ["video", "image_minimax"]
     },
     {
       "id": "h3-fast-base-model",

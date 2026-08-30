@@ -1,3 +1,13 @@
+### 30 agosto 2026 — Video Editing H3 nativo e completamento LTX 2.5
+
+- Rimossa dall'app l'iniezione SAM3/MaskVid: `VIDEO EDITING` usa ora direttamente
+  il percorso nativo dell'Ultra AIO Composer con il modello H3 standard/Hybrid.
+- Studio e Chat distinguono l'editing temporale dal percorso `Reference / Remix H3`;
+  PDD FAST resta escluso dall'editing.
+- Rimossi dall'installer e dal manifest i requisiti SAM3, MaskVid e relativo modello.
+  I file già installati nella ComfyUI dell'utente non vengono cancellati.
+- Completati su F: RedGraft LTX 2.5, text encoder INT8 ConvRot, Video VAE e Audio VAE.
+- Verifiche: typecheck, contratto Chat, test motore video e build di produzione.
 # Worklog
 
 ### 29 agosto 2026 — Riparazione schema Inpaint dopo rollback Bernini

@@ -11,7 +11,6 @@ import type { FastWorkflowStore } from "./fast-workflow-store.js";
 import type { ComfyProgressTracker } from "./comfy-progress.js";
 import type { JobRepository } from "./job-repository.js";
 import { buildLtx25Prompt } from "./ltx25-workflow.js";
-import type { SamRuntimeControl } from "./sam-runtime-control.js";
 
 const MAX_SEED = 9_007_199_254_740_000;
 const BASE_SECONDS_5S_05MP = 172;
@@ -426,18 +425,7 @@ function normalizeRequest(value: unknown): StudioJobRequest {
     MAX_SOURCE_VIDEO_SECONDS,
     Math.max(0, Number(value.inpaintEndSeconds ?? 0) || 0),
   );
-  if (
-    generationMode === "VIDEO EDITING" &&
-    inpaintEndSeconds > 0 &&
-    inpaintEndSeconds <= inpaintStartSeconds
-  ) {
-    throw new Error("La fine dell'inpaint deve essere successiva all'inizio");
-  }
-  if (generationMode === "VIDEO EDITING" && inpaintTargetCount(inpaintTarget) > 1) {
-    throw new Error(
-      "SAM3 può modificare un solo bersaglio per volta. Indica un elemento solo oppure usa Reference / Remix H3 senza SAM per più trasformazioni.",
-    );
-  }
+
   if (
     videoEngine === "ltx25" &&
     generationMode !== "T2V" &&
@@ -488,81 +476,6 @@ function normalizeRequest(value: unknown): StudioJobRequest {
     inpaintStartSeconds,
     inpaintEndSeconds,
   };
-}
-
-function attachH3Inpaint(
-  prompt: ComfyApiPrompt,
-  sampler: ComfyApiNode,
-  routerId: string,
-  request: StudioJobRequest,
-) {
-  if (request.generationMode !== "VIDEO EDITING") return;
-  if (!request.inpaintTarget) {
-    throw new Error(
-      "Indica l'elemento da modificare, per esempio: vestito, automobile o cielo",
-    );
-  }
-  const highest = Math.max(
-    0,
-    ...Object.keys(prompt)
-      .map((value) => Number(value))
-      .filter(Number.isFinite),
-  );
-  const loaderId = String(highest + 1);
-  const segmentId = String(highest + 2);
-  const propagateId = String(highest + 3);
-  const outputId = String(highest + 4);
-  prompt[loaderId] = {
-    class_type: "LoadSAM3Model",
-    inputs: { precision: "auto", compile: false },
-    _meta: { title: "H3 Studio — SAM3 model" },
-  };
-  prompt[segmentId] = {
-    class_type: "SAM3VideoSegmentation",
-    inputs: {
-      prompt_mode: "text",
-      video_frames: [routerId, 7],
-      text_prompt: request.inpaintTarget,
-      frame_idx: 0,
-      score_threshold: 0.3,
-    },
-    _meta: { title: "H3 Studio — trova soggetto con parole" },
-  };
-  prompt[propagateId] = {
-    class_type: "SAM3Propagate",
-    inputs: {
-      sam3_model_config: [loaderId, 0],
-      video_state: [segmentId, 0],
-      start_frame: 0,
-      end_frame: -1,
-      direction: "forward",
-    },
-    _meta: { title: "H3 Studio — traccia maschera video" },
-  };
-  prompt[outputId] = {
-    class_type: "SAM3VideoOutput",
-    inputs: {
-      masks: [propagateId, 0],
-      video_state: [propagateId, 2],
-      scores: [propagateId, 1],
-      obj_id: -1,
-      plot_all_masks: true,
-    },
-    _meta: { title: "H3 Studio — maschera tracciata" },
-  };
-  sampler.inputs.studio_inpaint_mask = [outputId, 0];
-  sampler.inputs.studio_inpaint_grow = request.inpaintMaskGrow;
-  sampler.inputs.studio_inpaint_start_seconds = request.inpaintStartSeconds;
-  sampler.inputs.studio_inpaint_end_seconds = request.inpaintEndSeconds;
-}
-
-function inpaintTargetCount(target: string) {
-  return target
-    .replace(/\band\b|\be\b/gi, ",")
-    .split(/[,;]+/)
-    .map((item) => item.replace(/^(?:and|e)\s+/i, "").trim())
-    .filter(Boolean)
-    .length;
 }
 
 function audioPolicyPrompt(request: StudioJobRequest) {
@@ -857,7 +770,6 @@ export function prepareStudioJob(
     sampler.inputs.studio_source_context_prefix = sourceContext?.prefix ?? "";
     sampler.inputs.studio_source_context_clip_index =
       sourceContext?.candidateIndex ?? 0;
-    attachH3Inpaint(prompt, sampler, routerId, request);
     const keepSourceAspect = request.aspectFormat === "keep source aspect";
     size.inputs.size_mode = keepSourceAspect
       ? "source aspect + megapixels"
@@ -997,10 +909,6 @@ export function publicDryRun(
 }
 
 export class StudioJobService {
-  private readonly samPromptIds = new Set<string>();
-  private readonly releasedSamPrompts = new Set<string>();
-  private samReleaseQueue: Promise<void> = Promise.resolve();
-
   constructor(
     private readonly comfy: ComfyClient,
     private readonly workflowStore: WorkflowStore,
@@ -1008,117 +916,12 @@ export class StudioJobService {
     private readonly runtimeSettings: RuntimeSettingsStore,
     private readonly progressTracker: ComfyProgressTracker,
     private readonly jobs: JobRepository,
-    private readonly samRuntime?: SamRuntimeControl,
-  ) {
-    this.progressTracker.onTerminal(({ promptId }) => {
-      if (this.samPromptIds.has(promptId)) {
-        return this.releaseSamPrompt(promptId);
-      }
-    });
-  }
-
-  private promptUsesSam(prompt: ComfyApiPrompt) {
-    return Object.values(prompt).some((node) =>
-      /^(?:LoadSAM3Model|SAM3VideoSegmentation|SAM3Propagate|SAM3VideoOutput)$/i
-        .test(node.class_type)
-    );
-  }
-
-  private registerSamPrompt(promptId: string, prompt: ComfyApiPrompt) {
-    if (!this.promptUsesSam(prompt)) return;
-    this.samPromptIds.add(promptId);
-    this.releasedSamPrompts.delete(promptId);
-  }
-
-  private async releaseSamPrompt(promptId: string) {
-    if (
-      !this.samRuntime ||
-      !this.samPromptIds.has(promptId) ||
-      this.releasedSamPrompts.has(promptId)
-    ) {
-      return;
-    }
-
-    const release = this.samReleaseQueue.catch(() => undefined).then(async () => {
-      if (this.releasedSamPrompts.has(promptId)) return;
-
-      const queue = await this.comfy.queueState().catch(() => null);
-      const anotherSamPromptIsRunning = queue
-        ? [...queue.runningPromptIds].some(
-            (runningId) =>
-              runningId !== promptId && this.samPromptIds.has(runningId),
-          )
-        : false;
-
-      if (!anotherSamPromptIsRunning) {
-        await this.samRuntime?.release();
-      }
-      this.releasedSamPrompts.add(promptId);
-    });
-    this.samReleaseQueue = release;
-    await release;
-  }
-
+  ) {}
   async prepare(
     rawRequest: unknown,
     excludedSeeds: ReadonlySet<number> = new Set(),
     runtimeOverride?: RuntimeSettings,
   ) {
-    const wantsInpaint = isRecord(rawRequest) &&
-      rawRequest.videoEngine !== "ltx25" &&
-      rawRequest.generationMode === "VIDEO EDITING";
-    if (wantsInpaint) {
-      const requiredClasses = [
-        "LoadSAM3Model",
-        "SAM3VideoSegmentation",
-        "SAM3Propagate",
-        "SAM3VideoOutput",
-        "MVEx_MaskToLatentSpace",
-      ] as const;
-      const [nodeInfo, samplerInfo] = await Promise.all([
-        Promise.all(requiredClasses.map(async (className) => {
-          const info = await this.comfy.objectInfo(className).catch(() => null);
-          return [className, isRecord(info) && isRecord(info[className])] as const;
-        })),
-        this.comfy.objectInfo("H3ReferenceMemorySampler").catch(() => null),
-      ]);
-      const missing: string[] = nodeInfo
-        .filter(([, available]) => !available)
-        .map(([className]) => className);
-      const sampler = samplerInfo?.H3ReferenceMemorySampler;
-      const input = isRecord(sampler) && isRecord(sampler.input)
-        ? sampler.input
-        : null;
-      const optional = input && isRecord(input.optional) ? input.optional : null;
-      if (!optional || !("studio_inpaint_mask" in optional)) {
-        missing.push("H3ReferenceMemorySampler (aggiornato per inpaint)");
-      }
-      if (missing.length) {
-        throw new Error(
-          `Inpaint video non pronto: mancano ${missing.join(", ")}. Installa le dipendenze dalla pagina Admin e riavvia ComfyUI.`,
-        );
-      }
-      const statusInfo = await this.comfy
-        .objectInfo("H3StudioInpaintStatus")
-        .catch(() => null);
-      const statusNode = statusInfo?.H3StudioInpaintStatus;
-      const statusInput = isRecord(statusNode) && isRecord(statusNode.input)
-        ? statusNode.input
-        : null;
-      const required = statusInput && isRecord(statusInput.required)
-        ? statusInput.required
-        : null;
-      const stateDefinition = required?.state;
-      const stateChoices = Array.isArray(stateDefinition) &&
-          Array.isArray(stateDefinition[0])
-        ? stateDefinition[0]
-        : [];
-      if (!stateChoices.includes("ready")) {
-        throw new Error(
-          "Modello SAM3 mancante (circa 3,45 GB): installa models/sam3/sam3.safetensors dalla pagina Admin prima di avviare Inpaint video. Il download non viene avviato di nascosto.",
-        );
-      }
-    }
     const wantsFast = isRecord(rawRequest) &&
       rawRequest.videoEngine !== "ltx25" &&
       rawRequest.qualityMode !== "min" &&
@@ -1269,7 +1072,6 @@ export class StudioJobService {
           `h3-studio-${prepared.jobId}`,
         );
         this.progressTracker.register(queued.promptId, candidate.prompt);
-        this.registerSamPrompt(queued.promptId, candidate.prompt);
         this.jobs.markQueued(
           prepared.jobId,
           candidate.index,
@@ -1319,18 +1121,6 @@ export class StudioJobService {
         candidate.promptId,
         liveProgress?.currentNode,
       );
-      if (
-        this.samPromptIds.has(candidate.promptId) &&
-        (
-          currentNodeClass === "H3ReferenceMemorySampler" ||
-          liveProgress?.phase === "completed" ||
-          liveProgress?.phase === "failed" ||
-          statusString === "success" ||
-          statusString === "error"
-        )
-      ) {
-        void this.releaseSamPrompt(candidate.promptId).catch(() => undefined);
-      }
       let status = candidate.status;
       if (statusString === "success" && output) status = "ready";
       else if (statusString === "error" || liveProgress?.phase === "failed") {
@@ -1408,13 +1198,6 @@ export class StudioJobService {
         job.candidates.some((candidate) => candidate.status === "ready") ? "partial" : "failed",
       );
     }
-    await Promise.all(
-      active.flatMap((candidate) =>
-        candidate.promptId && this.samPromptIds.has(candidate.promptId)
-          ? [this.releaseSamPrompt(candidate.promptId)]
-          : []
-      ),
-    );
     return this.get(jobId);
   }
 
@@ -1424,7 +1207,6 @@ export class StudioJobService {
       try {
         const prompt = JSON.parse(candidate.api_prompt_json) as ComfyApiPrompt;
         this.progressTracker.register(candidate.prompt_id, prompt);
-        this.registerSamPrompt(candidate.prompt_id, prompt);
         recovered += 1;
       } catch {
         // A malformed historical snapshot must not prevent bridge startup.

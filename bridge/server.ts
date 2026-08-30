@@ -35,7 +35,6 @@ import { AudioJobRepository } from "./audio-job-repository.js";
 import { AudioStudioService } from "./audio-studio-service.js";
 import { PromptPlannerService } from "./prompt-planner.js";
 import { LlmRuntimeControl } from "./llm-runtime-control.js";
-import { SamRuntimeControl } from "./sam-runtime-control.js";
 import {
   InstallSettingsStore,
   WORKFLOW_CATALOG,
@@ -104,7 +103,6 @@ const fastWorkflowStore = new FastWorkflowStore(
 const runtimeSettings = new RuntimeSettingsStore(config.dataDir);
 const promptPlanner = new PromptPlannerService(comfy, runtimeSettings);
 const llmRuntime = new LlmRuntimeControl();
-const samRuntime = new SamRuntimeControl();
 const progressTracker = new ComfyProgressTracker(installSettings.comfyUrl);
 progressTracker.start();
 const jobRepository = new JobRepository(config.dataDir);
@@ -143,7 +141,6 @@ const studioJobs = new StudioJobService(
   runtimeSettings,
   progressTracker,
   jobRepository,
-  samRuntime,
 );
 const audioStudio = new AudioStudioService(
   comfy,
