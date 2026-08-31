@@ -15,7 +15,6 @@ e documentazione, ma non password, database, media generati o pesi dei modelli.
    npm run typecheck
    npm run test:setup
    npm run test:projects
-   npm run test:fast
    npm run build
    ```
 

@@ -10,13 +10,6 @@ export const WORKFLOW_CATALOG = [
     file: "studio-backend.ui.json",
   },
   {
-    id: "h3-fast-alibaba-pdd",
-    role: "fast" as const,
-    name: "MiniMax H3 FAST Alibaba PDD-Acc",
-    description: "Derivato API a 8 NFE con Euler, sigmas PDD e shift 12/3.",
-    file: "studio-fast-pdd.api.json",
-  },
-  {
     id: "krea2-character-sheet",
     role: "image" as const,
     name: "Krea 2 Character/Object Sheet",
@@ -126,7 +119,6 @@ export class InstallSettingsStore {
     };
     for (const [key, role] of [
       ["videoWorkflowId", "video"],
-      ["fastWorkflowId", "fast"],
       ["imageWorkflowId", "image"],
       ["imageEditWorkflowId", "image_edit"],
       ["imageAnimaWorkflowId", "image_anima"],

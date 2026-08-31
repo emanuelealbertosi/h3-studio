@@ -15,6 +15,8 @@ import {
   preserveMusicIntent,
   resolveChatImageAspect,
   resolveChatImageH3Settings,
+  resolveChatLtxMegapixels,
+  resolveChatLtxTiming,
   resolveChatKeyframePositions,
   resolveChatTtsText,
   resolveChatVideoAudioRole,
@@ -37,6 +39,15 @@ try {
   const chat = new ChatRepository(jobs.databasePath);
   const primary = chat.createConversation(project!.id);
   assert.equal(primary.title, "Nuova chat");
+  assert.equal(primary.systemPrompt, "");
+  assert.equal(primary.systemPromptEnabled, true);
+  const personalized = chat.updateSystemPrompt(
+    primary.id,
+    "Rispondi con tono ironico ma competente.",
+    true,
+  );
+  assert.equal(personalized.systemPrompt, "Rispondi con tono ironico ma competente.");
+  assert.equal(personalized.systemPromptEnabled, true);
   chat.add({
     projectId: project!.id,
     conversationId: primary.id,
@@ -83,6 +94,15 @@ try {
   assert.equal(compactedContext.messages.length, 2);
   assert.equal(chat.memoryStatus(project!.id, primary.id).summarizedMessages, 1);
   const secondary = chat.createConversation(project!.id, "Seconda idea");
+  assert.equal(secondary.systemPrompt, "Rispondi con tono ironico ma competente.");
+  assert.equal(secondary.systemPromptEnabled, true);
+  const secondaryWithoutPersona = chat.updateSystemPrompt(
+    secondary.id,
+    secondary.systemPrompt,
+    false,
+  );
+  assert.equal(secondaryWithoutPersona.systemPromptEnabled, false);
+  assert.equal(chat.getConversation(primary.id)?.systemPromptEnabled, true);
   chat.add({
     projectId: project!.id,
     conversationId: secondary.id,
@@ -98,7 +118,19 @@ try {
   assert.equal(chat.memoryStatus(project!.id, primary.id).active, false);
   assert.equal(chat.deleteConversation(secondary.id).deleted, true);
   const migration = new DatabaseSync(jobs.databasePath, { readOnly: true });
-  assert.ok(migration.prepare("SELECT version FROM schema_migrations WHERE version = 26").get());
+  assert.ok(migration.prepare("SELECT version FROM schema_migrations WHERE version = 28").get());
+  const projectColumns = new Set(
+    (migration.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    ),
+  );
+  const conversationColumns = new Set(
+    (migration.prepare("PRAGMA table_info(chat_conversations)").all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    ),
+  );
+  assert.ok(projectColumns.has("chat_system_prompt"));
+  assert.ok(conversationColumns.has("system_prompt_enabled"));
   const jobColumns = new Set(
     (migration.prepare("PRAGMA table_info(jobs)").all() as Array<{ name: string }>).map(
       (column) => column.name,
@@ -131,6 +163,8 @@ try {
   assert.equal(routeAction(proposedImage, "video")?.type, "generate_video");
   assert.equal(routeAction(proposedImage, "video")?.videoEngine, "h3");
   assert.equal(routeAction(proposedImage, "ltx25")?.videoEngine, "ltx25");
+  assert.equal(routeAction(proposedImage, "ltx25")?.ltxQuality, "fast");
+  assert.equal(routeAction(proposedImage, "ltx25_quality")?.ltxQuality, "quality");
   assert.equal(routeAction(proposedImage, "edit")?.type, "edit_image");
   assert.equal(routeAction(proposedImage, "tts")?.type, "generate_tts");
   assert.equal(routeAction(proposedImage, "music")?.type, "generate_music");
@@ -139,6 +173,10 @@ try {
   assert.equal(
     preserveLtx25Intent({ type: "generate_video", prompt: "A runner" }, "usa LTX 2.5")?.videoEngine,
     "ltx25",
+  );
+  assert.equal(
+    preserveLtx25Intent({ type: "generate_video", prompt: "A runner" }, "usa LTX quality con refine")?.ltxQuality,
+    "quality",
   );
   assert.equal(
     preserveLtx25Intent({ type: "generate_video", prompt: "A runner" }, "crea rapidamente un video")?.videoEngine,
@@ -261,6 +299,15 @@ try {
     shotCount: 12, durationSeconds: 15, totalSeconds: 180,
   });
   assert.throws(() => resolveChatVideoTiming(181), /massimo 180 secondi/i);
+  assert.deepEqual(resolveChatLtxTiming(20), {
+    shotCount: 1, durationSeconds: 20, totalSeconds: 20,
+  });
+  assert.throws(() => resolveChatLtxTiming(21), /fino a 20 secondi/i);
+  assert.equal(resolveChatLtxMegapixels("LTX a 1 MP", "fast"), 0.98);
+  assert.equal(resolveChatLtxMegapixels("LTX a 0,7 MP", "fast"), 0.7);
+  assert.equal(resolveChatLtxMegapixels("LTX Quality a 0,98 MP", "quality"), 0.98);
+  assert.equal(resolveChatLtxMegapixels("LTX Fast a 2 MP", "fast"), 2);
+  assert.equal(resolveChatLtxMegapixels("LTX Quality a 2 MP", "quality"), 0.98);
   assert.equal(extractRequestedVideoDuration("crea un video di 30s"), 30);
   assert.equal(extractRequestedVideoDuration("crea un video di 30 secondi"), 30);
   assert.equal(extractRequestedVideoDuration("crea un video di 2 minuti"), 120);
@@ -346,6 +393,7 @@ try {
   assert.match(server, /\/api\/chat\/:projectId\/messages/);
   assert.match(server, /\/api\/chat\/conversations\/:conversationId/);
   assert.match(server, /\/api\/chat\/conversations\/:conversationId\/regenerate/);
+  assert.match(server, /\/api\/chat\/conversations\/:conversationId\/system-prompt/);
   assert.match(server, /preserveMedia/);
   assert.match(server, /deleteChatMedia/);
   assert.match(server, /external-media\/:mediaId\/rename/);
@@ -356,10 +404,12 @@ try {
   assert.match(service, /explicitDuration \?\? \(VIDEO_DURATION_CUE\.test\(requestText\)/);
   assert.match(service, /shotCount: timing\.shotCount/);
   assert.match(service, /durationSeconds: timing\.durationSeconds/);
-  assert.match(service, /megapixels: 0\.5/);
-  assert.match(service, /qualityMode: "fast"/);
+  assert.match(service, /resolveChatLtxMegapixels\(requestText, ltxQuality\)/);
+  assert.match(service, /qualityMode: videoEngine === "ltx25" && ltxQuality === "quality" \? "max" : "fast"/);
   assert.match(service, /ROUTE_OVERRIDE/);
   assert.match(service, /MEMORY_SYSTEM_PROMPT/);
+  assert.match(service, /PROJECT_CHAT_PERSONA/);
+  assert.match(service, /conversation\.systemPromptEnabled/);
   assert.match(service, /recallLatestMedia/);
   assert.match(service, /recentMediaSources/);
   assert.match(service, /generate_anima for anime, manga, illustration, drawing or cartoon-style/);
@@ -370,7 +420,6 @@ try {
   assert.match(service, /natural lip synchronization/);
   assert.match(service, /audio_role: audioRole/);
   assert.match(service, /resolveChatVideoAudioRole\(/);
-  assert.match(service, /PDD remains an explicit[\s\S]*?Studio-only FAST choice/);
   assert.match(service, /turboEnabled: false/);
   assert.doesNotMatch(service, /turboEnabled: true/);
   assert.match(service, /resolveChatVideoMode\(/);
@@ -389,8 +438,9 @@ try {
   assert.match(panel, /\(\^\|\\s\)@\$/);
   assert.match(panel, /chat-picker-grid/);
   assert.match(panel, /Crea con/);
-  assert.match(panel, /"auto" \| "video" \| "ltx25" \| "krea" \| "minimax" \| "anima" \| "edit"/);
-  assert.match(panel, /label: "LTX 2\.5"/);
+  assert.match(panel, /"auto" \| "video" \| "ltx25" \| "ltx25_quality" \| "krea" \| "minimax" \| "anima" \| "edit"/);
+  assert.match(panel, /label: "LTX Fast"/);
+  assert.match(panel, /label: "LTX Quality"/);
   assert.match(panel, /label: "Image H3"/);
   assert.doesNotMatch(panel, /label: "MiniMax"/);
   assert.match(panel, /trackedActions/);
@@ -410,6 +460,8 @@ try {
   assert.match(panel, /Nuova Chat/);
   assert.match(panel, /Conserva i media generati/);
   assert.match(panel, /saveConversationTitle/);
+  assert.match(panel, /saveSystemPrompt/);
+  assert.match(panel, /Persona \{systemPromptEnabled/);
   assert.match(panel, /RegenerateDialog/);
   assert.match(panel, /↻ Rigenera/);
   assert.match(panel, /onOpenStudio: \(kind: "video" \| "image" \| "audio", jobId: string\)/);
@@ -431,6 +483,7 @@ try {
   assert.match(styles, /\.chat-thread-sidebar\s*\{[\s\S]*?position:\s*sticky[\s\S]*?top:\s*88px/);
   assert.match(styles, /\.chat-thread-groups[^}]*overflow-y:\s*auto/);
   assert.match(styles, /\.chat-delete-dialog/);
+  assert.match(styles, /\.chat-system-prompt-panel/);
   assert.match(node, /llama-server/);
   assert.match(node, /--reasoning", "off"/);
   assert.match(node, /H3_CHAT_LLAMA_SERVER/);

@@ -9,8 +9,8 @@ export const JOB_DATABASE_MIGRATIONS = [
         updated_at TEXT NOT NULL,
         prompt TEXT NOT NULL,
         candidate_count INTEGER NOT NULL CHECK (candidate_count BETWEEN 1 AND 4),
-        duration_seconds INTEGER NOT NULL CHECK (duration_seconds IN (5, 10, 15)),
-        megapixels REAL NOT NULL CHECK (megapixels IN (0.5, 0.7, 1.0)),
+        duration_seconds INTEGER NOT NULL CHECK (duration_seconds IN (5, 10, 15, 20)),
+        megapixels REAL NOT NULL CHECK (megapixels IN (0.5, 0.7, 1.0, 1.5, 2.0)),
         generation_mode TEXT NOT NULL,
         aspect_format TEXT NOT NULL,
         requested_seed TEXT,
@@ -622,6 +622,14 @@ export const JOB_DATABASE_MIGRATIONS = [
     version: 27,
     statements: [
       `ALTER TABLE jobs ADD COLUMN ltx_profile_json TEXT`,
+    ],
+  },
+  {
+    version: 28,
+    statements: [
+      `ALTER TABLE projects ADD COLUMN chat_system_prompt TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE chat_conversations ADD COLUMN system_prompt_enabled INTEGER NOT NULL DEFAULT 1
+       CHECK (system_prompt_enabled IN (0, 1))`,
     ],
   },
 ] as const;

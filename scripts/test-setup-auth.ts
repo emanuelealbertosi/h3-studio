@@ -42,8 +42,8 @@ try {
   assert.equal(updated.comfyUrl, "http://localhost:9000");
   assert.deepEqual(await settingsStore.get(), updated);
   await assert.rejects(
-    () => settingsStore.update({ ...defaults, fastWorkflowId: "wrong" }),
-    /Workflow fast non valido/,
+    () => settingsStore.update({ ...defaults, videoWorkflowId: "wrong" }),
+    /Workflow video non valido/,
   );
   console.log("First-run settings + Admin auth: OK");
 } finally {

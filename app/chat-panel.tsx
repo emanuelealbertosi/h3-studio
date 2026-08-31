@@ -10,13 +10,15 @@ type ChatConversation = {
   projectName: string;
   title: string;
   titleIsAuto: boolean;
+  systemPrompt: string;
+  systemPromptEnabled: boolean;
   memoryActive: boolean;
   messageCount: number;
   lastMessage?: string | null;
   createdAt: string;
   updatedAt: string;
 };
-type ChatRoute = "auto" | "video" | "ltx25" | "krea" | "minimax" | "anima" | "edit" | "tts" | "music";
+type ChatRoute = "auto" | "video" | "ltx25" | "ltx25_quality" | "krea" | "minimax" | "anima" | "edit" | "tts" | "music";
 type ChatMemory = { active: boolean; summarizedMessages: number; summary: string };
 type ChatTrackedCandidate = {
   index: number;
@@ -60,6 +62,7 @@ type ChatMessage = {
     type: "generate_video" | "generate_image" | "generate_minimax_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
     prompt: string;
     videoEngine?: "h3" | "ltx25";
+    ltxQuality?: "fast" | "quality";
     jobId?: string;
     status: "started" | "failed";
     error?: string;
@@ -99,8 +102,8 @@ function annotated(output: { filename: string; subfolder: string; type: string }
   return `${path} [${output.type}]`;
 }
 
-function actionLabel(type: NonNullable<ChatMessage["action"]>["type"], videoEngine?: "h3" | "ltx25") {
-  if (type === "generate_video") return videoEngine === "ltx25" ? "Video LTX 2.5" : "Video H3";
+function actionLabel(type: NonNullable<ChatMessage["action"]>["type"], videoEngine?: "h3" | "ltx25", ltxQuality?: "fast" | "quality") {
+  if (type === "generate_video") return videoEngine === "ltx25" ? `Video LTX ${ltxQuality === "quality" ? "Quality" : "Fast"}` : "Video H3";
   if (type === "generate_anima") return "Immagine Anima";
   if (type === "generate_minimax_image") return "Image H3";
   if (type === "edit_image") return "Edit Flux.2 Klein";
@@ -192,6 +195,10 @@ export default function ChatPanel({
   const [text, setText] = useState("");
   const [route, setRoute] = useState<ChatRoute>("auto");
   const [memory, setMemory] = useState<ChatMemory | null>(null);
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [systemPromptEnabled, setSystemPromptEnabled] = useState(true);
+  const [systemPromptOpen, setSystemPromptOpen] = useState(false);
+  const [savingSystemPrompt, setSavingSystemPrompt] = useState(false);
   const [jobStates, setJobStates] = useState<Record<string, ChatTrackedJob>>({});
   const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -258,6 +265,9 @@ export default function ChatPanel({
     if (!activeConversationId) {
       setMessages([]);
       setMemory(null);
+      setSystemPrompt("");
+      setSystemPromptEnabled(true);
+      setSystemPromptOpen(false);
       return;
     }
     let disposed = false;
@@ -275,6 +285,9 @@ export default function ChatPanel({
         if (disposed) return;
         setMessages(payload.messages ?? []);
         setMemory(payload.memory ?? null);
+        setSystemPrompt(payload.conversation.systemPrompt ?? "");
+        setSystemPromptEnabled(payload.conversation.systemPromptEnabled !== false);
+        setSystemPromptOpen(false);
         setConversations((current) => current.map((conversation) =>
           conversation.id === payload.conversation!.id ? payload.conversation! : conversation
         ));
@@ -418,6 +431,44 @@ export default function ChatPanel({
     setAttachments([]);
     setText("");
     if (conversation.projectId !== projectId) onSelectProject(conversation.projectId);
+  }
+
+  async function saveSystemPrompt() {
+    if (!activeConversationId || savingSystemPrompt) return;
+    setSavingSystemPrompt(true);
+    setNotice("Salvataggio personalità del progetto…");
+    try {
+      const response = await fetch(`${bridgeUrl}/api/chat/conversations/${activeConversationId}/system-prompt`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: systemPrompt, enabled: systemPromptEnabled }),
+      });
+      const payload = await response.json() as { conversation?: ChatConversation; error?: string };
+      if (!response.ok || !payload.conversation) {
+        throw new Error(payload.error ?? "System prompt non salvato");
+      }
+      const saved = payload.conversation;
+      setSystemPrompt(saved.systemPrompt);
+      setSystemPromptEnabled(saved.systemPromptEnabled);
+      setConversations((current) => current.map((conversation) =>
+        conversation.projectId === saved.projectId
+          ? {
+              ...conversation,
+              systemPrompt: saved.systemPrompt,
+              systemPromptEnabled: conversation.id === saved.id
+                ? saved.systemPromptEnabled
+                : conversation.systemPromptEnabled,
+            }
+          : conversation
+      ));
+      setNotice(saved.systemPromptEnabled && saved.systemPrompt
+        ? "Personalità del progetto attiva in questa Chat"
+        : "Personalità del progetto disattivata in questa Chat");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "System prompt non salvato");
+    } finally {
+      setSavingSystemPrompt(false);
+    }
   }
 
   async function createConversationForProject(targetProjectId: string, ignoreLock = false) {
@@ -584,7 +635,7 @@ export default function ChatPanel({
       setAttachments([]);
       const last = payload.messages.at(-1);
       setNotice(last?.action?.status === "started"
-        ? `${actionLabel(last.action.type, last.action.videoEngine)} avviato${payload.reusedAttachments ? " · media recuperato dalla memoria" : ""} · il modello LLM è stato scaricato dalla memoria`
+        ? `${actionLabel(last.action.type, last.action.videoEngine, last.action.ltxQuality)} avviato${payload.reusedAttachments ? " · media recuperato dalla memoria" : ""} · il modello LLM è stato scaricato dalla memoria`
         : last?.status === "failed" ? last.error ?? "Risposta fallita" : "Chat pronta");
       setRuntime((current) => current ? { ...current, loaded: !last?.action } : current);
     } catch (error) {
@@ -648,7 +699,8 @@ export default function ChatPanel({
   const routes: Array<{ id: ChatRoute; label: string; help: string }> = [
     { id: "auto", label: "Auto", help: "LLM sceglie in base alla richiesta" },
     { id: "video", label: "Video H3", help: "Forza la generazione video" },
-    { id: "ltx25", label: "LTX 2.5", help: "Motore video rapido opzionale: solo T2V/I2V, max 15s; H3 resta il default" },
+    { id: "ltx25", label: "LTX Fast", help: "Single-stage 8 step: T2V/I2V fino a 20 s e 0,98 MP" },
+    { id: "ltx25_quality", label: "LTX Quality", help: "Two-stage 8+3: upscale latent 2× e refine, base 0,5 MP" },
     { id: "krea", label: "Krea", help: "Forza una immagine fotografica/generale" },
     { id: "minimax", label: "Image H3", help: "T2I, I2I o Reference H3 fino a 9 immagini" },
     { id: "anima", label: "Anima", help: "Forza disegno, anime, manga o illustrazione" },
@@ -740,9 +792,45 @@ export default function ChatPanel({
             <span className="chat-memory" title={memory.summary}>⌁ Memoria · {memory.summarizedMessages}</span>
           )}
           <span className={runtime?.ready ? "chat-runtime ready" : "chat-runtime error"}>{runtime?.ready ? runtime.loaded ? "● Modello caricato" : "○ Pronto" : "! Setup richiesto"}</span>
+          <button
+            className={systemPromptEnabled && systemPrompt ? "chat-persona-button active" : "chat-persona-button"}
+            disabled={!activeConversationId}
+            onClick={() => setSystemPromptOpen((current) => !current)}
+            type="button"
+          >Persona {systemPromptEnabled && systemPrompt ? "ON" : "OFF"}</button>
           <button disabled={!messages.length || chatLocked} onClick={() => void clearChat()} type="button">Pulisci</button>
         </div>
       </header>
+
+      {systemPromptOpen && <section className="chat-system-prompt-panel">
+        <div>
+          <span className="section-index">PERSONALITÀ DEL PROGETTO</span>
+          <strong>System prompt condiviso</strong>
+          <p>Il testo è comune a tutte le Chat di {projectName ?? "questo progetto"}; l’interruttore vale soltanto per questa conversazione.</p>
+        </div>
+        <label className="chat-system-prompt-toggle">
+          <input
+            checked={systemPromptEnabled}
+            disabled={savingSystemPrompt}
+            onChange={(event) => setSystemPromptEnabled(event.target.checked)}
+            type="checkbox"
+          />
+          Usa in questa Chat
+        </label>
+        <textarea
+          disabled={savingSystemPrompt}
+          maxLength={12_000}
+          onChange={(event) => setSystemPrompt(event.target.value)}
+          placeholder="Esempio: rispondi con tono ironico ma competente, diretto e sintetico. Chiamami Emanuele."
+          value={systemPrompt}
+        />
+        <footer>
+          <small>{systemPrompt.length.toLocaleString("it-IT")} / 12.000</small>
+          <button disabled={savingSystemPrompt} onClick={() => void saveSystemPrompt()} type="button">
+            {savingSystemPrompt ? "Salvataggio…" : "Salva per il progetto"}
+          </button>
+        </footer>
+      </section>}
 
       <div className="chat-messages">
         {!messages.length && (
@@ -773,7 +861,7 @@ export default function ChatPanel({
                 {action && <div className={`chat-action-card ${failed ? "failed" : action.status}`}>
                   <div className="chat-action-heading">
                     <div>
-                      <strong>{actionLabel(action.type, action.videoEngine)}</strong>
+                      <strong>{actionLabel(action.type, action.videoEngine, action.ltxQuality)}</strong>
                       <small>{action.jobId ? `Job ${action.jobId.slice(0, 8)} · ${tracked?.fetchError ?? candidate?.error ?? trackedStatus(candidate)}` : action.error}</small>
                     </div>
                     <div className="chat-action-buttons">
@@ -800,7 +888,7 @@ export default function ChatPanel({
                       ? <audio controls preload="metadata" src={mediaUrl} />
                       : tracked?.kind === "video"
                         ? <video controls playsInline preload="metadata" src={mediaUrl} />
-                        : <a href={mediaUrl} rel="noreferrer" target="_blank"><img alt={candidate?.output?.filename ?? actionLabel(action.type, action.videoEngine)} src={mediaUrl} /></a>
+                        : <a href={mediaUrl} rel="noreferrer" target="_blank"><img alt={candidate?.output?.filename ?? actionLabel(action.type, action.videoEngine, action.ltxQuality)} src={mediaUrl} /></a>
                       : <>
                         <div className="video-noise" />
                         <div className="video-blur" />

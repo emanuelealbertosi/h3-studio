@@ -90,10 +90,13 @@ assert.match(page, /return formatted \? `Tempo \${formatted}` : null/);
 assert.match(page, /isReady \|\| isFailed\s*\? formatProcessingTime/s);
 assert.match(page, /setCurrentJobMegapixels\(job\.request\.megapixels\)/);
 assert.match(page, /candidateVersionMegapixels\(\s*currentJobMegapixels,/s);
-assert.match(page, /\{\[5, 10, 15\]\.map/);
-assert.match(page, /disabled=\{duration === 15 && item\.value > 0\.7\}/);
-assert.match(page, /if \(nextDuration === 15 && megapixels > 0\.7\)/);
-assert.match(page, /15 s supporta al massimo 0\.7 MP/);
+assert.match(page, /\[5, 10, 15, \.\.\.\(videoEngine === "ltx25" \? \[20\] : \[\]\)\]\.map/);
+assert.match(page, /videoEngine === "h3" && duration === 15 && item\.value > 0\.7/);
+assert.match(page, /videoEngine === "h3" && nextDuration === 15 && megapixels > 0\.7/);
+assert.match(page, /H3 a 15 s supporta al massimo 0,7 MP/);
+assert.match(page, /1\.5 MP · experimental/);
+assert.match(page, /2 MP · experimental/);
+assert.match(page, /LTX Quality/);
 assert.match(css, /\.segmented-control button:disabled\s*\{[^}]*cursor:\s*not-allowed/s);
 const prepareVideoOperationPattern =
   /function prepareVideoOperation\([\s\S]*?\n  }\n\n  function prepareClipOperation/;

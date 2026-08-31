@@ -64,7 +64,7 @@ try {
 
   external.delete(first.id);
   assert.equal(external.count(), 0);
-  console.log("External media persistence + 15s SQLite constraint: OK");
+  console.log("External media persistence + extended SQLite constraints: OK");
 } finally {
   external.close();
   projects.close();
@@ -146,7 +146,8 @@ try {
     const upgradedSchema = (
       verified.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'").get() as { sql: string }
     ).sql;
-    assert.match(upgradedSchema, /duration_seconds IN \(5, 10, 15\)/);
+    assert.match(upgradedSchema, /duration_seconds IN \(5, 10, 15, 20\)/);
+    assert.match(upgradedSchema, /megapixels IN \(0\.5, 0\.7, 1\.0, 1\.5, 2\.0\)/);
     assert.equal(verified.prepare("PRAGMA foreign_key_check").all().length, 0);
   } finally {
     verified.close();
@@ -155,7 +156,7 @@ try {
     readdirSync(path.join(legacyDir, "backups")).filter((name) => name.endsWith(".sqlite")).length,
     1,
   );
-  console.log("Legacy 5/10s database migration + backup: OK");
+  console.log("Legacy database migration to LTX 20s/2MP + backup: OK");
 } catch (error) {
   legacyFailure = error;
 } finally {

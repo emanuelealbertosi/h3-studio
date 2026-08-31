@@ -59,21 +59,13 @@ Principio guida: **ComfyUI è il motore, H3 Studio è lo studio di produzione**.
 
 ## 4. Preset qualità
 
-### FAST
-
-- Motore separato Alibaba PDD-Acc a 8 NFE.
-- Modello base dedicato Ref2VA o FL2VA non-pruned, abbinato obbligatoriamente al PDD della stessa famiglia; varianti AdaLN pruned/8-wide sono bloccate prima della coda.
-- Ricetta bloccata: Euler, sigmas PDD, CFG 1, SigmaShift video/audio 12/3, strength trunk/head 1.
-- Nessun Turbo/distill LoRA e nessun cache pack; sono ammessi fino a tre LoRA creativi/personaggio.
-- 5 o 10 secondi.
-- Risoluzione predefinita 0,5 MP, modificabile fino a 0,98 MP.
-- Scopo: selezione rapida di idea, seed, composizione e movimento.
-
 ### 8 / 12 / 20 / 30
 
-- Workflow H3 standard con modello e massimo tre LoRA scelti nel pannello Admin H3.
-- 8 step è il test standard rapido senza PDD; 12/20/30 aumentano progressivamente l'effort.
+- Workflow H3 standard/Hybrid con modello e massimo tre LoRA scelti nel pannello Admin H3.
+- 8 step è il test rapido; 12/20/30 aumentano progressivamente l'effort.
 - Nessun cambio implicito di modello o LoRA passando fra i quattro valori.
+- Il precedente motore Alibaba PDD-Acc è stato ritirato il 30 agosto 2026 insieme a pesi, nodo custom e workflow dedicato.
+
 
 ### FINAL
 
@@ -85,9 +77,7 @@ Principio guida: **ComfyUI è il motore, H3 Studio è lo studio di produzione**.
 
 ### Avvertenza di coerenza
 
-Lo stesso seed non garantisce lo stesso video passando dal modello/PDD FAST al
-motore H3 standard. FAST è una selezione creativa, non una proxy pixel-perfect
-della final; per un confronto controllato fra step usare 8/12/20/30 sul motore standard.
+Per un confronto controllato fra qualità usare lo stesso modello, gli stessi LoRA e lo stesso seed sui preset 8/12/20/30 del motore H3 standard.
 
 ## 5. Esperienza principale
 
@@ -196,7 +186,7 @@ Responsabilità:
 costo = base × durata × megapixel × step × modalità × candidati
 ```
 
-Unità di riferimento: 5 secondi, 0,5 MP, FAST PDD 8 NFE, un candidato = **20 crediti**. Il vecchio 4-step non viene esposto.
+Unità di riferimento: 5 secondi, 0,5 MP, H3 standard 8 step, un candidato = **20 crediti**. Il vecchio 4-step non viene esposto.
 
 - 10 secondi: ×2.
 - 0,7 MP: ×1,4.
@@ -287,7 +277,7 @@ id, userId, jobId opzionale, tipo, quantità firmata, motivazione, actorId e tim
 - Creare `FINAL-MiniMax H3 AIO AUTOPROMPT ULTRA - STUDIO BACKEND.json`.
 - Versionare anche l'export API.
 - Mappare gli input con nomi semantici e firma del workflow.
-- Applicare override a prompt, seed, modalità, durata, MP, profilo engine, step, sampler, scheduler, modello, PDD, LoRA, reference, keyframe, memory, anchor e output prefix.
+- Applicare override a prompt, seed, modalità, durata, MP, profilo engine, step, sampler, scheduler, modello, LoRA, reference, keyframe, memory, anchor e output prefix.
 - Salvare per ogni candidato il prompt API realmente inviato.
 
 ## 12. Roadmap
@@ -322,7 +312,7 @@ Legenda: `[x]` completato e verificato; `[~]` parziale o presente solo a livello
 - [x] `/api/health` e connessione ComfyUI.
 - [x] Canale WebSocket eventi predisposto.
 - [x] Copia workflow Studio Backend e mappa input.
-- [x] Dry-run FAST PDD e 8 standard con override e validazione della coppia Ref2VA/FL2VA.
+- [x] Dry-run H3 standard sui preset 8/12/20/30.
 - [x] Invio reale 1–4 promptId, monitoraggio history e player MP4 via bridge.
 - [x] Primo job T2V reale, output MP4 verificato e importato nella cronologia persistente.
 - [x] Indicizzazione output MP4 da history ComfyUI e persistenza del riferimento nel database.
@@ -439,7 +429,7 @@ Legenda: `[x]` completato e verificato; `[~]` parziale o presente solo a livello
 - [x] Routing esplicito TTS/Music alla Chat multimodale con reference audio.
 - [x] Pipeline `Canzone col mio timbro`: MiniMax Music → BS-RoFormer → Seed-VC → remix stereo, con Stop e unload garantiti.
 - [x] Video H3 parlante da Chat: Picture 1 come frame iniziale I2V, audio esterno preservato, segmentazione temporale e lip-sync; R2V solo per reference esplicite.
-- [x] `Audio esatto + lip-sync (I2V/R2V)` nel Video Studio: parlato o musica, `<Soundtrack>` per-shot, memoria H3, trim esatto e mux dell'audio originale; fallback standard 8-step senza PDD.
+- [x] `Audio esatto + lip-sync (I2V/R2V)` nel Video Studio: parlato o musica, `<Soundtrack>` per-shot, memoria H3, trim esatto e mux dell'audio originale; profilo H3 standard 8-step.
 - [ ] Collaudare su GPU reale un brano cantato da 20–30 secondi e valutare fedeltà labiale, identità e continuità fra shot.
 - [ ] Collaudare la conversione timbrica completa sulla GPU reale dopo il download dei modelli audio.cpp.
 - [ ] Collaudare voice clone italiano e una generazione Music lunga su GPU reale.
@@ -490,5 +480,5 @@ L'MVP è completo quando un utente autorizzato può creare un progetto, stimare 
 2. Misurare qualità, VRAM e tempi e scegliere l'ordine definitivo della pipeline combinata.
 3. Aggiungere ETA calibrata e retry granulari alle varianti; Stop è già disponibile per run e post-process.
 4. Eseguire test GPU reali di I2V, Reference, Keyframes, Continue ed Edit e completare la gestione degli overlap.
-5. Riavviare ComfyUI e collaudare realmente il profilo FAST PDD-Acc Ref2VA; misurare ETA e qualità contro 8 standard sullo stesso seed.
+5. Collaudare i preset H3 8/12/20/30 sullo stesso seed e annotare ETA e qualità.
 6. Iniziare auth, utenti e ledger crediti server-side.

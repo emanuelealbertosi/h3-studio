@@ -6,8 +6,6 @@ import type {
   RuntimeSettings,
   RuntimeSettingsStore,
 } from "./runtime-settings.js";
-import { assertPddModelCompatibility } from "./pdd-compatibility.js";
-import type { FastWorkflowStore } from "./fast-workflow-store.js";
 import type { ComfyProgressTracker } from "./comfy-progress.js";
 import type { JobRepository } from "./job-repository.js";
 import { buildLtx25Prompt } from "./ltx25-workflow.js";
@@ -45,15 +43,17 @@ const AUDIO_ROUTING_ROLES = [
   "exact_soundtrack_plus_h3_sfx",
   "music_video_lipsync",
 ] as const;
-const EFFECTIVE_SHOT_SECONDS: Record<5 | 10 | 15, number> = {
+const EFFECTIVE_SHOT_SECONDS: Record<5 | 10 | 15 | 20, number> = {
   5: 123 / 24,
   10: 242 / 24,
   15: 362 / 24,
+  20: 482 / 24,
 };
-const EDIT_SOURCE_STRIDE_SECONDS: Record<5 | 10 | 15, number> = {
+const EDIT_SOURCE_STRIDE_SECONDS: Record<5 | 10 | 15 | 20, number> = {
   5: 122 / 24,
   10: 242 / 24,
   15: 360 / 24,
+  20: 480 / 24,
 };
 const MAX_SOURCE_VIDEO_SECONDS = 180;
 
@@ -69,8 +69,8 @@ export type StudioJobRequest = {
   prompt: string;
   candidateCount: 1 | 2 | 3 | 4;
   shotCount: number;
-  durationSeconds: 5 | 10 | 15;
-  megapixels: 0.5 | 0.7 | 0.98;
+  durationSeconds: 5 | 10 | 15 | 20;
+  megapixels: 0.5 | 0.7 | 0.98 | 1.5 | 2;
   generationMode: GenerationMode;
   aspectFormat: AspectFormat;
   seedMode: SeedMode;
@@ -256,19 +256,15 @@ function normalizeRequest(value: unknown): StudioJobRequest {
   }
 
   const durationSeconds = Number(value.durationSeconds);
-  if (durationSeconds !== 5 && durationSeconds !== 10 && durationSeconds !== 15) {
-    throw new Error("durationSeconds deve essere 5, 10 oppure 15");
+  if (durationSeconds !== 5 && durationSeconds !== 10 && durationSeconds !== 15 && durationSeconds !== 20) {
+    throw new Error("durationSeconds deve essere 5, 10, 15 oppure 20");
   }
 
   const requestedMegapixels = Number(value.megapixels);
-  if (![0.5, 0.7, 0.98, 1].includes(requestedMegapixels)) {
-    throw new Error("megapixels deve essere 0.5, 0.7 oppure 0.98");
+  if (![0.5, 0.7, 0.98, 1, 1.5, 2].includes(requestedMegapixels)) {
+    throw new Error("megapixels deve essere 0.5, 0.7, 0.98, 1.5 oppure 2");
   }
   const megapixels = requestedMegapixels === 1 ? 0.98 : requestedMegapixels;
-  if (durationSeconds === 15 && megapixels > 0.7) {
-    throw new Error("A 15 secondi la risoluzione massima supportata è 0.7 MP");
-  }
-
   let videoEngine: VideoEngine;
   if (value.videoEngine === undefined) videoEngine = "h3";
   else if (value.videoEngine === "h3" || value.videoEngine === "ltx25") {
@@ -306,6 +302,18 @@ function normalizeRequest(value: unknown): StudioJobRequest {
     value.qualityMode === "max"
       ? value.qualityMode
       : "fast";
+  if (videoEngine === "h3" && durationSeconds === 20) {
+    throw new Error("MiniMax H3 supporta shot da 5, 10 o 15 secondi; 20 secondi è disponibile con LTX 2.5");
+  }
+  if (videoEngine === "h3" && megapixels > 0.98) {
+    throw new Error("MiniMax H3 video supporta al massimo 0.98 MP");
+  }
+  if (videoEngine === "h3" && durationSeconds === 15 && megapixels > 0.7) {
+    throw new Error("A 15 secondi MiniMax H3 supporta al massimo 0.7 MP");
+  }
+  if (videoEngine === "ltx25" && qualityMode === "max" && megapixels > 0.98) {
+    throw new Error("LTX Quality usa una base massima di 0.98 MP e produce circa 4 MP dopo upscale latent x2");
+  }
   if (
     requestedSeed !== undefined &&
     (!Number.isSafeInteger(requestedSeed) || requestedSeed < 0)
@@ -455,13 +463,13 @@ function normalizeRequest(value: unknown): StudioJobRequest {
     prompt,
     candidateCount: candidateCount as 1 | 2 | 3 | 4,
     shotCount,
-    durationSeconds: durationSeconds as 5 | 10 | 15,
-    megapixels: megapixels as 0.5 | 0.7 | 0.98,
+    durationSeconds: durationSeconds as 5 | 10 | 15 | 20,
+    megapixels: megapixels as 0.5 | 0.7 | 0.98 | 1.5 | 2,
     generationMode: generationMode as GenerationMode,
     aspectFormat: aspectFormat as AspectFormat,
     seedMode,
     qualityMode,
-    turboEnabled: value.turboEnabled !== false,
+    turboEnabled: false,
     seed: requestedSeed,
     mediaState: media.json,
     referenceRoles,
@@ -587,33 +595,6 @@ function resolveEngineSettings(
   request: StudioJobRequest,
   runtimeSettings: RuntimeSettings,
 ): ResolvedEngineSettings {
-  const musicVideo =
-    audioRoutingFromMediaState(request.mediaState).role === "music_video_lipsync";
-  // PDD is a preview engine, not the model path we want for structural video
-  // edits. Keep VIDEO EDITING on the configured standard H3 model even when a
-  // stale client still submits the FAST flags.
-  const fast =
-    request.qualityMode === "fast" &&
-    request.turboEnabled &&
-    !musicVideo &&
-    request.generationMode !== "VIDEO EDITING";
-  if (fast) {
-    assertPddModelCompatibility(
-      runtimeSettings.fast.model,
-      runtimeSettings.fast.pddFile,
-    );
-    const loras = runtimeSettings.fast.loras.map((slot) => ({ ...slot }));
-    return {
-      family: "h3",
-      profile: "fast",
-      model: runtimeSettings.fast.model,
-      pddFile: runtimeSettings.fast.pddFile,
-      loras,
-      lora: loras[0]?.name ?? "",
-      loraStrength: loras[0]?.strength ?? 0,
-      steps: 8,
-    };
-  }
   const steps =
     request.qualityMode === "fast"
       ? 8
@@ -638,6 +619,7 @@ function resolveEngineSettings(
 
 function resolveLtx25EngineSettings(
   runtimeSettings: RuntimeSettings,
+  qualityMode: QualityMode,
 ): ResolvedEngineSettings {
   return {
     family: "ltx25",
@@ -646,13 +628,14 @@ function resolveLtx25EngineSettings(
     encoder: runtimeSettings.ltx25.encoder,
     videoVae: runtimeSettings.ltx25.videoVae,
     audioVae: runtimeSettings.ltx25.audioVae,
+    upscaler: runtimeSettings.ltx25.upscaler,
     cfg: runtimeSettings.ltx25.cfg,
     sampler: runtimeSettings.ltx25.sampler,
     pddFile: null,
     loras: [],
     lora: "",
     loraStrength: 0,
-    steps: 8,
+    steps: qualityMode === "max" ? 11 : 8,
   };
 }
 
@@ -665,7 +648,7 @@ export function prepareStudioJob(
 ) {
   const request = normalizeRequest(rawRequest);
   if (request.videoEngine === "ltx25") {
-    const engineSettings = resolveLtx25EngineSettings(runtimeSettings);
+    const engineSettings = resolveLtx25EngineSettings(runtimeSettings, request.qualityMode);
     const baseSeed = request.seed ?? randomSeed();
     const randomSeeds = new Set<number>();
     const candidates: PreparedCandidate[] = [];
@@ -791,14 +774,6 @@ export function prepareStudioJob(
       request.generationMode === "T2V" ? "[]" : request.mediaState;
     model.inputs.model_name = resolvedEngine.model;
     configureEngineLoras(loras, resolvedEngine);
-    if (resolvedEngine.profile === "fast") {
-      sampler.inputs.steps = 8;
-      sampler.inputs.sampler_name = "euler";
-      sampler.inputs.scheduler = "simple";
-      sampler.inputs.pdd_acc_file = resolvedEngine.pddFile;
-      shift.inputs.shift_video = 12;
-      shift.inputs.shift_audio = 3;
-    }
     if (audioRouting.role === "music_video_lipsync") {
       sampler.class_type = "H3MusicVideoReferenceMemorySampler";
       sampler.inputs.soundtrack = [routerId, 17];
@@ -912,7 +887,6 @@ export class StudioJobService {
   constructor(
     private readonly comfy: ComfyClient,
     private readonly workflowStore: WorkflowStore,
-    private readonly fastWorkflowStore: FastWorkflowStore,
     private readonly runtimeSettings: RuntimeSettingsStore,
     private readonly progressTracker: ComfyProgressTracker,
     private readonly jobs: JobRepository,
@@ -922,56 +896,25 @@ export class StudioJobService {
     excludedSeeds: ReadonlySet<number> = new Set(),
     runtimeOverride?: RuntimeSettings,
   ) {
-    const wantsFast = isRecord(rawRequest) &&
-      rawRequest.videoEngine !== "ltx25" &&
-      rawRequest.qualityMode !== "min" &&
-      rawRequest.qualityMode !== "med" &&
-      rawRequest.qualityMode !== "max" &&
-      rawRequest.turboEnabled !== false &&
-      rawRequest.generationMode !== "VIDEO EDITING";
-    if (wantsFast) {
-      const [pddInfo, samplerInfo] = await Promise.all([
-        this.comfy.objectInfo("MiniMaxH3PDDAccApply").catch(() => null),
-        this.comfy.objectInfo("H3ReferenceMemorySampler").catch(() => null),
-      ]);
-      const pddNodeReady = isRecord(pddInfo) &&
-        isRecord(pddInfo.MiniMaxH3PDDAccApply);
-      const sampler = samplerInfo?.H3ReferenceMemorySampler;
-      const input = isRecord(sampler) && isRecord(sampler.input)
-        ? sampler.input
-        : null;
-      const optional = input && isRecord(input.optional) ? input.optional : null;
-      if (!pddNodeReady || !optional || !("pdd_acc_file" in optional)) {
-        throw new Error(
-          "FAST Alibaba è installato ma non ancora caricato: riavvia ComfyUI.",
-        );
-      }
-    }
     const [sourcePrompt, runtimeSettings] = await Promise.all([
       isRecord(rawRequest) && rawRequest.videoEngine === "ltx25"
         ? Promise.resolve({} as ComfyApiPrompt)
-        : wantsFast
-        ? this.fastWorkflowStore.loadApiPrompt()
         : this.workflowStore.loadApiPrompt(),
       runtimeOverride ?? this.runtimeSettings.get(),
     ]);
-    if (wantsFast) {
-      const installedModels = await this.comfy.models("diffusion_models");
-      if (!installedModels.includes(runtimeSettings.fast.model)) {
-        throw new Error(
-          `Modello FAST non installato: ${runtimeSettings.fast.model}. Installalo dalla pagina Dipendenze/Admin e riavvia ComfyUI.`,
-        );
-      }
-    }
     if (isRecord(rawRequest) && rawRequest.videoEngine === "ltx25") {
       const installedModels = await this.comfy.models("diffusion_models");
       const installedEncoders = await this.comfy.models("text_encoders");
       const installedVaes = await this.comfy.models("vae");
+      const installedUpscalers = await this.comfy.modelFiles("latent_upscale_models");
       const missing = [
         installedModels.includes(runtimeSettings.ltx25.model) ? null : runtimeSettings.ltx25.model,
         installedEncoders.includes(runtimeSettings.ltx25.encoder) ? null : runtimeSettings.ltx25.encoder,
         installedVaes.includes(runtimeSettings.ltx25.videoVae) ? null : runtimeSettings.ltx25.videoVae,
         installedVaes.includes(runtimeSettings.ltx25.audioVae) ? null : runtimeSettings.ltx25.audioVae,
+        rawRequest.qualityMode === "max" && !installedUpscalers.includes(runtimeSettings.ltx25.upscaler)
+          ? runtimeSettings.ltx25.upscaler
+          : null,
       ].filter((item): item is string => Boolean(item));
       if (missing.length) {
         throw new Error(`LTX 2.5 non pronto: mancano ${missing.join(", ")}`);
@@ -1022,19 +965,10 @@ export class StudioJobService {
             encoder: original.engine.encoder || currentSettings.ltx25.encoder,
             videoVae: original.engine.videoVae || currentSettings.ltx25.videoVae,
             audioVae: original.engine.audioVae || currentSettings.ltx25.audioVae,
+            upscaler: original.engine.upscaler || currentSettings.ltx25.upscaler,
             steps: 8,
             cfg: original.engine.cfg,
             sampler: original.engine.sampler,
-          },
-        }
-      : original.engine.profile === "fast"
-      ? {
-          ...currentSettings,
-          fast: {
-            model: original.engine.model,
-            pddFile: original.engine.pddFile ?? currentSettings.fast.pddFile,
-            loras: original.engine.loras,
-            steps: 8,
           },
         }
       : {

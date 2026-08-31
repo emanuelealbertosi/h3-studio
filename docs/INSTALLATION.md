@@ -93,7 +93,6 @@ HTTP-only della durata di 12 ore.
 
 - `workflows/studio-backend.ui.json`: AIO H3 da aprire in ComfyUI.
 - `workflows/studio-backend.api.json`: snapshot API usato dal bridge.
-- `workflows/studio-fast-pdd.api.json`: profilo FAST Alibaba PDD-Acc.
 - `workflows/studio-krea2.api.json`: generazione immagini Krea 2.
 - `workflows/studio-flux2-klein-edit.api.json`: edit Flux.2 Klein 4B Distilled con una-quattro reference.
 - `workflows/studio-anima.api.json`: generazione anime Anima con profilo separato.
@@ -102,7 +101,9 @@ HTTP-only della durata di 12 ore.
   VAE opzionali nella cartella indicata esplicitamente con `-ModelRoot`; non usa
   mai un disco predefinito. Indicare la cartella `models` della ComfyUI collegata
   oppure un model store già dichiarato in `extra_model_paths.yaml`. Il checkpoint
-  RedGraft resta un download distinto da Civitai.
+  RedGraft resta un download distinto da Civitai. Il profilo Quality richiede
+  inoltre `ltx-2.3-spatial-upscaler-x2-1.1.safetensors` nella cartella
+  `latent_upscale_models`; l'Admin lo espone e lo verifica separatamente.
 - `workflows/catalog.json`: ruoli e associazioni disponibili.
 - `workflows/dependencies.json`: nodi e modelli richiesti.
 

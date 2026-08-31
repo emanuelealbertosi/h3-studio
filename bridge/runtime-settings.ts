@@ -1,9 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import {
-  assertPddModelCompatibility,
-  FAST_PDD_PAIRS,
-} from "./pdd-compatibility.js";
 
 export type EngineLoraSettings = {
   name: string;
@@ -28,6 +24,7 @@ export type Ltx25EngineSettings = {
   encoder: string;
   videoVae: string;
   audioVae: string;
+  upscaler: string;
   steps: 8;
   cfg: number;
   sampler: "euler_ancestral" | "euler";
@@ -153,8 +150,8 @@ export const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
     steps: 8,
   },
   fast: {
-    model: FAST_PDD_PAIRS[0].model,
-    pddFile: FAST_PDD_PAIRS[0].pddFile,
+    model: "minimax_h3_ref2va_int8_convrot.safetensors",
+    pddFile: "MiniMax-H3-Ref2VA-Acc-8Step.safetensors",
     loras: [],
     steps: 8,
   },
@@ -163,6 +160,7 @@ export const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
     encoder: "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
     videoVae: "ltx-2.5-video-vae-conv-bf16.safetensors",
     audioVae: "ltx-2.5-audio-vae-bf16.safetensors",
+    upscaler: "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
     steps: 8,
     cfg: 1,
     sampler: "euler",
@@ -345,6 +343,9 @@ function validateSettings(value: unknown): RuntimeSettings {
   const ltx25Encoder = typeof ltx25.encoder === "string" ? ltx25.encoder.trim() : "";
   const ltx25VideoVae = typeof ltx25.videoVae === "string" ? ltx25.videoVae.trim() : "";
   const ltx25AudioVae = typeof ltx25.audioVae === "string" ? ltx25.audioVae.trim() : "";
+  const ltx25Upscaler = typeof ltx25.upscaler === "string" && ltx25.upscaler.trim()
+    ? ltx25.upscaler.trim()
+    : defaults.ltx25.upscaler;
   const ltx25Cfg = Number(ltx25.cfg);
   const ltx25Sampler = ltx25.sampler === "euler" || ltx25.sampler === "euler_ancestral"
     ? ltx25.sampler
@@ -402,13 +403,12 @@ function validateSettings(value: unknown): RuntimeSettings {
       ? imageEdit.attentionBackend
       : "auto";
   if (!h3Model) throw new Error("Seleziona un modello H3");
-  if (!fastModel) throw new Error("Seleziona un modello FAST H3");
-  if (!pddFile) throw new Error("Seleziona l'acceleratore PDD Alibaba per FAST");
   if (!ltx25Model) throw new Error("Seleziona un modello LTX 2.5");
   if (!ltx25Encoder) throw new Error("Seleziona il text encoder LTX 2.5");
   if (!ltx25VideoVae || !ltx25AudioVae) {
     throw new Error("Seleziona entrambe le VAE LTX 2.5");
   }
+  if (!ltx25Upscaler) throw new Error("Seleziona il latent upscaler LTX Quality");
   if (!Number.isFinite(ltx25Cfg) || ltx25Cfg < 0.5 || ltx25Cfg > 3) {
     throw new Error("Il CFG LTX 2.5 deve essere compreso fra 0,5 e 3");
   }
@@ -505,7 +505,6 @@ function validateSettings(value: unknown): RuntimeSettings {
   if (!Number.isInteger(voiceConversionSteps) || voiceConversionSteps < 10 || voiceConversionSteps > 100) {
     throw new Error("Gli step Seed-VC devono essere un intero fra 10 e 100");
   }
-  assertPddModelCompatibility(fastModel, pddFile);
 
   return {
     h3: {
@@ -524,6 +523,7 @@ function validateSettings(value: unknown): RuntimeSettings {
       encoder: ltx25Encoder,
       videoVae: ltx25VideoVae,
       audioVae: ltx25AudioVae,
+      upscaler: ltx25Upscaler,
       steps: 8,
       cfg: ltx25Cfg,
       sampler: ltx25Sampler,

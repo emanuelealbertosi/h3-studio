@@ -91,6 +91,7 @@ type LtxProfileSnapshot = {
   encoder: string;
   videoVae: string;
   audioVae: string;
+  upscaler: string;
   cfg: number;
   sampler: "euler_ancestral" | "euler";
 };
@@ -171,6 +172,9 @@ function partialLtxProfile(value: unknown): Partial<LtxProfileSnapshot> {
     ...(typeof value.audioVae === "string" && value.audioVae.trim()
       ? { audioVae: value.audioVae }
       : {}),
+    ...(typeof value.upscaler === "string" && value.upscaler.trim()
+      ? { upscaler: value.upscaler }
+      : {}),
     ...(cfg === undefined ? {} : { cfg }),
     ...(sampler ? { sampler } : {}),
   };
@@ -216,6 +220,9 @@ function ltxProfileFromPrompt(row: CandidateRow | undefined): Partial<LtxProfile
     ...(textInput("CLIPLoader", "clip_name")
       ? { encoder: textInput("CLIPLoader", "clip_name")! }
       : {}),
+    ...(textInput("LatentUpscaleModelLoader", "model_name")
+      ? { upscaler: textInput("LatentUpscaleModelLoader", "model_name")! }
+      : {}),
     ...(referencedVae("VAEDecodeTiled", "vae")
       ? { videoVae: referencedVae("VAEDecodeTiled", "vae")! }
       : {}),
@@ -247,6 +254,7 @@ function ltxProfileFromRow(
     encoder: persisted.encoder ?? prompt.encoder ?? "",
     videoVae: persisted.videoVae ?? prompt.videoVae ?? "",
     audioVae: persisted.audioVae ?? prompt.audioVae ?? "",
+    upscaler: persisted.upscaler ?? prompt.upscaler ?? "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
     cfg: persisted.cfg ?? prompt.cfg ?? 1,
     sampler: persisted.sampler ?? prompt.sampler ?? "euler",
   };
@@ -259,6 +267,7 @@ function ltxProfileJson(settings: ResolvedEngineSettings) {
     encoder: settings.encoder,
     videoVae: settings.videoVae,
     audioVae: settings.audioVae,
+    upscaler: settings.upscaler,
     cfg: settings.cfg,
     sampler: settings.sampler,
   } satisfies LtxProfileSnapshot);
@@ -314,7 +323,7 @@ export class JobRepository {
       }
     }
     this.ensureInpaintColumns();
-    this.ensureFifteenSecondJobs();
+    this.ensureTwentySecondJobs();
     this.database.exec("PRAGMA optimize");
   }
 
@@ -357,13 +366,15 @@ export class JobRepository {
     }
   }
 
-  private ensureFifteenSecondJobs() {
+  private ensureTwentySecondJobs() {
     const schema = this.database
       .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'")
       .get() as { sql?: string } | undefined;
     if (
-      !schema?.sql ||
-      !/duration_seconds[\s\S]{0,120}duration_seconds\s+IN\s*\(5,\s*10\)/i.test(schema.sql)
+      !schema?.sql || (
+        /duration_seconds[\s\S]{0,120}duration_seconds\s+IN\s*\(5,\s*10,\s*15,\s*20\)/i.test(schema.sql) &&
+        /megapixels\s+REAL[\s\S]{0,100}megapixels\s+IN\s*\(0\.5,\s*0\.7,\s*1\.0,\s*1\.5,\s*2\.0\)/i.test(schema.sql)
+      )
     ) {
       return;
     }
@@ -383,7 +394,7 @@ export class JobRepository {
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     copyFileSync(
       this.databasePath,
-      path.join(backupDirectory, `h3-studio-before-15s-${timestamp}.sqlite`),
+      path.join(backupDirectory, `h3-studio-before-ltx-20s-2mp-${timestamp}.sqlite`),
     );
 
     this.database.exec("PRAGMA foreign_keys = OFF");
@@ -397,8 +408,8 @@ export class JobRepository {
         prompt TEXT NOT NULL,
         candidate_count INTEGER NOT NULL CHECK (candidate_count BETWEEN 1 AND 4),
         shot_count INTEGER NOT NULL DEFAULT 1 CHECK (shot_count BETWEEN 1 AND 12),
-        duration_seconds INTEGER NOT NULL CHECK (duration_seconds IN (5, 10, 15)),
-        megapixels REAL NOT NULL CHECK (megapixels IN (0.5, 0.7, 1.0)),
+        duration_seconds INTEGER NOT NULL CHECK (duration_seconds IN (5, 10, 15, 20)),
+        megapixels REAL NOT NULL CHECK (megapixels IN (0.5, 0.7, 1.0, 1.5, 2.0)),
         generation_mode TEXT NOT NULL,
         aspect_format TEXT NOT NULL,
         requested_seed TEXT,
@@ -467,7 +478,7 @@ export class JobRepository {
     }
     const violations = this.database.prepare("PRAGMA foreign_key_check").all();
     if (violations.length) {
-      throw new Error("Migrazione durata 15s completata con riferimenti SQLite non validi");
+      throw new Error("Migrazione LTX 20s/2MP completata con riferimenti SQLite non validi");
     }
   }
 
@@ -690,11 +701,13 @@ export class JobRepository {
         promptLength: job.prompt.length,
         candidateCount: job.candidate_count as 1 | 2 | 3 | 4,
         shotCount: job.shot_count,
-        durationSeconds: job.duration_seconds as 5 | 10 | 15,
+        durationSeconds: job.duration_seconds as 5 | 10 | 15 | 20,
         megapixels: (job.megapixels === 1 ? 0.98 : job.megapixels) as
           | 0.5
           | 0.7
-          | 0.98,
+          | 0.98
+          | 1.5
+          | 2,
         generationMode: job.generation_mode,
         aspectFormat: job.aspect_format,
         seedMode: job.seed_mode,

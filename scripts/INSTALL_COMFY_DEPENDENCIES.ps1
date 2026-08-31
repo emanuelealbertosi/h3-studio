@@ -96,7 +96,6 @@ if (-not $SkipExternalNodes) {
     @{ Name = "rgthree-comfy"; Url = "https://github.com/rgthree/rgthree-comfy.git" },
     @{ Name = "ComfyUI-KJNodes"; Url = "https://github.com/kijai/ComfyUI-KJNodes.git" },
     @{ Name = "ComfyUI-VideoHelperSuite"; Url = "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git" },
-    @{ Name = "ComfyUI-MiniMax-H3-PDD-Acc"; Url = "https://github.com/Jalen-Brunson/ComfyUI-MiniMax-H3-PDD-Acc.git" },
     @{ Name = "Rebalance-Pack"; Url = "https://github.com/nova452/Rebalance-Pack.git" },
     @{ Name = "ComfyUI-H3-FaceRefine"; Url = "https://github.com/Carasibana/ComfyUI-H3-FaceRefine.git" },
     @{ Name = "Comfyui_Minimax_h3_latent_Upscaler"; Url = "https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git" }

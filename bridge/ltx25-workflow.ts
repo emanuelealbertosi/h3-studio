@@ -5,6 +5,7 @@ import type { StudioJobRequest } from "./studio-job.js";
 const FPS = 24;
 const DISTILLED_SIGMAS =
   "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0";
+const QUALITY_REFINE_SIGMAS = "0.85, 0.7250, 0.4219, 0.0";
 
 const RATIOS: Record<string, number> = {
   "16:9 landscape": 16 / 9,
@@ -83,6 +84,7 @@ export function buildLtx25Prompt(
   }
   const { width, height } = ltx25Dimensions(request);
   const frames = 1 + Math.floor((request.durationSeconds * FPS) / 8) * 8;
+  const quality = request.qualityMode === "max";
   const prompt: ComfyApiPrompt = {
     "1": { class_type: "UNETLoader", inputs: { unet_name: settings.model, weight_dtype: "default" } },
     "2": { class_type: "CLIPLoader", inputs: { clip_name: settings.encoder, type: "ltxv", device: "default" } },
@@ -115,6 +117,72 @@ export function buildLtx25Prompt(
       inputs: { vae: ["3", 0], image: ["12", 0], latent: ["8", 0], strength: 0.7, bypass: false },
     };
     prompt["10"].inputs.video_latent = ["13", 0];
+  }
+  if (quality) {
+    prompt["24"] = {
+      class_type: "LatentUpscaleModelLoader",
+      inputs: { model_name: settings.upscaler },
+    };
+    prompt["25"] = {
+      class_type: "LTXVLatentUpsampler",
+      inputs: { samples: ["19", 0], upscale_model: ["24", 0], vae: ["3", 0] },
+    };
+    let refinedVideoLatent: [string, number] = ["25", 0];
+    if (picture) {
+      prompt["34"] = {
+        class_type: "LTXVImgToVideoInplace",
+        inputs: {
+          vae: ["3", 0],
+          image: ["12", 0],
+          latent: ["25", 0],
+          strength: 1,
+          bypass: false,
+        },
+      };
+      refinedVideoLatent = ["34", 0];
+    }
+    prompt["26"] = {
+      class_type: "LTXVCropGuides",
+      inputs: { positive: ["7", 0], negative: ["7", 1], latent: ["19", 0] },
+    };
+    prompt["27"] = {
+      class_type: "LTXVConcatAVLatent",
+      inputs: { video_latent: refinedVideoLatent, audio_latent: ["19", 1] },
+    };
+    prompt["28"] = { class_type: "RandomNoise", inputs: { noise_seed: seed } };
+    prompt["29"] = {
+      class_type: "CFGGuider",
+      inputs: {
+        model: ["1", 0],
+        positive: ["26", 0],
+        negative: ["26", 1],
+        cfg: 1,
+      },
+    };
+    prompt["30"] = {
+      class_type: "KSamplerSelect",
+      inputs: { sampler_name: "euler_cfg_pp" },
+    };
+    prompt["31"] = {
+      class_type: "ManualSigmas",
+      inputs: { sigmas: QUALITY_REFINE_SIGMAS },
+    };
+    prompt["32"] = {
+      class_type: "SamplerCustomAdvanced",
+      inputs: {
+        noise: ["28", 0],
+        guider: ["29", 0],
+        sampler: ["30", 0],
+        sigmas: ["31", 0],
+        latent_image: ["27", 0],
+      },
+    };
+    prompt["33"] = {
+      class_type: "LTXVSeparateAVLatent",
+      inputs: { av_latent: ["32", 0] },
+    };
+    prompt["20"].inputs.samples = ["33", 0];
+    prompt["21"].inputs.samples = ["33", 1];
   }
   return prompt;
 }

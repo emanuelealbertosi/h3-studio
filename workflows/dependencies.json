@@ -16,7 +16,7 @@
       ],
       "url": "https://github.com/jlucasmcrell/ComfyUI-H3-Multishot",
       "notes": "La versione estesa usata da H3 Studio si trova in comfyui_nodes/ e viene installata dallo script incluso.",
-      "requiredFor": ["video", "fast"]
+      "requiredFor": ["video"]
     },
     {
       "id": "h3-studio-chat-node",
@@ -51,7 +51,10 @@
         "SaveVideo",
         "LoadImage",
         "LTXVPreprocess",
-        "LTXVImgToVideoInplace"
+        "LTXVImgToVideoInplace",
+        "LatentUpscaleModelLoader",
+        "LTXVLatentUpsampler",
+        "LTXVCropGuides"
       ],
       "url": "https://github.com/Comfy-Org/ComfyUI",
       "notes": "Le classi LTX 2.5 usate da T2V e I2V sono incluse nel core ComfyUI recente. Se una verifica object_info fallisce, aggiorna ComfyUI e riavvialo; H3 resta predefinito.",
@@ -63,7 +66,7 @@
       "kind": "custom_node",
       "requiredClasses": ["MiniMaxH3MediaLoader", "MiniMaxH3ReferenceSplitter"],
       "url": "https://github.com/Adudeguyman/ComfyUI-Fantastic-MiniMaxH3-PromptBuilder",
-      "requiredFor": ["video", "fast"]
+      "requiredFor": ["video"]
     },
     {
       "id": "dasiwa-llm",
@@ -71,7 +74,7 @@
       "kind": "custom_node",
       "requiredClasses": ["DaSiWa_LLMModelSelector", "DaSiWa_LLMAnalyze"],
       "url": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-      "requiredFor": ["video", "fast"]
+      "requiredFor": ["video"]
     },
     {
       "id": "rgthree",
@@ -79,7 +82,7 @@
       "kind": "custom_node",
       "requiredClasses": ["Power Lora Loader (rgthree)"],
       "url": "https://github.com/rgthree/rgthree-comfy",
-      "requiredFor": ["video", "fast", "face", "upscale"]
+      "requiredFor": ["video", "face", "upscale"]
     },
     {
       "id": "kj-nodes",
@@ -87,7 +90,7 @@
       "kind": "custom_node",
       "requiredClasses": ["ImageSharpenKJ", "PathchSageAttentionKJ"],
       "url": "https://github.com/kijai/ComfyUI-KJNodes",
-      "requiredFor": ["video", "fast", "image", "face", "upscale"]
+      "requiredFor": ["video", "image", "face", "upscale"]
     },
     {
       "id": "video-helper-suite",
@@ -96,14 +99,6 @@
       "requiredClasses": ["VHS_LoadVideoPath", "VHS_VideoCombine"],
       "url": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite",
       "requiredFor": ["face", "upscale"]
-    },
-    {
-      "id": "pdd-acc",
-      "label": "MiniMax H3 PDD-Acc",
-      "kind": "custom_node",
-      "requiredClasses": ["MiniMaxH3PDDAccApply"],
-      "url": "https://github.com/Jalen-Brunson/ComfyUI-MiniMax-H3-PDD-Acc",
-      "requiredFor": ["fast"]
     },
     {
       "id": "krea-rebalance",
@@ -187,18 +182,6 @@
       "requiredFor": ["upscale"]
     },
     {
-      "id": "pdd-models",
-      "label": "Alibaba MiniMax H3 Acc LoRAs",
-      "kind": "model",
-      "folder": "pdd_acc",
-      "filenames": [
-        "MiniMax-H3-FL2VA-Acc-8Step.safetensors",
-        "MiniMax-H3-Ref2VA-Acc-8Step.safetensors"
-      ],
-      "url": "https://huggingface.co/alibaba-pai/MiniMax-H3-Acc-LoRAs",
-      "requiredFor": ["fast"]
-    },
-    {
       "id": "h3-base-model",
       "label": "Modello H3 standard predefinito",
       "kind": "model",
@@ -207,25 +190,12 @@
       "requiredFor": ["video", "image_minimax"]
     },
     {
-      "id": "h3-fast-base-model",
-      "label": "Modello H3 FAST Ref2VA / FL2VA INT8 ConvRot non-pruned",
-      "kind": "model",
-      "folder": "diffusion_models",
-      "filenames": [
-        "minimax_h3_ref2va_int8_convrot.safetensors",
-        "minimax_h3_fl2va_int8_convrot.safetensors"
-      ],
-      "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/diffusion_models",
-      "notes": "Installa almeno un modello ufficiale non-pruned e la patch PDD della stessa famiglia; installali entrambi per poter cambiare famiglia dall'Admin.",
-      "requiredFor": ["fast"]
-    },
-    {
       "id": "h3-text-encoder",
       "label": "Text encoder MiniMax H3",
       "kind": "model",
       "folder": "text_encoders",
       "filenames": ["qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"],
-      "requiredFor": ["video", "fast", "image_minimax"]
+      "requiredFor": ["video", "image_minimax"]
     },
     {
       "id": "h3-image-vae",
@@ -261,7 +231,7 @@
       "kind": "model",
       "folder": "vae",
       "filenames": ["minimax_h3_video_vae_int8_convrot.safetensors"],
-      "requiredFor": ["video", "fast"]
+      "requiredFor": ["video"]
     },
     {
       "id": "h3-audio-vae",
@@ -269,7 +239,7 @@
       "kind": "model",
       "folder": "vae",
       "filenames": ["minimax_h3_audio_vae_fp32.safetensors"],
-      "requiredFor": ["video", "fast"]
+      "requiredFor": ["video"]
     },
     {
       "id": "minimax-music-core",
@@ -317,7 +287,7 @@
       "filenames": [
         "huihui-ai\\Huihui-gemma-4-12B-it-qat-q4_0-unquantized-abliterated-GGUF\\Huihui-gemma-4-12B-it-qat-q4_0-unquantized-abliterated-Q4_K.gguf"
       ],
-      "requiredFor": ["video", "fast", "chat"]
+      "requiredFor": ["video", "chat"]
     },
     {
       "id": "h3-chat-mmproj",
@@ -422,6 +392,16 @@
       "filenames": ["qwen_image_vae.safetensors"],
       "url": "https://huggingface.co/circlestone-labs/Anima",
       "requiredFor": ["image_anima"]
+    },
+    {
+      "id": "ltx25-spatial-upscaler",
+      "label": "LTX 2.3 Spatial Latent Upscaler x2",
+      "kind": "model",
+      "folder": "latent_upscale_models",
+      "filenames": ["ltx-2.3-spatial-upscaler-x2-1.1.safetensors"],
+      "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+      "notes": "Richiesto soltanto dal profilo LTX Quality two-stage.",
+      "requiredFor": ["video_ltx25"]
     },
     {
       "id": "ltx25-redgraft-model",

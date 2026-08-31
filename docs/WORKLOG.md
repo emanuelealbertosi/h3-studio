@@ -1,3 +1,8 @@
+# 30 agosto 2026 — Ritiro Alibaba PDD-Acc
+
+- Rimossi dall'app il preset FAST/PDD, il workflow dedicato, il nodo custom e i pesi PDD/ConvRot installati per quel profilo.
+- H3 espone ora soltanto 8/12/20/30 step sul modello standard/Hybrid; le voci PDD più sotto restano cronologia storica e non descrivono lo stato attuale.
+
 ### 30 agosto 2026 — Video Editing H3 nativo e completamento LTX 2.5
 
 - Allineato deterministicamente `VIDEO EDITING` al contratto full-reference ufficiale MiniMax: `<Video 1>` e l'eventuale `<Audio 1>` vengono definiti e coperti in `retention_analysis`, il prefisso del `summary` deriva dal router validato e ogni segmento cita la sorgente temporale.

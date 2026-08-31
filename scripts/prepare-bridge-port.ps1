@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)]
   [string]$ProjectRoot,
@@ -285,6 +285,33 @@ function Test-H3BridgeCommandLine(
   return $hasProjectTsxReference -and $hasExactEntrypoint
 }
 
+function Get-LatestBridgeSourceWriteTimeUtc([string]$Root) {
+  $runtimeRoots = @(
+    (Join-Path $Root "bridge"),
+    (Join-Path $Root "db"),
+    (Join-Path $Root "workflows")
+  )
+  $runtimeFiles = @()
+  foreach ($runtimeRoot in $runtimeRoots) {
+    if (Test-Path -LiteralPath $runtimeRoot -PathType Container) {
+      $runtimeFiles += @(
+        Get-ChildItem -LiteralPath $runtimeRoot -File -Recurse -ErrorAction Stop |
+          Where-Object { $_.Extension -in @('.ts', '.js', '.mjs', '.json') }
+      )
+    }
+  }
+  foreach ($relativePath in @('.env', 'package.json')) {
+    $candidate = Join-Path $Root $relativePath
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      $runtimeFiles += Get-Item -LiteralPath $candidate -ErrorAction Stop
+    }
+  }
+  if ($runtimeFiles.Count -eq 0) {
+    return [DateTime]::MinValue
+  }
+  return ($runtimeFiles | Measure-Object -Property LastWriteTimeUtc -Maximum).Maximum
+}
+
 try {
   $resolvedProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\', '/')
 } catch {
@@ -398,12 +425,20 @@ try {
     -TimeoutSec 3 `
     -ErrorAction Stop
   if ($health.bridge.status -eq 'online') {
+    $bridgeStartedUtc = ([DateTime]$owner.CreationDate).ToUniversalTime()
+    $latestSourceUtc = Get-LatestBridgeSourceWriteTimeUtc $resolvedProjectRoot
+    if ($bridgeStartedUtc -ge $latestSourceUtc) {
+      Write-Output (
+        "[H3 Studio] Bridge del progetto già attivo e aggiornato " +
+        "(PID $ownerPid): riuso l'istanza esistente."
+      )
+      # Exit 25 is an intentional launcher contract: keep this healthy bridge.
+      exit 25
+    }
     Write-Output (
-      "[H3 Studio] Bridge del progetto già attivo (PID $ownerPid): riuso " +
-      "l'istanza esistente."
+      "[H3 Studio] Bridge PID $ownerPid obsoleto: i sorgenti backend sono " +
+      "più recenti del processo. Verrà sostituito automaticamente."
     )
-    # Exit 25 is an intentional launcher contract: keep this healthy bridge.
-    exit 25
   }
 } catch {
   Write-Output (

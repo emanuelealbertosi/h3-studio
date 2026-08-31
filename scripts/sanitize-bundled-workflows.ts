@@ -148,7 +148,6 @@ async function sanitizeUi() {
 
 await Promise.all([
   sanitizeApi("studio-backend.api.json"),
-  sanitizeApi("studio-fast-pdd.api.json"),
   sanitizeUi(),
 ]);
 

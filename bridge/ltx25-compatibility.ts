@@ -1,4 +1,4 @@
-export type Ltx25AssetRole = "model" | "encoder" | "videoVae" | "audioVae";
+export type Ltx25AssetRole = "model" | "encoder" | "videoVae" | "audioVae" | "upscaler";
 
 export type Ltx25AssetSelection = Record<Ltx25AssetRole, string>;
 
@@ -7,6 +7,7 @@ const ROLE_LABELS: Record<Ltx25AssetRole, string> = {
   encoder: "Text encoder LTX 2.5",
   videoVae: "Video VAE LTX 2.5",
   audioVae: "Audio VAE LTX 2.5",
+  upscaler: "Latent upscaler LTX Quality",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -30,6 +31,7 @@ export function ltx25AssetCompatibility(role: Ltx25AssetRole, name: string) {
   const isAudio = /audio/i.test(filename);
   const isVideo = /video/i.test(filename);
   const isEncoder = /gemma|encoder|text|proj/i.test(filename);
+  const isUpscaler = /spatial.*upscaler|upscaler.*spatial/i.test(filename);
 
   const compatible = role === "model"
     ? safetensors && ltx25 && !isVae && !isEncoder
@@ -37,7 +39,9 @@ export function ltx25AssetCompatibility(role: Ltx25AssetRole, name: string) {
       ? safetensors && ltx25 && isEncoder && !isVae
       : role === "videoVae"
         ? safetensors && ltx25 && isVae && isVideo && !isAudio
-        : safetensors && ltx25 && isVae && isAudio && !isVideo;
+        : role === "audioVae"
+          ? safetensors && ltx25 && isVae && isAudio && !isVideo
+          : safetensors && /ltx.*2[._-]?3/i.test(filename) && isUpscaler;
 
   if (compatible) return { compatible: true } as const;
   return {
@@ -49,7 +53,9 @@ export function ltx25AssetCompatibility(role: Ltx25AssetRole, name: string) {
           ? "Gemma con proiezione LTX"
           : role === "videoVae"
             ? "Video VAE"
-            : "Audio VAE"
+          : role === "audioVae"
+            ? "Audio VAE"
+            : "spatial upscaler LTX 2.3"
     } in formato safetensors.`,
   } as const;
 }
@@ -61,6 +67,7 @@ export function parseLtx25AssetSelection(value: unknown): Ltx25AssetSelection {
     encoder: typeof value.encoder === "string" ? value.encoder.trim() : "",
     videoVae: typeof value.videoVae === "string" ? value.videoVae.trim() : "",
     audioVae: typeof value.audioVae === "string" ? value.audioVae.trim() : "",
+    upscaler: typeof value.upscaler === "string" ? value.upscaler.trim() : "",
   };
   const missing = (Object.keys(selection) as Ltx25AssetRole[])
     .find((role) => !selection[role]);

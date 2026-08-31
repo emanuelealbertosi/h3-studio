@@ -18,7 +18,7 @@ su richiesta esplicita, avviare Video H3, il motore video opzionale LTX 2.5, imm
 (T2I/I2I/Reference), edit Flux.2 Klein o immagini Anima. Le immagini allegate possono inoltre diventare keyframe iniziali,
 intermedi o finali, con posizioni automatiche, percentuali o tempi espliciti. I
 video H3 avviati dalla Chat usano il profilo standard controllato
-dal server: 10 secondi, un candidato, 0,5 MP e 8 step senza PDD. LTX 2.5 parte
+dal server: 10 secondi, un candidato, 0,5 MP e 8 step sul modello H3 standard/Hybrid. LTX 2.5 parte
 solo dal selettore dedicato o quando viene nominato esplicitamente. Il modello LLM resta
 caricato fra i messaggi, ma viene scaricato automaticamente prima di ogni render
 per restituire VRAM a ComfyUI. I riferimenti impliciti come “modificala” usano
@@ -58,18 +58,17 @@ text-only. Un continuity lock testuale impone di conservare identità, abiti,
 ambiente e inquadratura; nei monoshot il parser impedisce inoltre al planner di
 introdurre da solo un secondo taglio.
 
-Lo Studio espone cinque preset: **FAST / 8 / 12 / 20 / 30**. FAST è un motore
-separato basato su Alibaba PDD-Acc a 8 NFE, con modello Ref2VA o FL2VA dedicato
-**non-pruned** (il default è `minimax_h3_ref2va_int8_convrot.safetensors`),
-sigmas PDD, Euler e shift 12/3. I quattro preset numerici usano invece il
-workflow H3 standard senza forzare il motore FAST. Modello, file PDD e fino a
-tre LoRA creativi del FAST si configurano nell'Admin separatamente dallo stack
-H3 standard.
+Lo Studio espone quattro preset H3: **8 / 12 / 20 / 30**. Tutti usano il
+workflow standard/Hybrid e lo stack di modello e LoRA configurato nell'Admin. Il
+vecchio profilo Alibaba PDD-Acc è stato ritirato: pesi, nodo custom e workflow
+dedicato non fanno più parte dell'installazione.
 
 Come alternativa esplicita, lo Studio e la Chat espongono **LTX 2.5 RedGraft
-INT8** in modalità single-stage a 8 step, con audio nativo. Supporta T2V e I2V
-con una sola immagine, segmenti da 5/10/15 secondi e gli stessi formati e livelli
-di risoluzione dello Studio; H3 rimane sempre il motore predefinito.
+INT8** con audio nativo. **LTX Fast** usa il single-stage a 8 step e supporta
+T2V/I2V con una sola immagine, segmenti da 5/10/15/20 secondi e 0,5/0,7/0,98/
+1,5/2 MP. **LTX Quality** aggiunge upscale latent 2× e refine a 3 step, con base
+0,5/0,7/0,98 MP. I profili più pesanti sono marcati sperimentali su GPU da
+16 GB; H3 rimane sempre il motore predefinito.
 
 Il tab **Assets/Libreria** gestisce ora personaggi e oggetti persistenti,
 reference multiple tramite drag-and-drop e character/object sheet con Krea 2.
@@ -121,9 +120,7 @@ shot riceve la porzione temporale corretta come `<Soundtrack>`. In I2V,
 `Picture 1` rimane il frame iniziale esatto; in Reference resta una reference
 visiva. Il master conserva l'audio originale invariato. Quando la durata è
 disponibile il numero di shot viene calcolato automaticamente (massimo 12);
-questa modalità usa il sampler standard e disattiva
-automaticamente PDD/Turbo, mantenendo comunque 8 step quando era selezionato
-FAST.
+questa modalità usa il sampler H3 standard a 8 step.
 
 La modalità **Parlato → brano** prende un audio da disco o Libreria, ne usa
 trascrizione e durata reale per progettare una base strumentale con il planner
@@ -189,7 +186,6 @@ video corrispondenti dall'output ComfyUI.
 
 Test locali principali: `npm run test:projects`, `npm run test:export`,
 `npm run test:library`, `npm run test:external`, `npm run test:krea-contract`,
-`npm run test:fast` e `npm run test:multishot`.
 Il bootstrap e l'autenticazione locale si verificano con `npm run test:setup`.
 Il contratto completo Image Studio si verifica con `npm run test:images`.
 Il contratto della Chat locale si verifica con `npm run test:chat`.

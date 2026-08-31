@@ -41,7 +41,7 @@ di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
   `Picture 1 al secondo 2, Picture 2 al secondo 8`. I secondi vengono convertiti
   sulla durata complessiva, anche nei video multishot. La Chat può usare fino a
   otto immagini come keyframe, pur mostrandone al massimo quattro al planner Vision.
-- Sopra il campo di testo scegli **Auto, Video H3, LTX 2.5, Krea, Image H3, Anima o Edit**. La
+- Sopra il campo di testo scegli **Auto, Video H3, LTX Fast, LTX Quality, Krea, Image H3, Anima o Edit**. La
   scelta esplicita prevale sempre sul router del modello LLM, ma non avvia nulla finché
   il testo non contiene una richiesta esplicita di generazione. Se vuoi essere
   certo di ottenere un disegno, seleziona **Anima**; se vuoi una fotografia o
@@ -49,11 +49,13 @@ di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
   una still H3: nessun allegato crea T2I, una Picture crea I2I e da due a nove
   Picture attivano Reference. In Auto funziona anche una richiesta esplicita
   come “usa Image H3 per questa immagine”.
-- **LTX 2.5** è un motore video rapido opzionale e non viene mai scelto soltanto
+- **LTX 2.5** è un motore video opzionale e non viene mai scelto soltanto
   perché nel testo compare “fast”, “rapido” o “preview”. Seleziona il bottone
-  oppure scrivi esplicitamente “usa LTX 2.5”. Questa prima integrazione accetta
-  T2V o I2V con una sola Picture, un solo segmento da 5/10/15 secondi e nessun
-  Video/Audio allegato; per Reference, Keyframes, Continue, Edit e lip-sync usa H3.
+  oppure scrivi esplicitamente “usa LTX 2.5”. **LTX Fast** usa 8 step e accetta
+  5/10/15/20 secondi con 0,5/0,7/0,98/1,5/2 MP. **LTX Quality** usa un secondo
+  passaggio di refine dopo upscale latent 2× e accetta 0,5/0,7/0,98 MP base.
+  Entrambi accettano T2V o I2V con una sola Picture e nessun Video/Audio
+  allegato; per Reference, Keyframes, Continue, Edit e lip-sync usa H3.
 - In **Auto**, anime, manga, disegno, illustrazione e cartoon vengono instradati
   ad Anima; le immagini fotografiche o generiche usano Krea.
 - Una richiesta video H3 senza durata usa 10 secondi, un candidato, 0,5 MP e
@@ -61,6 +63,22 @@ di H3 Studio. Il sottomenu a sinistra le raggruppa per progetto.
   multishot: per esempio 30 secondi diventano `3 × 10 s`. Sono supportati fino
   a 12 shot; oltre 120 secondi usa chunk da 15 secondi, fino a un massimo di
   180 secondi. Per cambiare gli altri parametri apri poi il job nello Studio.
+
+## Personalità per progetto
+
+Il pulsante **Persona ON/OFF** nell'intestazione apre l'editor del system prompt.
+Il testo viene salvato una sola volta sul progetto e diventa immediatamente
+disponibile in tutte le sue conversazioni. L'interruttore **Usa in questa Chat**
+è invece indipendente per ogni conversazione: permette, per esempio, di mantenere
+una personalità creativa nelle chat narrative e disattivarla in una chat tecnica,
+senza cancellare il testo condiviso.
+
+Il system prompt personalizza identità conversazionale, relazione, tono, atteggiamento,
+forma delle risposte e preferenze conversazionali. Le regole interne di routing, lo schema JSON del
+planner, la numerazione degli allegati, i vincoli dei motori e le regole di
+sicurezza restano sempre prioritarie; una personalità non può quindi trasformare
+una normale risposta in un job né cambiare autonomamente motore o parametri.
+Il limite è 12.000 caratteri.
 
 Le azioni compaiono come schede vive nella conversazione. Durante la preparazione
 del modello LLM e poi durante la produzione, il riquadro mostra lo splash sfocato, la
@@ -97,11 +115,12 @@ reinviata integralmente al modello. Quando la finestra recente supera 16
 messaggi o il budget derivato da `n_ctx`, LLM consolida i messaggi meno recenti
 in una memoria persistente della conversazione. La richiesta successiva contiene:
 
-1. regole del router;
+1. regole interne del router;
 2. motore scelto nell'interfaccia;
-3. memoria compatta della conversazione;
-4. messaggi recenti entro il budget;
-5. allegati Vision del messaggio corrente.
+3. system prompt del progetto, se attivo nella conversazione;
+4. memoria compatta della conversazione;
+5. messaggi recenti entro il budget;
+6. allegati Vision del messaggio corrente.
 
 La memoria conserva decisioni, identità, asset, preferenze, impostazioni riuscite
 e attività aperte; elimina saluti e ripetizioni. Il badge **Memoria · N** mostra

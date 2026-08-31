@@ -91,13 +91,46 @@ try {
     megapixels: 0.7,
   }, DEFAULT_RUNTIME_SETTINGS, "ltx25-15s");
   assert.equal(fifteenSeconds.candidates[0].prompt["8"].inputs.length, 361);
+  const fifteenSecondsMax = prepareStudioJob({}, {
+    ...request,
+    durationSeconds: 15,
+    megapixels: 0.98,
+  }, DEFAULT_RUNTIME_SETTINGS, "ltx25-15s-max");
+  assert.equal(fifteenSecondsMax.request.megapixels, 0.98);
+  const twentySecondsMax = prepareStudioJob({}, {
+    ...request,
+    durationSeconds: 20,
+    megapixels: 2,
+  }, DEFAULT_RUNTIME_SETTINGS, "ltx25-20s-max");
+  assert.equal(twentySecondsMax.candidates[0].prompt["8"].inputs.length, 481);
+  assert.equal(twentySecondsMax.request.megapixels, 2);
+
+  const quality = prepareStudioJob({}, {
+    ...request,
+    qualityMode: "max",
+  }, DEFAULT_RUNTIME_SETTINGS, "ltx25-quality");
+  const qualityPrompt = quality.candidates[0].prompt;
+  assert.equal(quality.engineSettings.steps, 11);
+  assert.equal(qualityPrompt["24"].class_type, "LatentUpscaleModelLoader");
+  assert.equal(qualityPrompt["24"].inputs.model_name, DEFAULT_RUNTIME_SETTINGS.ltx25.upscaler);
+  assert.deepEqual(qualityPrompt["25"].inputs.samples, ["19", 0]);
+  assert.equal(qualityPrompt["30"].inputs.sampler_name, "euler_cfg_pp");
+  assert.equal(qualityPrompt["31"].inputs.sigmas, "0.85, 0.7250, 0.4219, 0.0");
+  assert.deepEqual(qualityPrompt["20"].inputs.samples, ["33", 0]);
+  assert.deepEqual(qualityPrompt["21"].inputs.samples, ["33", 1]);
+  const qualityMax = prepareStudioJob({}, {
+    ...request,
+    qualityMode: "max",
+    megapixels: 0.98,
+  }, DEFAULT_RUNTIME_SETTINGS, "ltx25-quality-max");
+  assert.equal(qualityMax.request.megapixels, 0.98);
   assert.throws(
     () => prepareStudioJob({}, {
       ...request,
-      durationSeconds: 15,
-      megapixels: 0.98,
-    }, DEFAULT_RUNTIME_SETTINGS, "ltx25-15s-too-large"),
-    /risoluzione massima supportata/,
+      qualityMode: "max",
+      megapixels: 1.5,
+    }, DEFAULT_RUNTIME_SETTINGS, "ltx25-quality-too-large"),
+    /Quality usa una base massima di 0\.98 MP/,
   );
 
   const dependencyManifest = JSON.parse(
@@ -109,6 +142,7 @@ try {
   const workflowClasses = new Set([
     ...Object.values(prompt),
     ...Object.values(i2v.candidates[0].prompt),
+    ...Object.values(qualityPrompt),
   ].map((node) => node.class_type));
   assert.deepEqual(
     [...workflowClasses].filter((classType) => !declaredClasses.has(classType)),
@@ -159,6 +193,11 @@ try {
       value: DEFAULT_RUNTIME_SETTINGS.ltx25.videoVae,
       expected: /Audio VAE LTX 2\.5 incompatibile/,
     },
+    {
+      field: "upscaler",
+      value: "not-an-ltx-upscaler.safetensors",
+      expected: /Latent upscaler LTX Quality incompatibile/,
+    },
   ] as const) {
     assert.throws(
       () => assertLtx25AssetCompatibility({
@@ -205,6 +244,7 @@ try {
     encoder: "changed-ltx-encoder.safetensors",
     videoVae: "changed-ltx-video-vae.safetensors",
     audioVae: "changed-ltx-audio-vae.safetensors",
+    upscaler: "ltx-2.3-spatial-upscaler-x2-changed.safetensors",
     cfg: 1.2,
     sampler: "euler_ancestral" as const,
   };
@@ -233,6 +273,7 @@ try {
     encoder: DEFAULT_RUNTIME_SETTINGS.ltx25.encoder,
     videoVae: DEFAULT_RUNTIME_SETTINGS.ltx25.videoVae,
     audioVae: DEFAULT_RUNTIME_SETTINGS.ltx25.audioVae,
+    upscaler: DEFAULT_RUNTIME_SETTINGS.ltx25.upscaler,
     cfg: DEFAULT_RUNTIME_SETTINGS.ltx25.cfg,
     sampler: DEFAULT_RUNTIME_SETTINGS.ltx25.sampler,
   };
@@ -241,6 +282,7 @@ try {
     encoder: persisted.engine.encoder,
     videoVae: persisted.engine.videoVae,
     audioVae: persisted.engine.audioVae,
+    upscaler: persisted.engine.upscaler,
     cfg: persisted.engine.cfg,
     sampler: persisted.engine.sampler,
   }, originalProfile);
@@ -275,9 +317,13 @@ try {
       changedLtx.videoVae,
       changedLtx.audioVae,
     ],
+    latent_upscale_models: [originalProfile.upscaler, changedLtx.upscaler],
   };
   const comfy = {
     async models(folder: keyof typeof installedModels) {
+      return installedModels[folder] ?? [];
+    },
+    async modelFiles(folder: keyof typeof installedModels) {
       return installedModels[folder] ?? [];
     },
     async queuePrompt(candidatePrompt: ComfyApiPrompt) {
@@ -288,7 +334,6 @@ try {
   };
   const service = new StudioJobService(
     comfy as never,
-    null as never,
     null as never,
     store,
     { register() {} } as never,
@@ -301,6 +346,7 @@ try {
     encoder: regenerated.engine.encoder,
     videoVae: regenerated.engine.videoVae,
     audioVae: regenerated.engine.audioVae,
+    upscaler: regenerated.engine.upscaler,
     cfg: regenerated.engine.cfg,
     sampler: regenerated.engine.sampler,
   }, originalProfile, "regeneration must preserve the complete original LTX profile");
@@ -377,6 +423,7 @@ try {
     encoder: legacyPersisted.engine.encoder,
     videoVae: legacyPersisted.engine.videoVae,
     audioVae: legacyPersisted.engine.audioVae,
+    upscaler: legacyPersisted.engine.upscaler,
     cfg: legacyPersisted.engine.cfg,
     sampler: legacyPersisted.engine.sampler,
   }, originalProfile, "v26 jobs must recover their LTX profile from the stored API prompt");
@@ -392,7 +439,6 @@ try {
   const legacyService = new StudioJobService(
     comfy as never,
     null as never,
-    null as never,
     store,
     { register() {} } as never,
     legacyJobs,
@@ -404,6 +450,7 @@ try {
     encoder: regeneratedLegacy.engine.encoder,
     videoVae: regeneratedLegacy.engine.videoVae,
     audioVae: regeneratedLegacy.engine.audioVae,
+    upscaler: regeneratedLegacy.engine.upscaler,
     cfg: regeneratedLegacy.engine.cfg,
     sampler: regeneratedLegacy.engine.sampler,
   }, originalProfile);

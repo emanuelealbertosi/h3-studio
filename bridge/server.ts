@@ -20,9 +20,7 @@ import { ExternalMediaRepository } from "./external-media-repository.js";
 import { KreaAssetService } from "./krea-asset-service.js";
 import { CandidateVariantRepository } from "./candidate-variant-repository.js";
 import { PostprocessService } from "./postprocess-service.js";
-import { FastWorkflowStore } from "./fast-workflow-store.js";
 import { AdminAuthService } from "./admin-auth.js";
-import { pddModelCompatibility } from "./pdd-compatibility.js";
 import { assertLtx25AssetCompatibility } from "./ltx25-compatibility.js";
 import {
   ImageJobRepository,
@@ -96,10 +94,6 @@ const workflowStore = new WorkflowStore(
   workflowPath(config.workflowOutputDir, installSettings.videoWorkflowId),
   config.workflowOutputDir,
 );
-const fastWorkflowStore = new FastWorkflowStore(
-  workflowStore,
-  config.workflowOutputDir,
-);
 const runtimeSettings = new RuntimeSettingsStore(config.dataDir);
 const promptPlanner = new PromptPlannerService(comfy, runtimeSettings);
 const llmRuntime = new LlmRuntimeControl();
@@ -137,7 +131,6 @@ const timelineExport = new TimelineExportService(
 const studioJobs = new StudioJobService(
   comfy,
   workflowStore,
-  fastWorkflowStore,
   runtimeSettings,
   progressTracker,
   jobRepository,
@@ -177,25 +170,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-async function fastRuntimeStatus() {
-  const [pddInfo, samplerInfo] = await Promise.all([
-    comfy.objectInfo("MiniMaxH3PDDAccApply").catch(() => null),
-    comfy.objectInfo("H3ReferenceMemorySampler").catch(() => null),
-  ]);
-  const pddReady = isRecord(pddInfo) && isRecord(pddInfo.MiniMaxH3PDDAccApply);
-  const sampler = isRecord(samplerInfo)
-    ? samplerInfo.H3ReferenceMemorySampler
-    : null;
-  const input = isRecord(sampler) && isRecord(sampler.input) ? sampler.input : null;
-  const optional = input && isRecord(input.optional) ? input.optional : null;
-  const samplerReady = Boolean(optional && "pdd_acc_file" in optional);
-  return {
-    ready: pddReady && samplerReady,
-    error: pddReady && samplerReady
-      ? undefined
-      : "Riavvia ComfyUI per caricare il nodo PDD-Acc e il sampler H3 aggiornato",
-  };
-}
 
 async function removeComfyOutputFiles(
   files: Array<{ filename: string; subfolder: string; type: string }>,
@@ -804,6 +778,25 @@ app.patch<{
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Conversazione Chat non rinominata";
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
+app.put<{
+  Params: { conversationId: string };
+  Body: { prompt?: unknown; enabled?: unknown };
+}>("/api/chat/conversations/:conversationId/system-prompt", async (request, reply) => {
+  try {
+    return {
+      ok: true,
+      conversation: chat.updateSystemPrompt(
+        request.params.conversationId,
+        request.body?.prompt,
+        request.body?.enabled,
+      ),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "System prompt non salvato";
     return reply.status(400).send({ ok: false, error: message });
   }
 });
@@ -1682,18 +1675,16 @@ app.get<{
 });
 
 async function engineSettingsPayload() {
-  const [settings, models, loras, pddFiles, textEncoders, vaes, llmFiles, chatRuntime, workflow, fastWorkflow, fastRuntime, imageAttentionBackends, audioStatus] = await Promise.all([
+  const [settings, models, loras, textEncoders, vaes, latentUpscalers, llmFiles, chatRuntime, workflow, imageAttentionBackends, audioStatus] = await Promise.all([
     runtimeSettings.get(),
     comfy.models("diffusion_models"),
     comfy.models("loras"),
-    comfy.modelFiles("pdd_acc").catch((): string[] => []),
     comfy.modelFiles("text_encoders"),
     comfy.modelFiles("vae"),
+    comfy.modelFiles("latent_upscale_models").catch((): string[] => []),
     comfy.modelFiles("llm").catch((): string[] => []),
     comfy.chatStatus().catch(() => null),
     workflowStore.status(),
-    fastWorkflowStore.status(),
-    fastRuntimeStatus(),
     imageStudio.attentionBackends().catch((): string[] => []),
     audioStudio.status().catch(() => null),
   ]);
@@ -1704,11 +1695,6 @@ async function engineSettingsPayload() {
       apiPrompt: workflow.apiPromptPath,
       capturedAt: workflow.capturedAt,
       ready: workflow.ready,
-    },
-    fastWorkflow: {
-      ...fastWorkflow,
-      ready: fastWorkflow.ready && fastRuntime.ready,
-      error: fastWorkflow.error ?? fastRuntime.error,
     },
     kreaWorkflow: {
       source: workflowPath(config.workflowOutputDir, installSettings.imageWorkflowId),
@@ -1728,9 +1714,9 @@ async function engineSettingsPayload() {
     capabilities: {
       models: [...new Set(models)].sort(),
       loras: [...new Set(loras)].sort(),
-      pddFiles: [...new Set(pddFiles)].sort(),
       textEncoders: [...new Set(textEncoders)].sort(),
       vaes: [...new Set(vaes)].sort(),
+      latentUpscalers: [...new Set(latentUpscalers)].sort(),
       chatModels: [...new Set(chatRuntime?.models ?? llmFiles.filter((file) => /\.gguf$/i.test(file) && !/mmproj/i.test(file)))].sort(),
       chatProjectors: [...new Set(chatRuntime?.projectors ?? llmFiles.filter((file) => /mmproj.*\.gguf$/i.test(file)))].sort(),
       chatRuntime: chatRuntime ? {
@@ -1917,35 +1903,20 @@ async function saveEngineSettings(
       || typeof music !== "object" || music === null || Array.isArray(music)
       || typeof voiceConversion !== "object" || voiceConversion === null || Array.isArray(voiceConversion)
     ) {
-      return reply.status(400).send({ ok: false, error: "Configurazione H3, FAST, LTX 2.5, Krea, Anima o Chat mancante" });
+      return reply.status(400).send({ ok: false, error: "Configurazione H3, LTX 2.5, Krea, Anima o Chat mancante" });
     }
     assertLtx25AssetCompatibility(ltx25);
-    const [models, loras, pddFiles, textEncoders, vaes, llmFiles, chatRuntime] = await Promise.all([
+    const [models, loras, textEncoders, vaes, latentUpscalers, llmFiles, chatRuntime] = await Promise.all([
       comfy.models("diffusion_models"),
       comfy.models("loras"),
-      comfy.modelFiles("pdd_acc").catch((): string[] => []),
       comfy.modelFiles("text_encoders"),
       comfy.modelFiles("vae"),
+      comfy.modelFiles("latent_upscale_models").catch((): string[] => []),
       comfy.modelFiles("llm").catch((): string[] => []),
       comfy.chatStatus().catch(() => null),
     ]);
     if (!models.includes(String((h3 as { model?: unknown }).model ?? ""))) {
       return reply.status(400).send({ ok: false, error: "Modello H3 non installato" });
-    }
-    if (!models.includes(String((fast as { model?: unknown }).model ?? ""))) {
-      return reply.status(400).send({ ok: false, error: "Modello FAST H3 non installato" });
-    }
-    if (!pddFiles.includes(String((fast as { pddFile?: unknown }).pddFile ?? ""))) {
-      return reply.status(400).send({ ok: false, error: "Acceleratore PDD FAST non installato" });
-    }
-    const fastModelName = String((fast as { model?: unknown }).model ?? "");
-    const fastPddName = String((fast as { pddFile?: unknown }).pddFile ?? "");
-    const fastCompatibility = pddModelCompatibility(fastModelName, fastPddName);
-    if (!fastCompatibility.compatible) {
-      return reply.status(400).send({
-        ok: false,
-        error: fastCompatibility.reason,
-      });
     }
     if (!models.includes(String((krea as { model?: unknown }).model ?? ""))) {
       return reply.status(400).send({ ok: false, error: "Modello Krea non installato" });
@@ -1973,6 +1944,9 @@ async function saveEngineSettings(
     }
     if (!vaes.includes(String((anima as { vae?: unknown }).vae ?? ""))) {
       return reply.status(400).send({ ok: false, error: "VAE Anima non installata" });
+    }
+    if (!latentUpscalers.includes(String((ltx25 as { upscaler?: unknown }).upscaler ?? ""))) {
+      return reply.status(400).send({ ok: false, error: "Latent upscaler LTX Quality non installato" });
     }
     const availableChatModels = [
       ...new Set(
@@ -2015,24 +1989,11 @@ async function saveEngineSettings(
         error: "Attention backend non disponibile in ComfyUI: " + requestedAttention,
       });
     }
-    const fastLoras =
-      (((fast as { loras?: unknown }).loras as Array<{ name?: unknown }> | undefined) ?? [])
-        .map((slot) => String(slot?.name ?? ""))
-        .filter(Boolean);
-    const incompatibleFastLora = fastLoras.find((name) =>
-      /(?:turbo|distill|pdd|acc[-_ ]?8)/i.test(name),
-    );
-    if (incompatibleFastLora) {
-      return reply.status(400).send({
-        ok: false,
-        error: `LoRA FAST incompatibile con PDD-Acc: ${incompatibleFastLora}. Usa solo LoRA creativi/personaggio`,
-      });
-    }
     const requestedLoras = [
       ...(((h3 as { loras?: unknown }).loras as Array<{ name?: unknown }> | undefined) ?? []),
       ...(((krea as { loras?: unknown }).loras as Array<{ name?: unknown }> | undefined) ?? []),
       ...(((anima as { loras?: unknown }).loras as Array<{ name?: unknown }> | undefined) ?? []),
-    ].map((slot) => String(slot?.name ?? "")).filter(Boolean).concat(fastLoras);
+    ].map((slot) => String(slot?.name ?? "")).filter(Boolean);
     const missingLora = requestedLoras.find((name) => !loras.includes(name));
     if (missingLora) {
       return reply.status(400).send({ ok: false, error: `LoRA non installato: ${missingLora}` });

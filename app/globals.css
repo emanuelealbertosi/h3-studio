@@ -4475,6 +4475,68 @@ a:focus-visible {
 .chat-runtime.ready { border-color: rgba(93, 255, 143, 0.28); color: #72f59c; }
 .chat-runtime.error { border-color: rgba(255, 112, 112, 0.32); color: #ff9b9b; }
 .chat-memory { border-color: rgba(215, 255, 82, .24); color: var(--accent); cursor: help; }
+.chat-persona-button.active {
+  border-color: rgba(215, 255, 82, .38);
+  color: var(--accent);
+  background: rgba(215, 255, 82, .08);
+}
+
+.chat-system-prompt-panel {
+  margin: 14px 28px 0;
+  padding: 16px;
+  border: 1px solid rgba(215, 255, 82, .22);
+  border-radius: 14px;
+  background: rgba(215, 255, 82, .025);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 18px;
+}
+.chat-system-prompt-panel > div strong { display: block; margin-top: 3px; font-size: 13px; }
+.chat-system-prompt-panel > div p { margin: 5px 0 0; color: var(--muted); font-size: 9px; }
+.chat-system-prompt-toggle {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+  font-size: 9px;
+  white-space: nowrap;
+}
+.chat-system-prompt-toggle input { accent-color: var(--accent); }
+.chat-system-prompt-panel textarea {
+  grid-column: 1 / -1;
+  min-height: 112px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 12px;
+  background: rgba(0, 0, 0, .22);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.chat-system-prompt-panel textarea:focus { outline: 1px solid rgba(215, 255, 82, .42); }
+.chat-system-prompt-panel footer {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.chat-system-prompt-panel footer small { color: var(--muted); font-size: 8px; }
+.chat-system-prompt-panel footer button {
+  min-height: 34px;
+  border: 1px solid rgba(215, 255, 82, .35);
+  border-radius: 9px;
+  padding: 0 13px;
+  background: var(--accent);
+  color: #111;
+  font-size: 9px;
+  font-weight: 800;
+}
+.chat-system-prompt-panel button:disabled,
+.chat-system-prompt-panel textarea:disabled { opacity: .5; }
 
 .chat-messages {
   width: min(920px, calc(100% - 32px));
@@ -4662,6 +4724,8 @@ a:focus-visible {
   .chat-thread-project { min-width: 220px; margin-bottom: 0; }
   .chat-heading { align-items: flex-start; padding: 14px; }
   .chat-heading-actions { flex-direction: column; align-items: flex-end; }
+  .chat-system-prompt-panel { margin: 10px; grid-template-columns: 1fr; }
+  .chat-system-prompt-toggle { justify-self: start; }
   .chat-messages { width: calc(100% - 20px); padding-top: 24px; }
   .chat-message.user > div { width: 92%; }
   .chat-action-heading { align-items: stretch; flex-direction: column; }

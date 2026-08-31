@@ -8,12 +8,6 @@ import ImageStudioPanel, {
 import ChatPanel from "./chat-panel";
 import AudioStudioPanel from "./audio-studio-panel";
 import RegenerateDialog from "./regenerate-dialog";
-import {
-  compatiblePddFilesForModel,
-  fastPddPairForModel,
-  isOfficialFastPddModel,
-  preferredPddFileForModel,
-} from "../bridge/pdd-compatibility";
 import { compatibleEngineOptions } from "./engine-options";
 
 type CandidateStatus =
@@ -70,8 +64,8 @@ type ConnectionState =
   | "bridge-offline";
 type SeedMode = "random" | "base" | "fixed";
 type QualityMode = "fast" | "min" | "med" | "max";
-type GenerationPreset = "fast" | "8" | "12" | "20" | "30";
-type Megapixels = 0.5 | 0.7 | 0.98;
+type GenerationPreset = "8" | "12" | "20" | "30";
+type Megapixels = 0.5 | 0.7 | 0.98 | 1.5 | 2;
 type VideoEngine = "h3" | "ltx25";
 
 type BridgeHealthPayload = {
@@ -478,9 +472,6 @@ type EngineLoraSlot = {
   strength: number;
 };
 
-function isFastCreativeLora(name: string) {
-  return !/(?:turbo|distill|pdd|acc[-_ ]?8)/i.test(name);
-}
 
 function preferredFlux2Encoder(model: string, encoders: string[], fallback: string) {
   const pattern = /(?:9b|snofs)/i.test(model) ? /qwen.*3.*8b/i : /qwen.*3.*4b/i;
@@ -526,6 +517,7 @@ type EngineAdminResponse = {
       encoder: string;
       videoVae: string;
       audioVae: string;
+      upscaler: string;
       steps: 8;
       cfg: number;
       sampler: "euler_ancestral" | "euler";
@@ -597,6 +589,7 @@ type EngineAdminResponse = {
     pddFiles: string[];
     textEncoders: string[];
     vaes: string[];
+    latentUpscalers: string[];
     chatModels: string[];
     chatProjectors: string[];
     chatRuntime: { ready: boolean; loaded: boolean; version: string | null; error: string | null };
@@ -677,7 +670,7 @@ type RemoteJob = {
     promptLength: number;
     candidateCount: 1 | 2 | 3 | 4;
     shotCount?: number;
-    durationSeconds: 5 | 10 | 15;
+    durationSeconds: 5 | 10 | 15 | 20;
     megapixels: Megapixels;
     generationMode: GenerationMode;
     aspectFormat: string;
@@ -3510,7 +3503,6 @@ function SetupWizard({ status }: { status: SetupStatus }) {
             <input onChange={(event) => setSettings({ ...settings, comfyOutputDir: event.target.value })} placeholder="C:\\ComfyUI\\output" value={settings.comfyOutputDir} />
           </label>
           {workflowSelect("video", "videoWorkflowId")}
-          {workflowSelect("fast", "fastWorkflowId")}
           {workflowSelect("image", "imageWorkflowId")}
           {workflowSelect("image_edit", "imageEditWorkflowId")}
           {workflowSelect("image_anima", "imageAnimaWorkflowId")}
@@ -3603,16 +3595,6 @@ function AdminPanel() {
           ? `Controllo LLM non disponibile: ${error.message}`
           : "Controllo LLM non disponibile";
       }
-      const pairedPddFile = preferredPddFileForModel(
-        enginePayload.settings.fast.model,
-        enginePayload.capabilities.pddFiles,
-      );
-      if (pairedPddFile) {
-        enginePayload.settings.fast = {
-          ...enginePayload.settings.fast,
-          pddFile: pairedPddFile,
-        };
-      }
       dataRef.current = enginePayload;
       setData(enginePayload);
       setInstallData(installPayload);
@@ -3669,19 +3651,6 @@ function AdminPanel() {
       settings: {
         ...data.settings,
         [engine]: { ...data.settings[engine], loras },
-      },
-    });
-  }
-
-  function updateFastModel(model: string) {
-    if (!data) return;
-    const pddFile = preferredPddFileForModel(model, data.capabilities.pddFiles);
-    if (!pddFile) return;
-    setData({
-      ...data,
-      settings: {
-        ...data.settings,
-        fast: { ...data.settings.fast, model, pddFile },
       },
     });
   }
@@ -3898,7 +3867,6 @@ function AdminPanel() {
     setMessage("Sessione Admin chiusa");
   }
 
-  const fastModels = data?.capabilities.models.filter(isOfficialFastPddModel) ?? [];
   const h3Models = data
     ? compatibleEngineOptions(
         data.capabilities.models,
@@ -3918,12 +3886,16 @@ function AdminPanel() {
   const ltx25AudioVaes = data
     ? compatibleEngineOptions(data.capabilities.vaes, data.settings.ltx25.audioVae, /ltx.*2[._-]?5.*audio.*vae/i, "strict")
     : [];
+  const ltx25Upscalers = data
+    ? compatibleEngineOptions(data.capabilities.latentUpscalers, data.settings.ltx25.upscaler, /ltx.*2[._-]?3.*spatial.*upscaler/i, "strict")
+    : [];
   const ltx25CompatibleAssetsAvailable = Boolean(
     data &&
     ltx25Models.includes(data.settings.ltx25.model) &&
     ltx25Encoders.includes(data.settings.ltx25.encoder) &&
     ltx25Vaes.includes(data.settings.ltx25.videoVae) &&
-    ltx25AudioVaes.includes(data.settings.ltx25.audioVae),
+    ltx25AudioVaes.includes(data.settings.ltx25.audioVae) &&
+    ltx25Upscalers.includes(data.settings.ltx25.upscaler),
   );
   const kreaModels = data
     ? compatibleEngineOptions(
@@ -3986,15 +3958,6 @@ function AdminPanel() {
         data.capabilities.vaes,
         data.settings.anima.vae,
         /qwen.*image.*vae/i,
-      )
-    : [];
-  const selectedFastPair = data
-    ? fastPddPairForModel(data.settings.fast.model)
-    : null;
-  const compatibleFastPddFiles = data
-    ? compatiblePddFilesForModel(
-        data.settings.fast.model,
-        data.capabilities.pddFiles,
       )
     : [];
 
@@ -4094,7 +4057,6 @@ function AdminPanel() {
                 </label>
                 {([
                   ["video", "videoWorkflowId", "Workflow Video"],
-                  ["fast", "fastWorkflowId", "Workflow FAST"],
                   ["image", "imageWorkflowId", "Workflow Krea"],
                   ["image_edit", "imageEditWorkflowId", "Workflow Flux Klein Edit"],
                   ["image_anima", "imageAnimaWorkflowId", "Workflow Anima"],
@@ -4140,13 +4102,6 @@ function AdminPanel() {
               <small>
                 Catturato {data.workflow.capturedAt ? new Date(data.workflow.capturedAt).toLocaleString("it-IT") : "—"}
               </small>
-            </div>
-            <div className="workflow-card">
-              <span>Workflow FAST Alibaba</span>
-              <strong>{data.fastWorkflow.ready ? "PDD-Acc 8-step pronto" : "Riavvio ComfyUI richiesto"}</strong>
-              <code>{data.fastWorkflow.apiPromptPath}</code>
-              <small>{data.fastWorkflow.recipe}</small>
-              {data.fastWorkflow.error && <small className="workflow-error">{data.fastWorkflow.error}</small>}
             </div>
             <div className="workflow-card">
               <span>Workflow Krea</span>
@@ -4229,99 +4184,23 @@ function AdminPanel() {
             <article className="engine-config-card ltx-engine-card">
               <div className="engine-config-heading">
                 <div><span>ALT VIDEO ENGINE</span><h3>LTX 2.5</h3></div>
-                <b>8 STEP · SINGLE STAGE</b>
+                <b>FAST 8 · QUALITY 8+3</b>
               </div>
               <div className="admin-form image-edit-engine-form">
                 <label><span>Modello LTX 2.5</span><select value={data.settings.ltx25.model} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, model: event.target.value } } })}>{ltx25Models.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
                 <label><span>Text encoder LTX</span><select value={data.settings.ltx25.encoder} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, encoder: event.target.value } } })}>{ltx25Encoders.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
                 <label><span>Video VAE</span><select value={data.settings.ltx25.videoVae} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, videoVae: event.target.value } } })}>{ltx25Vaes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
                 <label><span>Audio VAE</span><select value={data.settings.ltx25.audioVae} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, audioVae: event.target.value } } })}>{ltx25AudioVaes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+                <label><span>Latent upscaler Quality</span><select value={data.settings.ltx25.upscaler} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, upscaler: event.target.value } } })}>{ltx25Upscalers.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
                 <label><span>CFG</span><input min="0.5" max="3" step="0.1" type="number" value={data.settings.ltx25.cfg} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, cfg: Number(event.target.value) } } })} /></label>
                 <label><span>Sampler</span><select value={data.settings.ltx25.sampler} onChange={(event) => setData({ ...data, settings: { ...data.settings, ltx25: { ...data.settings.ltx25, sampler: event.target.value as "euler" | "euler_ancestral" } } })}><option value="euler_ancestral">Euler ancestral</option><option value="euler">Euler</option></select></label>
                 {!ltx25CompatibleAssetsAvailable && (
-                  <p className="image-edit-profile-note">Nessun fallback automatico: installa o seleziona checkpoint, encoder, Video VAE e Audio VAE LTX 2.5 compatibili prima di usare il motore.</p>
+                  <p className="image-edit-profile-note">Nessun fallback automatico: installa o seleziona checkpoint, encoder, Video VAE, Audio VAE e latent upscaler compatibili prima di usare il motore.</p>
                 )}
-                <p className="image-edit-profile-note">RedGraft INT8 · T2V/I2V con audio nativo · H3 resta sempre il motore predefinito. Su GPU da 16 GB richiede l’offload aggressivo di ComfyUI (`--disable-smart-memory`).</p>
+                <p className="image-edit-profile-note">RedGraft INT8 · Fast single-stage fino a 20 s / 2 MP · Quality two-stage con upscale latent 2× e refine a 3 step, base fino a 0,98 MP. I profili oltre 0,98 MP Fast e oltre 0,5 MP Quality sono sperimentali su 16 GB. H3 resta predefinito.</p>
               </div>
             </article>
 
-            <article className="engine-config-card fast-engine-card">
-              <div className="engine-config-heading">
-                <div>
-                  <span>FAST ENGINE</span>
-                  <h3>Alibaba PDD-Acc</h3>
-                </div>
-                <b>8 STEP · {data.settings.fast.loras.filter((slot) => slot.name).length}/3 LoRA</b>
-              </div>
-              <div className="admin-form fast-engine-form">
-                <label>
-                  <span>Modello FAST H3</span>
-                  <select
-                    value={data.settings.fast.model}
-                    onChange={(event) => updateFastModel(event.target.value)}
-                  >
-                    {!fastModels.includes(data.settings.fast.model) && (
-                      <option value={data.settings.fast.model}>{data.settings.fast.model} · da installare</option>
-                    )}
-                    {fastModels.map((model) => <option key={model} value={model}>{model}</option>)}
-                  </select>
-                </label>
-                <label>
-                  <span>Acceleratore PDD</span>
-                  <select
-                    value={data.settings.fast.pddFile}
-                    disabled={compatibleFastPddFiles.length === 0}
-                    onChange={(event) => setData({
-                      ...data,
-                      settings: {
-                        ...data.settings,
-                        fast: { ...data.settings.fast, pddFile: event.target.value },
-                      },
-                    })}
-                  >
-                    {!compatibleFastPddFiles.includes(data.settings.fast.pddFile) && (
-                      <option value={data.settings.fast.pddFile}>
-                        {data.settings.fast.pddFile} · da installare
-                      </option>
-                    )}
-                    {compatibleFastPddFiles.map((file) => <option key={file} value={file}>{file}</option>)}
-                  </select>
-                  <small>
-                    Patch {selectedFastPair?.family.toUpperCase() ?? "—"} auto-abbinata al modello
-                  </small>
-                </label>
-                <div className="engine-fixed-recipe fast-recipe">
-                  <span>Ricetta bloccata</span>
-                  <strong>Euler · CFG 1 · shift 12/3</strong>
-                  <small>Sigmas PDD, strength 1, modello non-pruned, nessun Turbo/distill/cache</small>
-                </div>
-              </div>
-              <div className="engine-lora-stack">
-                {loraSlots("fast").map((slot, index) => (
-                  <div className="engine-lora-row" key={index}>
-                    <span>{index + 1}</span>
-                    <select
-                      aria-label={`LoRA FAST ${index + 1}`}
-                      value={slot.name}
-                      onChange={(event) => updateLora("fast", index, "name", event.target.value)}
-                    >
-                      <option value="">Nessun LoRA creativo</option>
-                      {data.capabilities.loras.filter(isFastCreativeLora).map((lora) => <option key={lora} value={lora}>{lora}</option>)}
-                    </select>
-                    <input
-                      aria-label={`Strength LoRA FAST ${index + 1}`}
-                      disabled={!slot.name}
-                      min="-2"
-                      max="2"
-                      step="0.05"
-                      type="number"
-                      value={slot.strength}
-                      onChange={(event) => updateLora("fast", index, "strength", Number(event.target.value))}
-                    />
-                  </div>
-                ))}
-              </div>
-            </article>
 
             <article className="engine-config-card">
               <div className="engine-config-heading">
@@ -4696,10 +4575,10 @@ function StudioApp() {
   const [muteNonDiegetic, setMuteNonDiegetic] = useState(false);
   const [qualityMode, setQualityMode] = useState<QualityMode>("fast");
   const [videoEngine, setVideoEngine] = useState<VideoEngine>("h3");
-  const [turboEnabled, setTurboEnabled] = useState(true);
+  const [turboEnabled, setTurboEnabled] = useState(false);
   const [candidateCount, setCandidateCount] = useState(4);
   const [shotCount, setShotCount] = useState(1);
-  const [duration, setDuration] = useState<5 | 10 | 15>(10);
+  const [duration, setDuration] = useState<5 | 10 | 15 | 20>(10);
   const [megapixels, setMegapixels] = useState<Megapixels>(0.5);
   const [mode, setMode] = useState<StudioMode>("t2v");
   const [aspectFormat, setAspectFormat] = useState("16:9 landscape");
@@ -4758,7 +4637,6 @@ function StudioApp() {
     label: "Connessione in corso",
     detail: null,
   });
-  const [fastSteps, setFastSteps] = useState(8);
   const [composerExpanded, setComposerExpanded] = useState(false);
   const candidateGridRef = useRef<HTMLDivElement>(null);
   const upscaleCancelRef = useRef<HTMLButtonElement>(null);
@@ -4877,9 +4755,9 @@ function StudioApp() {
   const modeConfig = modes.find((item) => item.value === mode) ?? modes[0];
   const effectiveSteps =
     videoEngine === "ltx25"
-      ? 8
+      ? qualityMode === "max" ? 11 : 8
       : qualityMode === "fast"
-      ? fastSteps
+      ? 8
       : qualityMode === "min"
         ? 12
         : qualityMode === "med"
@@ -4889,7 +4767,7 @@ function StudioApp() {
     videoEngine === "ltx25"
       ? "8"
       : qualityMode === "fast"
-      ? turboEnabled ? "fast" : "8"
+      ? "8"
       : qualityMode === "min"
         ? "12"
         : qualityMode === "med"
@@ -4897,11 +4775,6 @@ function StudioApp() {
           : "30";
 
   function selectGenerationPreset(preset: GenerationPreset) {
-    if (preset === "fast") {
-      setQualityMode("fast");
-      setTurboEnabled(true);
-      return;
-    }
     setTurboEnabled(false);
     setQualityMode(
       preset === "8" ? "fast" : preset === "12" ? "min" : preset === "20" ? "med" : "max",
@@ -4924,7 +4797,7 @@ function StudioApp() {
     () => {
       if (videoEngine === "ltx25") {
         return Math.round(
-          95 * (duration / 5) * (megapixels / 0.5) * candidateCount,
+          95 * (duration / 5) * (megapixels / 0.5) * candidateCount * (qualityMode === "max" ? 1.7 : 1),
         );
       }
       return Math.round(
@@ -4937,7 +4810,7 @@ function StudioApp() {
             candidateCount,
       );
     },
-    [candidateCount, duration, effectiveSteps, megapixels, shotCount, videoEngine],
+    [candidateCount, duration, effectiveSteps, megapixels, qualityMode, shotCount, videoEngine],
   );
   const estimatedTimeLabel = useMemo(() => {
     const minimumMinutes = Math.max(1, Math.round((estimatedSeconds * 0.85) / 60));
@@ -5044,7 +4917,7 @@ function StudioApp() {
         (job.request.seed === undefined ? "random" : "base"),
     );
     setQualityMode(job.request.qualityMode ?? "fast");
-    setTurboEnabled(job.engine.profile === "fast");
+    setTurboEnabled(false);
     if (job.request.seed !== undefined) {
       setSeedValue(String(job.request.seed));
     }
@@ -5171,9 +5044,6 @@ function StudioApp() {
             ? health.bridge.postprocessContract
             : 0,
         );
-        if (typeof health.fastEngine?.steps === "number") {
-          setFastSteps(health.fastEngine.steps);
-        }
         if (!health.comfyui?.connected) {
           setConnection({
             state: "comfy-offline",
@@ -5379,6 +5249,7 @@ function StudioApp() {
         progress: 0,
         seed: 0,
         status: (index < candidateCount ? "submitted" : "idle") as CandidateStatus,
+        phaseLabel: index < candidateCount ? "Preparazione nel bridge…" : undefined,
       })),
     );
     setIsRunning(true);
@@ -5397,7 +5268,7 @@ function StudioApp() {
           aspectFormat,
           seedMode,
           qualityMode,
-          turboEnabled,
+          turboEnabled: false,
           seed: seedMode === "random" ? undefined : numericSeed,
           mediaState:
             generationMode === "T2V" ? "[]" : JSON.stringify(mediaAssets),
@@ -5438,8 +5309,19 @@ function StudioApp() {
         }),
       );
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Invio fallito";
       setIsRunning(false);
-      setRunMessage(error instanceof Error ? error.message : "Invio fallito");
+      setCandidates((current) => current.map((candidate) =>
+        candidate.status === "submitted"
+          ? {
+              ...candidate,
+              status: "failed",
+              phaseLabel: "Invio non riuscito",
+              error: message,
+            }
+          : candidate,
+      ));
+      setRunMessage(message);
     }
   }
 
@@ -5850,8 +5732,6 @@ function StudioApp() {
     ]);
     setMode(operation);
     if (operation === "edit") {
-      // Video Edit always uses the configured standard H3/Hybrid engine. The
-      // FAST PDD profile is intentionally reserved for preview generation.
       setQualityMode("fast");
       setTurboEnabled(false);
     }
@@ -6592,13 +6472,19 @@ function StudioApp() {
                       setRunMessage("LTX 2.5 selezionato · motore rapido 8 step, T2V/I2V");
                     } else {
                       setVideoEngine(nextEngine);
+                      if (duration === 20) {
+                        setDuration(15);
+                        if (megapixels > 0.7) setMegapixels(0.7);
+                      } else if (megapixels > 0.98) {
+                        setMegapixels(0.98);
+                      }
                     }
                   }}
                 >
                   <option value="h3">MiniMax H3 · predefinito</option>
-                  <option value="ltx25">LTX 2.5 · rapido</option>
+                  <option value="ltx25">LTX 2.5 · Fast / Quality</option>
                 </select>
-                <small>{videoEngine === "ltx25" ? "RedGraft INT8 · audio nativo · 8 step" : "Tutte le modalità H3"}</small>
+                <small>{videoEngine === "ltx25" ? "Fast 8 step oppure Quality 8+3 con upscale latent 2×" : "Tutte le modalità H3"}</small>
               </label>
 
               <label className="select-control">
@@ -6682,14 +6568,14 @@ function StudioApp() {
               <fieldset className="segmented-control">
                 <legend>Durata per shot</legend>
                 <div>
-                  {[5, 10, 15].map((value) => (
+                  {[5, 10, 15, ...(videoEngine === "ltx25" ? [20] : [])].map((value) => (
                     <button
                       className={duration === value ? "selected" : ""}
                       key={value}
                       onClick={() => {
-                        const nextDuration = value as 5 | 10 | 15;
+                        const nextDuration = value as 5 | 10 | 15 | 20;
                         setDuration(nextDuration);
-                        if (nextDuration === 15 && megapixels > 0.7) {
+                        if (videoEngine === "h3" && nextDuration === 15 && megapixels > 0.7) {
                           setMegapixels(0.7);
                           setRunMessage("A 15 secondi la qualità massima è 0.7 MP.");
                         }
@@ -6705,17 +6591,32 @@ function StudioApp() {
               <fieldset className="segmented-control quality-control">
                 <legend>Qualità</legend>
                 <div>
-                  {[
+                  {(videoEngine === "ltx25" && qualityMode !== "max" ? [
                     { value: 0.5, label: "MIN", detail: "0.5 MP" },
                     { value: 0.7, label: "MID", detail: "0.7 MP" },
                     { value: 0.98, label: "MAX", detail: "0.98 MP" },
-                  ].map((item) => (
+                    { value: 1.5, label: "1.5", detail: "1.5 MP · experimental" },
+                    { value: 2, label: "2", detail: "2 MP · experimental" },
+                  ] : [
+                    { value: 0.5, label: "MIN", detail: "0.5 MP" },
+                    { value: 0.7, label: "MID", detail: "0.7 MP" },
+                    { value: 0.98, label: "MAX", detail: "0.98 MP" },
+                  ]).map((item) => (
                     <button
                       className={megapixels === item.value ? "selected" : ""}
-                      disabled={duration === 15 && item.value > 0.7}
+                      disabled={
+                        (videoEngine === "h3" && duration === 15 && item.value > 0.7) ||
+                        (videoEngine === "ltx25" && qualityMode === "max" && item.value > 0.98)
+                      }
                       key={item.value}
                       onClick={() => setMegapixels(item.value as Megapixels)}
-                      title={duration === 15 && item.value > 0.7 ? "Non disponibile a 15 secondi" : undefined}
+                      title={
+                        videoEngine === "ltx25" && qualityMode === "max" && item.value > 0.98
+                          ? "Quality supporta una base massima di 0,98 MP"
+                          : videoEngine === "h3" && duration === 15 && item.value > 0.7
+                            ? "Non disponibile a 15 secondi con H3"
+                            : undefined
+                      }
                       type="button"
                     >
                       <strong>{item.label}</strong>
@@ -6723,8 +6624,11 @@ function StudioApp() {
                     </button>
                   ))}
                 </div>
-                {duration === 15 && (
-                  <small className="duration-resolution-note">15 s supporta al massimo 0.7 MP.</small>
+                {videoEngine === "h3" && duration === 15 && (
+                  <small className="duration-resolution-note">H3 a 15 s supporta al massimo 0,7 MP.</small>
+                )}
+                {videoEngine === "ltx25" && qualityMode === "max" && (
+                  <small className="duration-resolution-note">Quality: output stimato circa {formatMegapixels(megapixels * 4)} MP. 0,98 MP base è sperimentale su 16 GB.</small>
                 )}
               </fieldset>
             </div>
@@ -6733,23 +6637,40 @@ function StudioApp() {
               <fieldset className="segmented-control quality-control">
                 <legend>Preset generazione</legend>
                 <div>
-                  {[
-                    { value: "fast", label: "FAST", detail: "PDD · 8" },
+                  {(videoEngine === "ltx25" ? [
+                    { value: "fast", label: "FAST", detail: "8 step · fino a 20 s / 2 MP" },
+                    { value: "quality", label: "QUALITY", detail: "8+3 · upscale latent 2×" },
+                  ] : [
                     { value: "8", label: "8", detail: "standard" },
                     { value: "12", label: "12", detail: "standard" },
                     { value: "20", label: "20", detail: "standard" },
                     { value: "30", label: "30", detail: "standard" },
-                  ].map((item) => (
+                  ]).map((item) => (
                     <button
-                      className={generationPreset === item.value ? "selected" : ""}
-                      disabled={videoEngine === "ltx25" || (mode === "edit" && item.value === "fast")}
-                      key={item.value}
-                      onClick={() => selectGenerationPreset(item.value as GenerationPreset)}
-                      title={
+                      className={
                         videoEngine === "ltx25"
-                          ? "LTX 2.5 usa il proprio profilo single-stage fisso a 8 step"
-                          : mode === "edit" && item.value === "fast"
-                          ? "Edit usa il modello H3 standard/Hybrid; PDD FAST non è disponibile"
+                          ? (item.value === "quality" ? qualityMode === "max" : qualityMode !== "max") ? "selected" : ""
+                          : generationPreset === item.value ? "selected" : ""
+                      }
+                      key={item.value}
+                      onClick={() => {
+                        if (videoEngine === "ltx25") {
+                          const quality = item.value === "quality";
+                          setQualityMode(quality ? "max" : "fast");
+                          setTurboEnabled(false);
+                          if (quality && megapixels > 0.98) setMegapixels(0.98);
+                          setRunMessage(
+                            quality
+                              ? "LTX Quality selezionato · 8+3 step, upscale latent 2×, base fino a 0,98 MP"
+                              : "LTX Fast selezionato · 8 step, fino a 20 s e 2 MP sperimentali",
+                          );
+                          return;
+                        }
+                        selectGenerationPreset(item.value as GenerationPreset);
+                      }}
+                      title={
+                        videoEngine === "ltx25" && item.value === "quality"
+                          ? "Two-stage: generazione base, upscale latent 2× e refine a 3 step"
                           : undefined
                       }
                       type="button"
@@ -7132,8 +7053,8 @@ function StudioApp() {
 
             <div className="composer-footer">
               <div className="preset-note">
-                <span className="fast-badge">{generationPreset === "fast" ? "FAST" : `${effectiveSteps} STEP`}</span>
-                {videoEngine === "ltx25" ? "LTX 2.5 RedGraft · single-stage" : generationPreset === "fast" ? "Alibaba PDD-Acc · 8 step" : `H3 standard · ${effectiveSteps} step`} · {shotCount > 1 ? `${shotCount} shot × ${duration}s ≈ ${shotCount * duration}s` : `${duration}s`} · {formatMegapixels(megapixels)} MP
+                <span className="fast-badge">{`${effectiveSteps} STEP`}</span>
+                {videoEngine === "ltx25" ? qualityMode === "max" ? `LTX 2.5 Quality · 8+3 step · output ~${formatMegapixels(megapixels * 4)} MP` : "LTX 2.5 Fast · 8 step" : `H3 standard · ${effectiveSteps} step`} · {shotCount > 1 ? `${shotCount} shot × ${duration}s ≈ ${shotCount * duration}s` : `${duration}s`} · {formatMegapixels(megapixels)} MP
               </div>
               <div className="generation-cta">
                 <div>

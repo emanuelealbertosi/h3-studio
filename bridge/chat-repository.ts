@@ -17,6 +17,7 @@ export type ChatActionRecord = {
   type: "generate_video" | "generate_image" | "generate_minimax_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
   prompt: string;
   videoEngine?: "h3" | "ltx25";
+  ltxQuality?: "fast" | "quality";
   jobId?: string;
   status: "started" | "failed";
   error?: string;
@@ -40,8 +41,10 @@ type ChatConversationRow = {
   id: string;
   project_id: string;
   project_name?: string;
+  project_system_prompt?: string;
   title: string;
   title_is_auto: number;
+  system_prompt_enabled: number;
   memory_summary: string;
   memory_sequence: number;
   created_at: string;
@@ -95,6 +98,8 @@ function presentConversation(row: ChatConversationRow) {
     projectName: row.project_name ?? "",
     title: row.title,
     titleIsAuto: Boolean(row.title_is_auto),
+    systemPrompt: row.project_system_prompt ?? "",
+    systemPromptEnabled: Boolean(row.system_prompt_enabled),
     memoryActive: Boolean(row.memory_summary),
     messageCount: Number(row.message_count ?? 0),
     lastMessage: row.last_message ?? null,
@@ -139,6 +144,7 @@ export class ChatRepository {
   getConversation(conversationId: string) {
     const row = this.database.prepare(
       `SELECT chat_conversations.*, projects.name AS project_name,
+       projects.chat_system_prompt AS project_system_prompt,
        (SELECT COUNT(*) FROM chat_messages
         WHERE chat_messages.conversation_id = chat_conversations.id) AS message_count,
        (SELECT content FROM chat_messages
@@ -153,6 +159,7 @@ export class ChatRepository {
 
   listConversations(projectId?: string | null) {
     const select = `SELECT chat_conversations.*, projects.name AS project_name,
+       projects.chat_system_prompt AS project_system_prompt,
        (SELECT COUNT(*) FROM chat_messages
         WHERE chat_messages.conversation_id = chat_conversations.id) AS message_count,
        (SELECT content FROM chat_messages
@@ -187,6 +194,30 @@ export class ChatRepository {
     ).run(title, new Date().toISOString(), conversationId);
     if (result.changes !== 1) throw new Error("Conversazione Chat non trovata");
     return this.getConversation(conversationId)!;
+  }
+
+  updateSystemPrompt(conversationId: string, promptValue: unknown, enabledValue: unknown) {
+    const conversation = this.getConversation(conversationId);
+    if (!conversation) throw new Error("Conversazione Chat non trovata");
+    if (typeof promptValue !== "string") throw new Error("System prompt non valido");
+    const systemPrompt = promptValue.trim();
+    if (systemPrompt.length > 12_000) throw new Error("Il system prompt può contenere al massimo 12.000 caratteri");
+    if (typeof enabledValue !== "boolean") throw new Error("Stato del system prompt non valido");
+    const now = new Date().toISOString();
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.prepare(
+        "UPDATE projects SET chat_system_prompt = ?, updated_at = ? WHERE id = ?",
+      ).run(systemPrompt, now, conversation.projectId);
+      this.database.prepare(
+        "UPDATE chat_conversations SET system_prompt_enabled = ?, updated_at = ? WHERE id = ?",
+      ).run(enabledValue ? 1 : 0, now, conversation.id);
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+    return this.getConversation(conversation.id)!;
   }
 
   maybeAutoTitle(conversationId: string, content: string) {

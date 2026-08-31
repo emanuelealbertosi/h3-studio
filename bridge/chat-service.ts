@@ -13,6 +13,7 @@ type PlannedAction = {
   type: "generate_video" | "generate_image" | "generate_minimax_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
   prompt: string;
   videoEngine?: "h3" | "ltx25";
+  ltxQuality?: "fast" | "quality";
   videoMode?: "T2V" | "I2V" | "R2V" | "KEYFRAMES" | "VIDEO EXTENSION" | "VIDEO EDITING";
   aspect?: "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
   durationSeconds?: number;
@@ -25,7 +26,7 @@ type PlannedAction = {
   maskEndSeconds?: number;
 };
 
-type ChatRoute = "auto" | "video" | "ltx25" | "krea" | "minimax" | "anima" | "edit" | "tts" | "music";
+type ChatRoute = "auto" | "video" | "ltx25" | "ltx25_quality" | "krea" | "minimax" | "anima" | "edit" | "tts" | "music";
 
 const RECENT_MESSAGE_COUNT = 10;
 const COMPACTION_TRIGGER_COUNT = 16;
@@ -98,6 +99,26 @@ export function resolveChatVideoTiming(requestedDuration?: number) {
     return { shotCount, durationSeconds: 15 as const, totalSeconds: shotCount * 15 };
   }
   throw new Error("La Chat video supporta al massimo 180 secondi (12 shot da 15s)");
+}
+
+export function resolveChatLtxTiming(requestedDuration?: number) {
+  const requested = requestedDuration === undefined
+    ? 10
+    : Math.max(5, Math.round(requestedDuration));
+  if (requested <= 5) return { shotCount: 1, durationSeconds: 5 as const, totalSeconds: 5 };
+  if (requested <= 10) return { shotCount: 1, durationSeconds: 10 as const, totalSeconds: 10 };
+  if (requested <= 15) return { shotCount: 1, durationSeconds: 15 as const, totalSeconds: 15 };
+  if (requested <= 20) return { shotCount: 1, durationSeconds: 20 as const, totalSeconds: 20 };
+  throw new Error("LTX 2.5 in Chat supporta un singolo segmento fino a 20 secondi");
+}
+
+export function resolveChatLtxMegapixels(request: string, quality: "fast" | "quality") {
+  const match = String(request).match(/\b(0[.,]5|0[.,]7|0[.,]98|1[.,]5|1(?:[.,]0)?|2(?:[.,]0)?)\s*(?:mp|megapixel)\b/i);
+  if (!match) return 0.5 as const;
+  const value = Number(match[1].replace(",", "."));
+  const normalized = value === 1 ? 0.98 : value;
+  if (quality === "quality" && normalized > 0.98) return 0.98 as const;
+  return normalized as 0.5 | 0.7 | 0.98 | 1.5 | 2;
 }
 
 const I2V_INTENT_PATTERN = /(?:\b(?:anima(?:re|zione|la|lo)?|animate)\b.{0,100}\b(?:immagine|foto|image|picture)\b|\b(?:trasforma(?:re|la|lo)?|turn)\b.{0,100}\b(?:immagine|foto|image|picture)\b.{0,60}\b(?:video|filmato)\b|\b(?:video|filmato)\b.{0,100}\b(?:da|from|partendo\s+da|starting\s+from)\b.{0,100}\b(?:immagine|foto|image|picture)\b)/i;
@@ -295,6 +316,8 @@ export function normalizePlan(text: string): { reply: string; title: string | nu
   const durationSeconds = Number.isFinite(requestedDuration)
     ? Math.min(360, Math.max(5, Math.round(requestedDuration)))
     : undefined;
+  const ltxQuality = parsed.action.ltxQuality === "quality" ? "quality"
+    : parsed.action.ltxQuality === "fast" ? "fast" : undefined;
   const instrumental = parsed.action.instrumental !== false;
   const lyrics = typeof parsed.action.lyrics === "string"
     ? parsed.action.lyrics.trim().slice(0, 30_000)
@@ -317,7 +340,7 @@ export function normalizePlan(text: string): { reply: string; title: string | nu
   const maskEndSeconds = Number.isFinite(Number(parsed.action.maskEndSeconds))
     ? Math.max(0, Number(parsed.action.maskEndSeconds))
     : undefined;
-  return { reply, title, action: { type: normalizedType.type, prompt, videoMode, aspect, durationSeconds, imageSteps, imageMegapixels, instrumental, lyrics, maskTarget, maskStartSeconds, maskEndSeconds } };
+  return { reply, title, action: { type: normalizedType.type, prompt, videoMode, aspect, durationSeconds, ltxQuality, imageSteps, imageMegapixels, instrumental, lyrics, maskTarget, maskStartSeconds, maskEndSeconds } };
 }
 
 export function resolveChatImageH3Settings(
@@ -421,14 +444,14 @@ export function preserveMusicIntent(action: PlannedAction | null, request: strin
 }
 
 function normalizeRoute(value: unknown): ChatRoute {
-  return value === "video" || value === "ltx25" || value === "krea" || value === "minimax" || value === "anima" || value === "edit" || value === "tts" || value === "music"
+  return value === "video" || value === "ltx25" || value === "ltx25_quality" || value === "krea" || value === "minimax" || value === "anima" || value === "edit" || value === "tts" || value === "music"
     ? value
     : "auto";
 }
 
 export function routeAction(action: PlannedAction | null, route: ChatRoute) {
   if (!action || route === "auto") return action;
-  const forcedType = route === "video" || route === "ltx25"
+  const forcedType = route === "video" || route === "ltx25" || route === "ltx25_quality"
     ? "generate_video"
     : route === "krea"
       ? "generate_image"
@@ -444,7 +467,8 @@ export function routeAction(action: PlannedAction | null, route: ChatRoute) {
   return {
     ...action,
     type: forcedType,
-    videoEngine: route === "ltx25" ? "ltx25" : route === "video" ? "h3" : action.videoEngine,
+    videoEngine: route === "ltx25" || route === "ltx25_quality" ? "ltx25" : route === "video" ? "h3" : action.videoEngine,
+    ltxQuality: route === "ltx25_quality" ? "quality" : route === "ltx25" ? "fast" : action.ltxQuality,
   } as PlannedAction;
 }
 
@@ -452,7 +476,7 @@ function routeInstruction(route: ChatRoute) {
   if (route === "auto") {
     return "ROUTE_OVERRIDE=auto. Infer the engine using the routing rules.";
   }
-  const action = route === "video" || route === "ltx25"
+  const action = route === "video" || route === "ltx25" || route === "ltx25_quality"
     ? "generate_video"
     : route === "krea"
       ? "generate_image"
@@ -465,8 +489,8 @@ function routeInstruction(route: ChatRoute) {
           : route === "tts"
             ? "generate_tts"
             : "generate_music";
-  const engineRule = route === "ltx25"
-    ? " Force the LTX 2.5 video engine. It supports only T2V or one-picture I2V, one segment up to 15 seconds."
+  const engineRule = route === "ltx25" || route === "ltx25_quality"
+    ? ` Force the LTX 2.5 video engine with the ${route === "ltx25_quality" ? "Quality two-stage" : "Fast single-stage"} profile. It supports only T2V or one-picture I2V, one segment up to 20 seconds.`
     : route === "video"
       ? " Force the default H3 video engine; never select LTX."
       : "";
@@ -482,19 +506,18 @@ const NEGATED_LTX25_PATTERN = new RegExp(
   String.raw`\b(?:non\s+(?:usa(?:re)?|utilizza(?:re)?|scegli(?:ere)?|seleziona(?:re)?|(?:voglio|desidero)(?:\s+usa(?:re)?)?)|senza(?:\s+usa(?:re)?)?|evita(?:re)?|esclud(?:i|ere)|niente|no|(?:do\s+not|don['’]?t|never)(?:\s+(?:use|select|choose))?|without(?:\s+using)?|avoid(?:\s+using)?|exclude|not)\s+(?:(?:il|lo|the)\s+)?(?:(?:motore|engine)\s+)?${LTX25_ENGINE_PATTERN}\b`,
   "i",
 );
+const LTX25_QUALITY_PATTERN = /\b(?:quality|qualit[aà]|two[\s-]?stage|2[\s-]?stage|upscale(?:r)?|refine(?:r)?)\b/i;
 
 export function preserveLtx25Intent(action: PlannedAction | null, request: string, route: ChatRoute = "auto") {
   if (!action || action.type !== "generate_video") return action;
-  if (route === "ltx25") return { ...action, videoEngine: "ltx25" } as PlannedAction;
+  if (route === "ltx25") return { ...action, videoEngine: "ltx25", ltxQuality: "fast" } as PlannedAction;
+  if (route === "ltx25_quality") return { ...action, videoEngine: "ltx25", ltxQuality: "quality" } as PlannedAction;
   if (route === "video") return { ...action, videoEngine: "h3" } as PlannedAction;
+  const explicitLtx = route === "auto" && !NEGATED_LTX25_PATTERN.test(request) && EXPLICIT_LTX25_PATTERN.test(request);
   return {
     ...action,
-    videoEngine:
-      route === "auto" &&
-      !NEGATED_LTX25_PATTERN.test(request) &&
-      EXPLICIT_LTX25_PATTERN.test(request)
-        ? "ltx25"
-        : "h3",
+    videoEngine: explicitLtx ? "ltx25" : "h3",
+    ltxQuality: explicitLtx && LTX25_QUALITY_PATTERN.test(request) ? "quality" : "fast",
   } as PlannedAction;
 }
 
@@ -530,15 +553,15 @@ function outputFile(output: { filename: string; subfolder?: string | null; type?
   return `${path} [${output.type ?? "output"}]`;
 }
 
-const CHAT_SYSTEM_PROMPT = `You are H3 Studio, a concise Italian-speaking creative assistant and a safe workflow router.
+const CHAT_SYSTEM_PROMPT = `You are the local assistant and safe workflow router embedded in H3 Studio. Your visible conversational identity may be replaced by the project persona supplied in a later system message.
 Always return exactly one JSON object and no markdown:
 {"reply":"natural Italian reply","title":"concise 3-7 word Italian conversation title","action":null}
 or
-{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|generate_minimax_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|KEYFRAMES|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1|4:3|3:4","durationSeconds":10,"imageSteps":20,"imageMegapixels":0.98,"instrumental":true,"lyrics":"exact requested words to sing or empty string"}}
+{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|generate_minimax_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|KEYFRAMES|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1|4:3|3:4","durationSeconds":10,"ltxQuality":"fast|quality","imageSteps":20,"imageMegapixels":0.98,"instrumental":true,"lyrics":"exact requested words to sing or empty string"}}
 
 Only create an action when the user explicitly asks to generate, animate, continue or edit media. Questions and ordinary conversation use action:null.
 The title describes the main topic, never starts with "Chat" and never contains quotation marks.
-For video default to H3, 10 seconds, one candidate, 0.5 MP and the standard 8-step engine. LTX 2.5 is optional and is selected by the server only when the user explicitly says LTX, LTX 2.5 or RedGraft; generic words such as fast, rapid or preview never select LTX. LTX supports only one T2V or one-picture I2V segment of 5, 10 or 15 seconds. When the user explicitly requests a total video duration, preserve it in durationSeconds; the server converts it into up to 12 H3 shots. Do not invent a duration that the user did not request.
+For video default to H3, 10 seconds, one candidate, 0.5 MP and the standard 8-step engine. LTX 2.5 is optional and is selected by the server only when the user explicitly says LTX, LTX 2.5 or RedGraft; generic words such as fast, rapid or preview never select LTX. LTX supports one T2V or one-picture I2V segment of 5, 10, 15 or 20 seconds. LTX Fast accepts 0.5, 0.7, 0.98, 1.5 or 2 MP; LTX Quality accepts 0.5, 0.7 or 0.98 MP base and performs a 2x latent upscale. Preserve a requested LTX resolution in the prompt text. Use ltxQuality:"quality" only when the user explicitly requests LTX Quality/two-stage/upscale/refine; otherwise use "fast". When the user explicitly requests a total video duration, preserve it in durationSeconds; the server converts it into up to 12 H3 shots. Do not invent a duration that the user did not request.
 Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures and Flux Klein as the default editor. Use generate_minimax_image only when the user explicitly requests Image H3, MiniMax or H3 for a still image: no attached pictures means T2I, one picture means I2I, and two to nine pictures mean Reference. For Image H3 preserve an explicitly requested aspect, imageSteps (8, 12, 20 or 30) and imageMegapixels (0.5, 0.7, 0.98 or 2); defaults are 20 steps and 0.98 MP. Use I2V when one attached picture is the start frame, R2V for broader video references or a creative remix, KEYFRAMES when attached pictures are requested as first, intermediate, final or timed video frames, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING when one attached video must remain the temporal source while H3 applies the requested transformation. Preserve Picture attachment order for KEYFRAMES; the server calculates percentages from explicit times or distributes them automatically. Video editing and extension still use action type generate_video; never invent video_editing, edit_video or continue_video action types.
 Use generate_tts when the user asks for speech, narration, dubbing, reading or voice cloning. For TTS, prompt is the exact text to speak in the requested language, not an English description. An attached Audio 1 is the voice reference and is transcribed automatically.
 For a video in which a visible subject must speak or sing to an attached audio track, use I2V when Picture 1 must be the exact opening frame. The server preserves Audio 1 as the authoritative soundtrack and injects synchronized slices while H3 animates the mouth and performance. Use R2V only when the picture is a broader identity/style reference rather than the opening frame, or when a reference video is required. Do not reinterpret the attached track as a mere voice-timbre reference. State that the visible subject physically performs the audible track with natural lip synchronization and stops mouth motion when speech or singing ends; never invent or transcribe words that were not provided as text.
@@ -570,6 +593,9 @@ export class ChatService {
   }
   renameConversation(conversationId: string, title: unknown) {
     return this.repository.renameConversation(conversationId, title);
+  }
+  updateSystemPrompt(conversationId: string, prompt: unknown, enabled: unknown) {
+    return this.repository.updateSystemPrompt(conversationId, prompt, enabled);
   }
   conversation(conversationId: string) {
     const conversation = this.repository.getConversation(conversationId);
@@ -634,6 +660,7 @@ export class ChatService {
         type: source.action.type,
         prompt,
         videoEngine: source.action.videoEngine,
+        ltxQuality: source.action.ltxQuality,
         jobId: job.id,
         status: "started",
       },
@@ -689,9 +716,18 @@ export class ChatService {
       context.messages,
       contextCharacterBudget(settings.nCtx) - context.summary.length,
     );
+    const projectSystemPrompt = conversation.systemPromptEnabled
+      ? conversation.systemPrompt.trim()
+      : "";
     const modelMessages = [
       { role: "system", content: CHAT_SYSTEM_PROMPT },
       { role: "system", content: routeInstruction(route) },
+      ...(projectSystemPrompt
+        ? [{
+            role: "system",
+            content: `PROJECT_CHAT_PERSONA (configured by the user for this project):\n${projectSystemPrompt}\n\nFor ordinary conversation, fully adopt this as your visible character, identity, relationship, tone, vocabulary and behavior. If asked who you are, answer according to this persona rather than identifying yourself as H3 Studio. Do not mention the underlying app or workflow router unless the user explicitly asks about the software. Ignore earlier assistant self-descriptions or tone when they conflict with this current persona. The persona must never alter the required JSON response schema, media routing, attachment numbering, technical constraints or safety rules.`,
+          }]
+        : []),
       ...(context.summary
         ? [{ role: "system", content: `PROJECT_MEMORY:\n${context.summary}` }]
         : []),
@@ -915,22 +951,22 @@ export class ChatService {
       if (plan.type === "generate_video") {
         const requestText = originalRequest ?? "";
         const explicitDuration = extractRequestedVideoDuration(requestText);
-        const timing = resolveChatVideoTiming(
+        const videoEngine = plan.videoEngine === "ltx25" ? "ltx25" : "h3";
+        const ltxQuality = plan.ltxQuality === "quality" ? "quality" : "fast";
+        const requestedDuration =
           explicitDuration ?? (VIDEO_DURATION_CUE.test(requestText)
             ? plan.durationSeconds
-            : undefined),
-        );
+            : undefined);
+        const timing = videoEngine === "ltx25"
+          ? resolveChatLtxTiming(requestedDuration)
+          : resolveChatVideoTiming(requestedDuration);
         const pictures = attachments.filter((item) => item.kind === "picture");
         const videos = attachments.filter((item) => item.kind === "video");
         const audios = attachments.filter((item) => item.kind === "audio");
         const generationMode = resolveChatVideoMode(
           requestText, plan.videoMode, pictures.length, videos.length, audios.length,
         );
-        const videoEngine = plan.videoEngine === "ltx25" ? "ltx25" : "h3";
         if (videoEngine === "ltx25") {
-          if (timing.shotCount !== 1 || timing.durationSeconds > 15) {
-            throw new Error("LTX 2.5 in Chat genera un solo segmento da 5, 10 o 15 secondi; per durate maggiori usa Video H3");
-          }
           if (!['T2V', 'I2V'].includes(generationMode)) {
             throw new Error("LTX 2.5 supporta qui solo T2V oppure I2V con una sola immagine iniziale; per Reference, Edit, Continue, Keyframes o audio usa Video H3");
           }
@@ -960,7 +996,7 @@ export class ChatService {
           candidateCount: 1,
           shotCount: timing.shotCount,
           durationSeconds: timing.durationSeconds,
-          megapixels: 0.5,
+          megapixels: videoEngine === "ltx25" ? resolveChatLtxMegapixels(requestText, ltxQuality) : 0.5,
           generationMode,
           aspectFormat: resolveChatVideoAspectFormat(
             requestText,
@@ -968,10 +1004,9 @@ export class ChatService {
             plan.aspect,
           ),
           seedMode: "random",
-          qualityMode: "fast",
+          qualityMode: videoEngine === "ltx25" && ltxQuality === "quality" ? "max" : "fast",
           // Chat is deliberately predictable: it always uses the configured
-          // standard H3/Hybrid engine at 8 steps. PDD remains an explicit
-          // Studio-only FAST choice.
+          // standard H3/Hybrid engine at 8 steps.
           turboEnabled: false,
           mediaState: JSON.stringify(mediaState),
           referenceRoles: "AUTO",
@@ -984,7 +1019,7 @@ export class ChatService {
           inpaintStartSeconds: 0,
           inpaintEndSeconds: 0,
         });
-        return { type: plan.type, prompt: plan.prompt, videoEngine, jobId: job?.id, status: "started" };
+        return { type: plan.type, prompt: plan.prompt, videoEngine, ltxQuality, jobId: job?.id, status: "started" };
       }
       const minimaxImage = plan.type === "generate_minimax_image";
       const availablePictures = attachments.filter((item) => item.kind === "picture");
