@@ -13,6 +13,7 @@ Questo documento descrive il mapping verificato tra H3 Studio e il workflow
 | Keyframes | `KEYFRAMES` | Almeno Picture 1 | Picture 1..N diventano anchor sulla timeline globale; Studio e Chat accettano distribuzione automatica, percentuali o secondi espliciti. |
 | Continue video | `VIDEO EXTENSION` | Video 1, fino a 180 secondi nello Studio | Il router continua dall'ultimo frame decodificato e salva soltanto il nuovo segmento. |
 | Video editing H3 | `VIDEO EDITING` | Video 1, fino a 180 secondi nello Studio | Video 1 resta la sorgente temporale; l'Ultra AIO Composer applica con H3 standard/Hybrid la trasformazione descritta nel prompt. |
+| Masking H3 · SAM3 | `VIDEO EDITING` + maschera | Esattamente Video 1 e un bersaglio testuale | SAM3 segue il bersaglio, MaskVid crea un crop stabile e ricompone l'area elaborata sul video originale. |
 
 ## Video editing nativo H3
 
@@ -25,6 +26,22 @@ Il modello è quello H3 standard configurato nell'Admin (Hybrid per default).
 PDD FAST resta escluso intenzionalmente dall'editing: con richieste strutturali
 il percorso standard è più prevedibile. Per usare invece il video soltanto come
 ispirazione o riferimento scegli `Reference / Remix H3`.
+
+## Masking H3 selettivo
+
+`Masking H3 · SAM3` è distinto dal Video editing nativo. Si usa quando la
+trasformazione deve riguardare un solo soggetto o oggetto, per esempio
+`vestito della donna` o `automobile rossa`. SAM3 produce una maschera temporale,
+MaskVid ritaglia una finestra stabile attorno al soggetto, H3 lavora a risoluzione
+nativa sul ritaglio e MaskVid lo ricompone sui frame originali. L'esterno della
+maschera non viene rigenerato.
+
+Lo Studio permette di allargare la maschera e limitare l'intervento a un intervallo
+in secondi; `0–0` indica l'intera clip. Il latent upscale è intenzionalmente escluso
+da questa modalità: si usa una risoluzione H3 nativa fino a 0,98 MP. Le dipendenze
+opzionali sono ComfyUI-SAM3, MaskVidExperiments e il peso `models/sam3/sam3.pt`.
+Il worker SAM3 viene scaricato dalla memoria prima che inizi il sampling H3.
+
 ### Contratto full-reference ufficiale
 
 Il formatter applica il contratto full-reference ufficiale anche quando il piano

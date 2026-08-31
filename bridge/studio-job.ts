@@ -9,9 +9,15 @@ import type {
 import type { ComfyProgressTracker } from "./comfy-progress.js";
 import type { JobRepository } from "./job-repository.js";
 import { buildLtx25Prompt } from "./ltx25-workflow.js";
+import type { SamRuntimeControl } from "./sam-runtime-control.js";
 
 const MAX_SEED = 9_007_199_254_740_000;
 const BASE_SECONDS_5S_05MP = 172;
+
+function isH3SamplerClass(value: string | null | undefined) {
+  return value === "H3ReferenceMemorySampler" ||
+    value === "H3MusicVideoReferenceMemorySampler";
+}
 const PLANNER_COLD_SECONDS = 28;
 const ASPECT_FORMATS = [
   "keep source aspect",
@@ -433,6 +439,15 @@ function normalizeRequest(value: unknown): StudioJobRequest {
     MAX_SOURCE_VIDEO_SECONDS,
     Math.max(0, Number(value.inpaintEndSeconds ?? 0) || 0),
   );
+  if (inpaintTarget && generationMode !== "VIDEO EDITING") {
+    throw new Error("Il masking è disponibile soltanto in Video editing H3");
+  }
+  if (
+    inpaintEndSeconds > 0 &&
+    inpaintEndSeconds <= inpaintStartSeconds
+  ) {
+    throw new Error("La fine dell'intervallo masking deve essere successiva all'inizio");
+  }
 
   if (
     videoEngine === "ltx25" &&
@@ -493,6 +508,9 @@ function audioPolicyPrompt(request: StudioJobRequest) {
   }
   if (request.generationMode === "VIDEO EXTENSION") {
     prompt += "\n\nSEAMLESS START: Begin from the exact final state of Video 1 and preserve visual and motion continuity through the first second. No cut, scene reset, teleport or pose reset. Then transition naturally into the requested action and camera direction.";
+  }
+  if (request.generationMode === "VIDEO EDITING" && request.inpaintTarget) {
+    prompt += `\n\nMASKED VIDEO EDIT: modify only the tracked region described as "${request.inpaintTarget}". Preserve every pixel outside that subject region, including camera, framing, background, lighting and all other people. Apply the requested transformation consistently across time without replacing the whole shot.`;
   }
   if (!request.muteDiegetic && !request.muteNonDiegetic) return prompt;
   const directive = request.muteDiegetic && request.muteNonDiegetic
@@ -615,6 +633,70 @@ function resolveEngineSettings(
     loraStrength: firstLora?.strength ?? 0,
     steps,
   };
+}
+
+function attachH3Masking(
+  prompt: ComfyApiPrompt,
+  sampler: ComfyApiNode,
+  routerId: string,
+  request: StudioJobRequest,
+) {
+  if (request.generationMode !== "VIDEO EDITING" || !request.inpaintTarget) return;
+  const highest = Math.max(
+    0,
+    ...Object.keys(prompt)
+      .map((value) => Number(value))
+      .filter(Number.isFinite),
+  );
+  const loaderId = String(highest + 1);
+  const segmentId = String(highest + 2);
+  const propagateId = String(highest + 3);
+  const outputId = String(highest + 4);
+  prompt[loaderId] = {
+    class_type: "LoadSAM3Model",
+    inputs: { precision: "auto", compile: false },
+    _meta: { title: "H3 Studio — SAM3" },
+  };
+  prompt[segmentId] = {
+    class_type: "SAM3VideoSegmentation",
+    inputs: {
+      prompt_mode: "text",
+      video_frames: [routerId, 7],
+      text_prompt: request.inpaintTarget,
+      frame_idx: 0,
+      score_threshold: 0.3,
+    },
+    _meta: { title: "H3 Studio — trova il soggetto" },
+  };
+  prompt[propagateId] = {
+    class_type: "SAM3Propagate",
+    inputs: {
+      sam3_model_config: [loaderId, 0],
+      video_state: [segmentId, 0],
+      start_frame: 0,
+      end_frame: -1,
+      direction: "forward",
+    },
+    _meta: { title: "H3 Studio — traccia la maschera" },
+  };
+  prompt[outputId] = {
+    class_type: "SAM3VideoOutput",
+    inputs: {
+      masks: [propagateId, 0],
+      video_state: [propagateId, 2],
+      scores: [propagateId, 1],
+      obj_id: -1,
+      plot_all_masks: true,
+    },
+    _meta: { title: "H3 Studio — maschera tracciata" },
+  };
+  sampler.inputs.studio_inpaint_mask = [outputId, 0];
+  sampler.inputs.studio_inpaint_grow = request.inpaintMaskGrow;
+  sampler.inputs.studio_inpaint_start_seconds = request.inpaintStartSeconds;
+  sampler.inputs.studio_inpaint_end_seconds = request.inpaintEndSeconds;
+  sampler.inputs.studio_inpaint_crop_mode = "tracked";
+  sampler.inputs.studio_inpaint_crop_scale = 1.5;
+  sampler.inputs.studio_inpaint_feather = 24;
 }
 
 function resolveLtx25EngineSettings(
@@ -774,6 +856,7 @@ export function prepareStudioJob(
       request.generationMode === "T2V" ? "[]" : request.mediaState;
     model.inputs.model_name = resolvedEngine.model;
     configureEngineLoras(loras, resolvedEngine);
+    attachH3Masking(prompt, sampler, routerId, request);
     if (audioRouting.role === "music_video_lipsync") {
       sampler.class_type = "H3MusicVideoReferenceMemorySampler";
       sampler.inputs.soundtrack = [routerId, 17];
@@ -884,18 +967,100 @@ export function publicDryRun(
 }
 
 export class StudioJobService {
+  private readonly samPromptIds = new Set<string>();
+  private readonly releasedSamPrompts = new Set<string>();
+  private samReleaseQueue: Promise<void> = Promise.resolve();
+
   constructor(
     private readonly comfy: ComfyClient,
     private readonly workflowStore: WorkflowStore,
     private readonly runtimeSettings: RuntimeSettingsStore,
     private readonly progressTracker: ComfyProgressTracker,
     private readonly jobs: JobRepository,
-  ) {}
+    private readonly samRuntime?: SamRuntimeControl,
+  ) {
+    this.progressTracker.onNode(({ promptId, classType }) => {
+      if (
+        this.samPromptIds.has(promptId) &&
+        isH3SamplerClass(classType)
+      ) {
+        return this.releaseSamPrompt(promptId);
+      }
+    });
+    this.progressTracker.onTerminal(({ promptId }) => {
+      if (this.samPromptIds.has(promptId)) return this.releaseSamPrompt(promptId);
+    });
+  }
+
+  private promptUsesSam(prompt: ComfyApiPrompt) {
+    return Object.values(prompt).some((node) =>
+      /^(?:LoadSAM3Model|SAM3VideoSegmentation|SAM3Propagate|SAM3VideoOutput)$/i
+        .test(node.class_type)
+    );
+  }
+
+  private registerSamPrompt(promptId: string, prompt: ComfyApiPrompt) {
+    if (!this.promptUsesSam(prompt)) return;
+    this.samPromptIds.add(promptId);
+    this.releasedSamPrompts.delete(promptId);
+  }
+
+  private async releaseSamPrompt(promptId: string) {
+    if (!this.samRuntime || !this.samPromptIds.has(promptId) || this.releasedSamPrompts.has(promptId)) return;
+    const release = this.samReleaseQueue.catch(() => undefined).then(async () => {
+      if (this.releasedSamPrompts.has(promptId)) return;
+      const queue = await this.comfy.queueState().catch(() => null);
+      const anotherSamPromptIsRunning = queue
+        ? [...queue.runningPromptIds].some(
+            (runningId) => runningId !== promptId && this.samPromptIds.has(runningId),
+          )
+        : false;
+      if (!anotherSamPromptIsRunning) await this.samRuntime?.release();
+      this.releasedSamPrompts.add(promptId);
+    });
+    this.samReleaseQueue = release;
+    await release;
+  }
   async prepare(
     rawRequest: unknown,
     excludedSeeds: ReadonlySet<number> = new Set(),
     runtimeOverride?: RuntimeSettings,
   ) {
+    const wantsMasking = isRecord(rawRequest) &&
+      rawRequest.videoEngine !== "ltx25" &&
+      rawRequest.generationMode === "VIDEO EDITING" &&
+      typeof rawRequest.inpaintTarget === "string" &&
+      rawRequest.inpaintTarget.trim().length > 0;
+    if (wantsMasking) {
+      const requiredClasses = [
+        "LoadSAM3Model",
+        "SAM3VideoSegmentation",
+        "SAM3Propagate",
+        "SAM3VideoOutput",
+        "MVEx_MaskToLatentSpace",
+        "MVEx_SubjectCrop",
+        "MVEx_SubjectUncrop",
+      ] as const;
+      const [nodeInfo, samplerInfo] = await Promise.all([
+        Promise.all(requiredClasses.map(async (className) => {
+          const info = await this.comfy.objectInfo(className).catch(() => null);
+          return [className, isRecord(info) && isRecord(info[className])] as const;
+        })),
+        this.comfy.objectInfo("H3ReferenceMemorySampler").catch(() => null),
+      ]);
+      const missing = nodeInfo
+        .filter(([, available]) => !available)
+        .map(([className]) => className as string);
+      const sampler = samplerInfo?.H3ReferenceMemorySampler;
+      const input = isRecord(sampler) && isRecord(sampler.input) ? sampler.input : null;
+      const optional = input && isRecord(input.optional) ? input.optional : null;
+      if (!optional || !("studio_inpaint_crop_mode" in optional)) {
+        missing.push("H3ReferenceMemorySampler (MaskVid crop/uncrop)");
+      }
+      if (missing.length) {
+        throw new Error(`Masking H3 non pronto: mancano ${missing.join(", ")}. Installa le dipendenze dalla pagina Admin e riavvia ComfyUI.`);
+      }
+    }
     const [sourcePrompt, runtimeSettings] = await Promise.all([
       isRecord(rawRequest) && rawRequest.videoEngine === "ltx25"
         ? Promise.resolve({} as ComfyApiPrompt)
@@ -1006,6 +1171,7 @@ export class StudioJobService {
           `h3-studio-${prepared.jobId}`,
         );
         this.progressTracker.register(queued.promptId, candidate.prompt);
+        this.registerSamPrompt(queued.promptId, candidate.prompt);
         this.jobs.markQueued(
           prepared.jobId,
           candidate.index,
@@ -1055,6 +1221,16 @@ export class StudioJobService {
         candidate.promptId,
         liveProgress?.currentNode,
       );
+      if (
+        this.samPromptIds.has(candidate.promptId) &&
+        (isH3SamplerClass(currentNodeClass) ||
+          liveProgress?.phase === "completed" ||
+          liveProgress?.phase === "failed" ||
+          statusString === "success" ||
+          statusString === "error")
+      ) {
+        void this.releaseSamPrompt(candidate.promptId).catch(() => undefined);
+      }
       let status = candidate.status;
       if (statusString === "success" && output) status = "ready";
       else if (statusString === "error" || liveProgress?.phase === "failed") {

@@ -21,7 +21,7 @@ const motionSource = await readFile(
 
 assert.match(
   source,
-  /None if operation_mode == "VIDEO EXTENSION" else initial_video/,
+  /None if operation_mode == "VIDEO EXTENSION" or inpaint_enabled\s+else initial_video/,
   "VIDEO EXTENSION must not condition on the full source video",
 );
 assert.match(

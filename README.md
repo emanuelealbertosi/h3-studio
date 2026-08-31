@@ -25,6 +25,11 @@ per restituire VRAM a ComfyUI. I riferimenti impliciti come “modificala” usa
 l'ultimo media generato o allegato nella conversazione; **Rigenera** permette di
 correggere il prompt in un popup e avviare una variante con seed nuovo.
 
+Lo Studio e la Chat includono inoltre **Masking H3** come modalità selettiva
+opzionale: SAM3 segue un soggetto descritto a parole, MaskVid stabilizza il crop
+e ricompone l'area modificata sul video originale. Il normale Video editing H3
+resta disponibile separatamente per le trasformazioni full-frame.
+
 ## Stato
 
 Fase attuale: **Milestone 4 — montaggio locale, Continue/Edit e workflow multimodali**.

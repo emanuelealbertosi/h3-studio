@@ -39,6 +39,8 @@
     "test:repair-processing-times": "tsx scripts/test-repair-processing-times.ts",
     "test:setup": "tsx scripts/test-setup-auth.ts",
     "test:llm-runtime": "tsx scripts/test-llm-runtime.ts",
+    "test:sam-runtime": "tsx scripts/test-sam-runtime.ts",
+    "test:masking": "tsx scripts/test-masking.ts",
     "repair:processing-times": "tsx scripts/repair-processing-times.ts",
     "setup:audio-voice": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-audio-cpp-voice.ps1",
     "sanitize:workflows": "tsx scripts/sanitize-bundled-workflows.ts",

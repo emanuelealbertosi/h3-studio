@@ -173,5 +173,12 @@ Quando alleghi un video e chiedi di modificarlo, Chat usa `VIDEO EDITING`
 nativo del workflow Ultra AIO Composer: il video resta la sorgente temporale e
 H3 applica la trasformazione descritta. Per un remix creativo che usi la clip
 soltanto come riferimento, chiedi esplicitamente “usa il video come riferimento”
-oppure scegli `Reference / Remix H3` nello Studio. Non sono richiesti SAM3 o
-MaskVid.
+oppure scegli `Reference / Remix H3` nello Studio. Il normale Video editing non
+richiede SAM3 o MaskVid.
+
+Per un intervento selettivo scegli invece il pulsante `Masking H3`, allega un solo
+video e descrivi sia il bersaglio sia la modifica, per esempio: “cambia soltanto
+il vestito della donna in blu e lascia invariato tutto il resto”. Il planner passa
+a SAM3 una frase nominale breve per il tracking; MaskVid ricompone il risultato
+sui frame originali. Puoi indicare anche un intervallo, ad esempio “solo da 2,5 a
+6 secondi”. Se vuoi modificare l'intero fotogramma continua a usare `Video H3`.

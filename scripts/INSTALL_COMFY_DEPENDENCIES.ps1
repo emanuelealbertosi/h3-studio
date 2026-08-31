@@ -98,10 +98,35 @@ if (-not $SkipExternalNodes) {
     @{ Name = "ComfyUI-VideoHelperSuite"; Url = "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git" },
     @{ Name = "Rebalance-Pack"; Url = "https://github.com/nova452/Rebalance-Pack.git" },
     @{ Name = "ComfyUI-H3-FaceRefine"; Url = "https://github.com/Carasibana/ComfyUI-H3-FaceRefine.git" },
-    @{ Name = "Comfyui_Minimax_h3_latent_Upscaler"; Url = "https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git" }
+    @{ Name = "Comfyui_Minimax_h3_latent_Upscaler"; Url = "https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git" },
+    @{ Name = "comfyui-sam3"; Url = "https://github.com/PozzettiAndrea/ComfyUI-SAM3.git" },
+    @{ Name = "MaskVidExperiments"; Url = "https://github.com/drozbay/MaskVidExperiments.git" }
   )
   foreach ($repo in $repositories) {
     Install-GitRepository -Name $repo.Name -Url $repo.Url
+  }
+
+  # The public native checkpoint already used by H3 Studio is sam3.pt.
+  # PozzettiAndrea's loader accepts the native state dict internally but its
+  # current filename constant points only to the optional safetensors mirror.
+  # Prefer the existing/native file so installations never download a second
+  # 3.45 GB checkpoint behind the user's back.
+  $samLoader = Join-Path $customNodes "comfyui-sam3\nodes\load_model.py"
+  if (Test-Path -LiteralPath $samLoader -PathType Leaf) {
+    $samSource = Get-Content -LiteralPath $samLoader -Raw
+    $samPatched = $samSource.Replace('MODEL_FILENAME = "sam3.safetensors"', 'MODEL_FILENAME = "sam3.pt"')
+    if ($samPatched -ne $samSource) {
+      Set-Content -LiteralPath $samLoader -Value $samPatched -Encoding utf8NoBOM
+      Write-Host "SAM3 configurato per il checkpoint nativo sam3.pt" -ForegroundColor Green
+    }
+  }
+  $samCompat = Join-Path $PSScriptRoot "patch-sam3-compat.mjs"
+  $samRoot = Join-Path $customNodes "comfyui-sam3"
+  if ((Test-Path -LiteralPath $samCompat -PathType Leaf) -and (Test-Path -LiteralPath $samRoot -PathType Container)) {
+    & node $samCompat $samRoot
+    if ($LASTEXITCODE -ne 0) {
+      throw "Patch compatibilità SAM3 fallita"
+    }
   }
 
   $sourceRoot = Join-Path $customNodes "_h3_studio_sources"

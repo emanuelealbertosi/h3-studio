@@ -162,6 +162,9 @@ try {
   assert.equal(routeAction({ ...proposedImage, type: "generate_anima" }, "krea")?.type, "generate_image");
   assert.equal(routeAction(proposedImage, "video")?.type, "generate_video");
   assert.equal(routeAction(proposedImage, "video")?.videoEngine, "h3");
+  assert.equal(routeAction(proposedImage, "masking")?.type, "generate_video");
+  assert.equal(routeAction(proposedImage, "masking")?.videoEngine, "h3");
+  assert.equal(routeAction(proposedImage, "masking")?.videoMode, "VIDEO EDITING");
   assert.equal(routeAction(proposedImage, "ltx25")?.videoEngine, "ltx25");
   assert.equal(routeAction(proposedImage, "ltx25")?.ltxQuality, "fast");
   assert.equal(routeAction(proposedImage, "ltx25_quality")?.ltxQuality, "quality");
@@ -432,13 +435,16 @@ try {
   assert.match(service, /referenceFile: reference\?\.file/);
   assert.match(service, /const ttsText = resolveChatTtsText\(plan\.prompt, originalRequest \?\? ""\)/);
   assert.match(service, /video_editing: \{ type: "generate_video", videoMode: "VIDEO EDITING" \}/);
+  assert.match(service, /inpaintTarget: maskTarget/);
+  assert.match(service, /Masking H3 richiede esattamente un video sorgente allegato/);
   assert.match(service, /catch \(error\) \{\s+await this\.comfy\.chatUnload\(\)\.catch/);
   assert.match(audioService, /Trascrizione reference con Whisper/);
   assert.match(audioService, /transcribeReference/);
   assert.match(panel, /\(\^\|\\s\)@\$/);
   assert.match(panel, /chat-picker-grid/);
   assert.match(panel, /Crea con/);
-  assert.match(panel, /"auto" \| "video" \| "ltx25" \| "ltx25_quality" \| "krea" \| "minimax" \| "anima" \| "edit"/);
+  assert.match(panel, /"auto" \| "video" \| "masking" \| "ltx25" \| "ltx25_quality" \| "krea" \| "minimax" \| "anima" \| "edit"/);
+  assert.match(panel, /label: "Masking H3"/);
   assert.match(panel, /label: "LTX Fast"/);
   assert.match(panel, /label: "LTX Quality"/);
   assert.match(panel, /label: "Image H3"/);

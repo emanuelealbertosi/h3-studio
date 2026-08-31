@@ -97,6 +97,7 @@ const modes = [
   { value: "keyframes", label: "Keyframes", factor: 1.15 },
   { value: "continue", label: "Continue video", factor: 1.2 },
   { value: "edit", label: "Video editing H3", factor: 1.2 },
+  { value: "masking", label: "Masking H3 · SAM3", factor: 1.25 },
 ] as const;
 
 type StudioMode = (typeof modes)[number]["value"];
@@ -115,6 +116,7 @@ const generationModeByUi: Record<StudioMode, GenerationMode> = {
   keyframes: "KEYFRAMES",
   continue: "VIDEO EXTENSION",
   edit: "VIDEO EDITING",
+  masking: "VIDEO EDITING",
 };
 
 const uiModeByGeneration: Record<GenerationMode, StudioMode> = {
@@ -415,7 +417,7 @@ const KEEP_SOURCE_ASPECT_FORMAT = "keep source aspect" as const;
 
 function sourceAspectLabel(mode: StudioMode) {
   if (mode === "i2v" || mode === "keyframes") return "Mantieni proporzioni · Picture 1";
-  if (mode === "continue" || mode === "edit") return "Mantieni proporzioni · Video 1";
+  if (mode === "continue" || mode === "edit" || mode === "masking") return "Mantieni proporzioni · Video 1";
   if (mode === "reference") return "Mantieni proporzioni · Picture/Video 1";
   return null;
 }
@@ -4573,6 +4575,10 @@ function StudioApp() {
   const [sourceJobId, setSourceJobId] = useState<string | null>(null);
   const [muteDiegetic, setMuteDiegetic] = useState(false);
   const [muteNonDiegetic, setMuteNonDiegetic] = useState(false);
+  const [inpaintTarget, setInpaintTarget] = useState("");
+  const [inpaintMaskGrow, setInpaintMaskGrow] = useState(8);
+  const [inpaintStartSeconds, setInpaintStartSeconds] = useState(0);
+  const [inpaintEndSeconds, setInpaintEndSeconds] = useState(0);
   const [qualityMode, setQualityMode] = useState<QualityMode>("fast");
   const [videoEngine, setVideoEngine] = useState<VideoEngine>("h3");
   const [turboEnabled, setTurboEnabled] = useState(false);
@@ -4911,7 +4917,11 @@ function StudioApp() {
     setMegapixels(job.request.megapixels);
     setCurrentJobMegapixels(job.request.megapixels);
     setAspectFormat(job.request.aspectFormat);
-    setMode(uiModeByGeneration[job.request.generationMode] ?? "t2v");
+    setMode(
+      job.request.generationMode === "VIDEO EDITING" && job.request.inpaintTarget
+        ? "masking"
+        : uiModeByGeneration[job.request.generationMode] ?? "t2v",
+    );
     setSeedMode(
       job.request.seedMode ??
         (job.request.seed === undefined ? "random" : "base"),
@@ -4943,6 +4953,10 @@ function StudioApp() {
     setKeyframePositions(job.request.keyframePositions ?? "AUTO");
     setMuteDiegetic(Boolean(job.request.muteDiegetic));
     setMuteNonDiegetic(Boolean(job.request.muteNonDiegetic));
+    setInpaintTarget(job.request.inpaintTarget ?? "");
+    setInpaintMaskGrow(job.request.inpaintMaskGrow ?? 8);
+    setInpaintStartSeconds(job.request.inpaintStartSeconds ?? 0);
+    setInpaintEndSeconds(job.request.inpaintEndSeconds ?? 0);
     setSourceJobId(job.sourceJobId ?? job.request.sourceJobId ?? null);
     if (job.projectId ?? job.request.projectId) {
       setStudioProjectId((job.projectId ?? job.request.projectId)!);
@@ -5222,6 +5236,18 @@ function StudioApp() {
       setRunMessage("Scegli una clip o carica un video sorgente.");
       return;
     }
+    if (mode === "masking" && !inpaintTarget.trim()) {
+      setRunMessage("Descrivi l'elemento che SAM3 deve tracciare, per esempio: vestito della donna.");
+      return;
+    }
+    if (
+      mode === "masking" &&
+      inpaintEndSeconds > 0 &&
+      inpaintEndSeconds <= inpaintStartSeconds
+    ) {
+      setRunMessage("La fine dell'intervallo deve essere successiva all'inizio.");
+      return;
+    }
     if (
       generationMode === "R2V" &&
       mediaAssets.length === 0
@@ -5279,10 +5305,10 @@ function StudioApp() {
           sourceJobId,
           muteDiegetic,
           muteNonDiegetic,
-          inpaintTarget: "",
-          inpaintMaskGrow: 8,
-          inpaintStartSeconds: 0,
-          inpaintEndSeconds: 0,
+          inpaintTarget: mode === "masking" ? inpaintTarget : "",
+          inpaintMaskGrow,
+          inpaintStartSeconds,
+          inpaintEndSeconds,
         }),
       });
       const payload = (await response.json()) as {
@@ -6494,14 +6520,14 @@ function StudioApp() {
                   onChange={(event) => {
                     const nextMode = event.target.value as StudioMode;
                     setMode(nextMode);
-                    if (nextMode === "edit") {
+                    if (nextMode === "edit" || nextMode === "masking") {
                       setQualityMode("fast");
                       setTurboEnabled(false);
                     }
                     if (nextMode === "t2v" && aspectFormat === KEEP_SOURCE_ASPECT_FORMAT) {
                       setAspectFormat("16:9 landscape");
                     }
-                    if (nextMode !== "continue" && nextMode !== "edit") setSourceJobId(null);
+                    if (nextMode !== "continue" && nextMode !== "edit" && nextMode !== "masking") setSourceJobId(null);
                   }}
                 >
                   {modes.map((item) => (
@@ -6683,6 +6709,61 @@ function StudioApp() {
               </fieldset>
             </div>
 
+            {mode === "masking" && (
+              <fieldset className="audio-policy">
+                <legend>Maschera intelligente · SAM3 + MaskVid</legend>
+                <label>
+                  <span>
+                    <strong>Elemento da modificare</strong>
+                    <small>Descrizione breve: “vestito della donna”, “automobile rossa”, “capelli”.</small>
+                  </span>
+                  <input
+                    onChange={(event) => setInpaintTarget(event.target.value)}
+                    placeholder="vestito della donna"
+                    type="text"
+                    value={inpaintTarget}
+                  />
+                </label>
+                <label>
+                  <span>
+                    <strong>Margine maschera</strong>
+                    <small>Allarga la regione rigenerata; 8 px è il valore consigliato.</small>
+                  </span>
+                  <select
+                    onChange={(event) => setInpaintMaskGrow(Number(event.target.value))}
+                    value={inpaintMaskGrow}
+                  >
+                    {[0, 4, 8, 12, 16, 24, 32].map((value) => (
+                      <option key={value} value={value}>{value} px</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>
+                    <strong>Intervallo opzionale</strong>
+                    <small>0–0 modifica tutta la clip; altrimenti indica inizio e fine in secondi.</small>
+                  </span>
+                  <span>
+                    <input
+                      min="0"
+                      onChange={(event) => setInpaintStartSeconds(Number(event.target.value))}
+                      step="0.1"
+                      type="number"
+                      value={inpaintStartSeconds}
+                    />
+                    <input
+                      min="0"
+                      onChange={(event) => setInpaintEndSeconds(Number(event.target.value))}
+                      step="0.1"
+                      type="number"
+                      value={inpaintEndSeconds}
+                    />
+                  </span>
+                </label>
+                <p>SAM3 traccia il bersaglio, MaskVid stabilizza il crop e lo ricompone sui frame sorgente. Fuori dalla maschera resta il video originale.</p>
+              </fieldset>
+            )}
+
             <div className="seed-row">
               <fieldset className="segmented-control seed-mode-control">
                 <legend>Seed candidati</legend>
@@ -6755,6 +6836,8 @@ function StudioApp() {
                             ? "Video 1 viene continuato; l’output contiene solo il nuovo segmento."
                             : mode === "edit"
                               ? "Video 1 resta la sorgente temporale: H3 applica al video la trasformazione descritta nel prompt."
+                              : mode === "masking"
+                                ? "Video 1 resta intatto fuori dal soggetto tracciato; H3 modifica soltanto la regione selezionata."
                               : "Immagini, video e audio vengono usati come riferimenti."}
                     </span>
                   </div>

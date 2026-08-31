@@ -18,7 +18,7 @@ type ChatConversation = {
   createdAt: string;
   updatedAt: string;
 };
-type ChatRoute = "auto" | "video" | "ltx25" | "ltx25_quality" | "krea" | "minimax" | "anima" | "edit" | "tts" | "music";
+type ChatRoute = "auto" | "video" | "masking" | "ltx25" | "ltx25_quality" | "krea" | "minimax" | "anima" | "edit" | "tts" | "music";
 type ChatMemory = { active: boolean; summarizedMessages: number; summary: string };
 type ChatTrackedCandidate = {
   index: number;
@@ -699,6 +699,7 @@ export default function ChatPanel({
   const routes: Array<{ id: ChatRoute; label: string; help: string }> = [
     { id: "auto", label: "Auto", help: "LLM sceglie in base alla richiesta" },
     { id: "video", label: "Video H3", help: "Forza la generazione video" },
+    { id: "masking", label: "Masking H3", help: "Modifica solo un soggetto tracciato in un video allegato" },
     { id: "ltx25", label: "LTX Fast", help: "Single-stage 8 step: T2V/I2V fino a 20 s e 0,98 MP" },
     { id: "ltx25_quality", label: "LTX Quality", help: "Two-stage 8+3: upscale latent 2× e refine, base 0,5 MP" },
     { id: "krea", label: "Krea", help: "Forza una immagine fotografica/generale" },

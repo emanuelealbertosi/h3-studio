@@ -48,6 +48,12 @@
 180 secondi, e conserva l'originale come genitore immutabile. Il bridge inoltra
 il job al percorso nativo dell'Ultra AIO Composer con il modello H3 standard/
 Hybrid. Non è un flusso Reference, non aggiunge maschere esterne e non usa PDD FAST.
+
+`Masking H3` riusa `VIDEO EDITING` ma aggiunge una pipeline opzionale separata:
+SAM3 segmenta e propaga un bersaglio testuale, MaskVid crea un crop temporale
+stabile, il sampler H3 elabora il crop e `Subject Uncrop` ripristina sui frame
+originali tutti i pixel esterni alla maschera. Il bridge chiude il worker SAM3
+non appena il sampler H3 può procedere senza di esso.
 ## Clip e montaggio
 
 I media generati sono oggetti immutabili. Una Sequence non contiene un MP4 progressivamente riscritto: contiene riferimenti ordinati ai Candidate selezionati e istruzioni di montaggio. Il player passa da un clip al successivo e applica in/out e transizioni in tempo reale. FFmpeg interviene soltanto durante l'esportazione o per normalizzare clip incompatibili.

@@ -26,7 +26,7 @@ type PlannedAction = {
   maskEndSeconds?: number;
 };
 
-type ChatRoute = "auto" | "video" | "ltx25" | "ltx25_quality" | "krea" | "minimax" | "anima" | "edit" | "tts" | "music";
+type ChatRoute = "auto" | "video" | "masking" | "ltx25" | "ltx25_quality" | "krea" | "minimax" | "anima" | "edit" | "tts" | "music";
 
 const RECENT_MESSAGE_COUNT = 10;
 const COMPACTION_TRIGGER_COUNT = 16;
@@ -444,14 +444,14 @@ export function preserveMusicIntent(action: PlannedAction | null, request: strin
 }
 
 function normalizeRoute(value: unknown): ChatRoute {
-  return value === "video" || value === "ltx25" || value === "ltx25_quality" || value === "krea" || value === "minimax" || value === "anima" || value === "edit" || value === "tts" || value === "music"
+  return value === "video" || value === "masking" || value === "ltx25" || value === "ltx25_quality" || value === "krea" || value === "minimax" || value === "anima" || value === "edit" || value === "tts" || value === "music"
     ? value
     : "auto";
 }
 
 export function routeAction(action: PlannedAction | null, route: ChatRoute) {
   if (!action || route === "auto") return action;
-  const forcedType = route === "video" || route === "ltx25" || route === "ltx25_quality"
+  const forcedType = route === "video" || route === "masking" || route === "ltx25" || route === "ltx25_quality"
     ? "generate_video"
     : route === "krea"
       ? "generate_image"
@@ -467,7 +467,8 @@ export function routeAction(action: PlannedAction | null, route: ChatRoute) {
   return {
     ...action,
     type: forcedType,
-    videoEngine: route === "ltx25" || route === "ltx25_quality" ? "ltx25" : route === "video" ? "h3" : action.videoEngine,
+    videoEngine: route === "ltx25" || route === "ltx25_quality" ? "ltx25" : route === "video" || route === "masking" ? "h3" : action.videoEngine,
+    videoMode: route === "masking" ? "VIDEO EDITING" : action.videoMode,
     ltxQuality: route === "ltx25_quality" ? "quality" : route === "ltx25" ? "fast" : action.ltxQuality,
   } as PlannedAction;
 }
@@ -476,7 +477,7 @@ function routeInstruction(route: ChatRoute) {
   if (route === "auto") {
     return "ROUTE_OVERRIDE=auto. Infer the engine using the routing rules.";
   }
-  const action = route === "video" || route === "ltx25" || route === "ltx25_quality"
+  const action = route === "video" || route === "masking" || route === "ltx25" || route === "ltx25_quality"
     ? "generate_video"
     : route === "krea"
       ? "generate_image"
@@ -493,6 +494,8 @@ function routeInstruction(route: ChatRoute) {
     ? ` Force the LTX 2.5 video engine with the ${route === "ltx25_quality" ? "Quality two-stage" : "Fast single-stage"} profile. It supports only T2V or one-picture I2V, one segment up to 20 seconds.`
     : route === "video"
       ? " Force the default H3 video engine; never select LTX."
+      : route === "masking"
+        ? " Force H3 VIDEO EDITING with SAM3 masking. A single attached video is required. Extract the exact visual subject to track into maskTarget; never leave maskTarget empty."
       : "";
   return `ROUTE_OVERRIDE=${route}. If and only if the user explicitly requests media creation, use action type ${action}. The selector alone never authorizes a render.${engineRule}`;
 }
@@ -513,6 +516,7 @@ export function preserveLtx25Intent(action: PlannedAction | null, request: strin
   if (route === "ltx25") return { ...action, videoEngine: "ltx25", ltxQuality: "fast" } as PlannedAction;
   if (route === "ltx25_quality") return { ...action, videoEngine: "ltx25", ltxQuality: "quality" } as PlannedAction;
   if (route === "video") return { ...action, videoEngine: "h3" } as PlannedAction;
+  if (route === "masking") return { ...action, videoEngine: "h3", videoMode: "VIDEO EDITING" } as PlannedAction;
   const explicitLtx = route === "auto" && !NEGATED_LTX25_PATTERN.test(request) && EXPLICIT_LTX25_PATTERN.test(request);
   return {
     ...action,
@@ -557,12 +561,13 @@ const CHAT_SYSTEM_PROMPT = `You are the local assistant and safe workflow router
 Always return exactly one JSON object and no markdown:
 {"reply":"natural Italian reply","title":"concise 3-7 word Italian conversation title","action":null}
 or
-{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|generate_minimax_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|KEYFRAMES|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1|4:3|3:4","durationSeconds":10,"ltxQuality":"fast|quality","imageSteps":20,"imageMegapixels":0.98,"instrumental":true,"lyrics":"exact requested words to sing or empty string"}}
+{"reply":"Italian confirmation","title":"concise 3-7 word Italian conversation title","action":{"type":"generate_video|generate_image|generate_minimax_image|edit_image|generate_anima|generate_tts|generate_music","prompt":"complete media prompt or exact TTS script","videoMode":"T2V|I2V|R2V|KEYFRAMES|VIDEO EXTENSION|VIDEO EDITING","aspect":"16:9|9:16|1:1|4:3|3:4","durationSeconds":10,"ltxQuality":"fast|quality","imageSteps":20,"imageMegapixels":0.98,"instrumental":true,"lyrics":"exact requested words to sing or empty string","maskTarget":"short concrete subject to track or empty string","maskStartSeconds":0,"maskEndSeconds":0}}
 
 Only create an action when the user explicitly asks to generate, animate, continue or edit media. Questions and ordinary conversation use action:null.
 The title describes the main topic, never starts with "Chat" and never contains quotation marks.
 For video default to H3, 10 seconds, one candidate, 0.5 MP and the standard 8-step engine. LTX 2.5 is optional and is selected by the server only when the user explicitly says LTX, LTX 2.5 or RedGraft; generic words such as fast, rapid or preview never select LTX. LTX supports one T2V or one-picture I2V segment of 5, 10, 15 or 20 seconds. LTX Fast accepts 0.5, 0.7, 0.98, 1.5 or 2 MP; LTX Quality accepts 0.5, 0.7 or 0.98 MP base and performs a 2x latent upscale. Preserve a requested LTX resolution in the prompt text. Use ltxQuality:"quality" only when the user explicitly requests LTX Quality/two-stage/upscale/refine; otherwise use "fast". When the user explicitly requests a total video duration, preserve it in durationSeconds; the server converts it into up to 12 H3 shots. Do not invent a duration that the user did not request.
 Use generate_anima for anime, manga, illustration, drawing or cartoon-style still images, including the Italian words disegno, illustrazione, anime, manga and cartone. Use generate_image for photographic or general Krea still images. Use edit_image only with attached pictures and Flux Klein as the default editor. Use generate_minimax_image only when the user explicitly requests Image H3, MiniMax or H3 for a still image: no attached pictures means T2I, one picture means I2I, and two to nine pictures mean Reference. For Image H3 preserve an explicitly requested aspect, imageSteps (8, 12, 20 or 30) and imageMegapixels (0.5, 0.7, 0.98 or 2); defaults are 20 steps and 0.98 MP. Use I2V when one attached picture is the start frame, R2V for broader video references or a creative remix, KEYFRAMES when attached pictures are requested as first, intermediate, final or timed video frames, VIDEO EXTENSION for continuing an attached video, and VIDEO EDITING when one attached video must remain the temporal source while H3 applies the requested transformation. Preserve Picture attachment order for KEYFRAMES; the server calculates percentages from explicit times or distributes them automatically. Video editing and extension still use action type generate_video; never invent video_editing, edit_video or continue_video action types.
+For a selective video edit explicitly limited to one subject or region (for example “change only her dress”, “mask the red car”, “leave everything else unchanged”), use VIDEO EDITING and set maskTarget to a short noun phrase identifying only the object SAM3 must track. Preserve an explicitly requested temporal range in maskStartSeconds/maskEndSeconds; 0/0 means the whole clip. For ordinary whole-frame H3 video editing leave maskTarget empty. Never silently turn a normal edit into masking.
 Use generate_tts when the user asks for speech, narration, dubbing, reading or voice cloning. For TTS, prompt is the exact text to speak in the requested language, not an English description. An attached Audio 1 is the voice reference and is transcribed automatically.
 For a video in which a visible subject must speak or sing to an attached audio track, use I2V when Picture 1 must be the exact opening frame. The server preserves Audio 1 as the authoritative soundtrack and injects synchronized slices while H3 animates the mouth and performance. Use R2V only when the picture is a broader identity/style reference rather than the opening frame, or when a reference video is required. Do not reinterpret the attached track as a mere voice-timbre reference. State that the visible subject physically performs the audible track with natural lip synchronization and stops mouth motion when speech or singing ends; never invent or transcribe words that were not provided as text.
 Use generate_music when the user asks for a song, soundtrack, instrumental or music. Put the musical request in prompt, set durationSeconds when requested (default 30), and set instrumental:false whenever singing, a singer, a voice, vocals, lyrics or words to sing are requested. For a vocal song, copy every user-supplied lyric verbatim into lyrics, preserving its language and wording; never translate, summarize or omit quoted words. Use lyrics:"" only for instrumental music or when the user did not supply exact words.
@@ -966,6 +971,15 @@ export class ChatService {
         const generationMode = resolveChatVideoMode(
           requestText, plan.videoMode, pictures.length, videos.length, audios.length,
         );
+        const maskTarget = generationMode === "VIDEO EDITING"
+          ? (plan.maskTarget ?? "").trim()
+          : "";
+        if (maskTarget && videos.length !== 1) {
+          throw new Error("Masking H3 richiede esattamente un video sorgente allegato");
+        }
+        if (plan.videoMode === "VIDEO EDITING" && maskTarget && videoEngine !== "h3") {
+          throw new Error("Masking video è disponibile soltanto con Video H3");
+        }
         if (videoEngine === "ltx25") {
           if (!['T2V', 'I2V'].includes(generationMode)) {
             throw new Error("LTX 2.5 supporta qui solo T2V oppure I2V con una sola immagine iniziale; per Reference, Edit, Continue, Keyframes o audio usa Video H3");
@@ -1014,10 +1028,10 @@ export class ChatService {
           sourceVideoAudio: "AUTO",
           muteDiegetic: false,
           muteNonDiegetic: false,
-          inpaintTarget: "",
+          inpaintTarget: maskTarget,
           inpaintMaskGrow: 8,
-          inpaintStartSeconds: 0,
-          inpaintEndSeconds: 0,
+          inpaintStartSeconds: plan.maskStartSeconds ?? 0,
+          inpaintEndSeconds: plan.maskEndSeconds ?? 0,
         });
         return { type: plan.type, prompt: plan.prompt, videoEngine, ltxQuality, jobId: job?.id, status: "started" };
       }

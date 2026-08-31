@@ -12,11 +12,49 @@
         "H3AIOAutopromptRequest",
         "H3AIOPlanParser",
         "H3AIOGenerationRouter",
-        "H3SaveContinuation"
+        "H3SaveContinuation",
+        "H3StudioInpaintStatus"
       ],
       "url": "https://github.com/jlucasmcrell/ComfyUI-H3-Multishot",
       "notes": "La versione estesa usata da H3 Studio si trova in comfyui_nodes/ e viene installata dallo script incluso.",
       "requiredFor": ["video"]
+    },
+    {
+      "id": "sam3-video-tracking",
+      "label": "SAM3 video tracking",
+      "kind": "custom_node",
+      "requiredClasses": [
+        "LoadSAM3Model",
+        "SAM3VideoSegmentation",
+        "SAM3Propagate",
+        "SAM3VideoOutput"
+      ],
+      "url": "https://github.com/PozzettiAndrea/ComfyUI-SAM3",
+      "notes": "Usato solo da Masking H3. Il worker isolato viene chiuso automaticamente prima del sampling H3 e a fine/errore/cancellazione.",
+      "requiredFor": ["video_masking"]
+    },
+    {
+      "id": "maskvid-experiments",
+      "label": "MaskVidExperiments crop / uncrop",
+      "kind": "custom_node",
+      "requiredClasses": [
+        "MVEx_MaskToLatentSpace",
+        "MVEx_SubjectCrop",
+        "MVEx_SubjectUncrop"
+      ],
+      "url": "https://github.com/drozbay/MaskVidExperiments",
+      "notes": "GPL-3.0. Stabilizza il crop del soggetto e ricompone l'area modificata sui frame originali.",
+      "requiredFor": ["video_masking"]
+    },
+    {
+      "id": "sam3-native-model",
+      "label": "SAM3 native checkpoint",
+      "kind": "model",
+      "folder": "sam3",
+      "filenames": ["sam3.pt"],
+      "url": "https://huggingface.co/1038lab/sam3/resolve/main/sam3.pt",
+      "notes": "Circa 3,45 GB. Il download è esplicito e opzionale; non serve per l'edit H3 normale.",
+      "requiredFor": ["video_masking"]
     },
     {
       "id": "h3-studio-chat-node",

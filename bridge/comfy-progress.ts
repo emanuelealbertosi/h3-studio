@@ -23,8 +23,17 @@ export type ComfyPromptTerminalEvent = {
   outcome: "completed" | "failed";
 };
 
+export type ComfyPromptNodeEvent = {
+  promptId: string;
+  nodeId: string;
+  classType: string | null;
+};
+
 type TerminalListener = (
   event: ComfyPromptTerminalEvent,
+) => void | Promise<void>;
+type NodeListener = (
+  event: ComfyPromptNodeEvent,
 ) => void | Promise<void>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -41,6 +50,7 @@ export class ComfyProgressTracker {
   private readonly nodeClasses = new Map<string, Map<string, string>>();
   private readonly mediaKinds = new Map<string, "video" | "image" | "audio">();
   private readonly terminalListeners = new Set<TerminalListener>();
+  private readonly nodeListeners = new Set<NodeListener>();
   private socket: WebSocket | null = null;
   private socketConnected = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -92,6 +102,11 @@ export class ComfyProgressTracker {
   onTerminal(listener: TerminalListener) {
     this.terminalListeners.add(listener);
     return () => this.terminalListeners.delete(listener);
+  }
+
+  onNode(listener: NodeListener) {
+    this.nodeListeners.add(listener);
+    return () => this.nodeListeners.delete(listener);
   }
 
   get connected() {
@@ -157,6 +172,16 @@ export class ComfyProgressTracker {
     }
   }
 
+  private emitNode(event: ComfyPromptNodeEvent) {
+    for (const listener of this.nodeListeners) {
+      try {
+        void Promise.resolve(listener(event)).catch(() => undefined);
+      } catch {
+        // Cleanup listeners must never break ComfyUI progress handling.
+      }
+    }
+  }
+
   private classifyNode(promptId: string, nodeId: string) {
     const classType = this.nodeClasses.get(promptId)?.get(nodeId) ?? "";
     if (/H3SaveContinuation|CreateVideo|FinalAudioRouter/i.test(classType)) {
@@ -206,6 +231,11 @@ export class ComfyProgressTracker {
         progress: classified.phase === "finalizing" ? 100 : null,
         exact: false,
         currentNode: nodeId,
+      });
+      this.emitNode({
+        promptId,
+        nodeId,
+        classType: this.nodeClasses.get(promptId)?.get(nodeId) ?? null,
       });
       return;
     }

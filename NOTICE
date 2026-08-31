@@ -7,3 +7,8 @@ License version 3 only (AGPL-3.0-only). See LICENSE.
 Bundled third-party and derived components retain their own copyright notices
 and licenses. In particular, comfyui_nodes/ComfyUI-H3-Multishot retains the MIT
 license and attribution of its upstream project; see the files in that folder.
+
+Optional masking support installs third-party components separately and does not
+relicense them: MaskVidExperiments is GPL-3.0; the ComfyUI-SAM3 wrapper is GPL-3.0
+and the SAM3 model weights remain subject to Meta's SAM License. Their upstream
+license files and model terms apply when those optional components are installed.

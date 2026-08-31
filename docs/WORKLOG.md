@@ -1,3 +1,20 @@
+# 31 agosto 2026 — Masking H3 con SAM3 e MaskVid
+
+- Aggiunta una modalità separata `Masking H3 · SAM3`: il normale `Video editing H3`
+  resta l'editing full-frame nativo, mentre il masking richiede un solo video e una
+  descrizione breve dell'elemento da seguire.
+- SAM3 segmenta e propaga il bersaglio sulla clip; MaskVid pianifica un crop stabile,
+  H3 rigenera il crop e `Subject Uncrop` ricompone il risultato sui frame sorgente.
+  I pixel fuori dalla maschera provengono quindi dal video originale.
+- Studio espone bersaglio, margine e intervallo temporale opzionale. La Chat dispone
+  del preset `Masking H3` e il planner produce `maskTarget` e l'eventuale intervallo.
+- Il worker isolato SAM3 viene chiuso appena la maschera è stata consegnata al sampler
+  o quando il job termina, evitando che il modello resti residente durante H3.
+- Installer e manifest dichiarano SAM3, MaskVid e `sam3.pt` come dipendenze opzionali;
+  la patch di compatibilità usa `comfy-kitchen 0.2.31` e SDPA PyTorch per la masked attention.
+- Verifiche: typecheck TypeScript, compilazione Python, contratto Chat, test del rilascio
+  runtime SAM e validazione del manifest.
+
 # 30 agosto 2026 — Ritiro Alibaba PDD-Acc
 
 - Rimossi dall'app il preset FAST/PDD, il workflow dedicato, il nodo custom e i pesi PDD/ConvRot installati per quel profilo.
@@ -439,14 +456,12 @@
   esplicitamente su H3 Reference. Aggiunte inoltre stima tempi dedicata, validazione
   di sampler e asset, rapporti I2V estremi e negazioni Chat italiane/inglesi.
 
-# 30 agosto 2026 — Isolamento SAM3 e protezione dei target
+# 30 agosto 2026 — Prototipo isolamento SAM3
 
 - Il worker isolato di SAM3 viene ora terminato appena la sua maschera è stata
   consegnata e il sampler H3 entra in esecuzione. Il modello SAM non resta quindi
   residente durante il planner o il job successivo e non forza RAM/pagefile a
   lavorare in swap.
-- VIDEO EDITING accetta un solo bersaglio semantico per passata: richieste come
-  `dress, background, and glasses` producevano in pratica una maschera minuscola
-  e parziale. Lo Studio mostra ora un errore esplicito; la Chat passa invece al
-  normale Reference / Remix H3 quando riconosce più bersagli indipendenti.
+- Il prototipo ha confermato che un bersaglio semantico breve e univoco produce
+  maschere più affidabili di una lista di oggetti indipendenti.
 - Aggiunti controllo runtime Windows/Linux e test dedicato `test:sam-runtime`.

@@ -29,6 +29,8 @@ Principio guida: **ComfyUI è il motore, H3 Studio è lo studio di produzione**.
 - Nessuna durata superiore nel generatore singolo.
 - `Continue video`: accetta una sorgente fino a 10 secondi e aggiunge 5 o 10 secondi.
 - `Video editing H3`: accetta una sorgente fino a 180 secondi e usa il percorso `VIDEO EDITING` nativo dell'Ultra AIO Composer con il modello H3 standard/Hybrid.
+- `Masking H3`: variante selettiva opzionale con SAM3 + MaskVid, un video sorgente
+  e un bersaglio testuale; ricompone l'area editata lasciando invariato l'esterno.
 - Video lunghi: costruiti come sequenze di chunk collegati nella timeline.
 
 ### Risoluzione

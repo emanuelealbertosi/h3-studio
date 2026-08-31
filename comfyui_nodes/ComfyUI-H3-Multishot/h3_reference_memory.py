@@ -27,9 +27,10 @@ class H3StudioInpaintStatus:
     def INPUT_TYPES(cls):
         import os
         import folder_paths
-        checkpoint = os.path.join(
-            folder_paths.base_path, "models", "sam3", "sam3.safetensors")
-        state = "ready" if os.path.isfile(checkpoint) else "missing"
+        model_dir = os.path.join(folder_paths.base_path, "models", "sam3")
+        state = "ready" if any(os.path.isfile(os.path.join(model_dir, name))
+                               for name in ("sam3.safetensors", "sam3.pt")) \
+            else "missing"
         return {"required": {"state": ([state], {"default": state})}}
 
     RETURN_TYPES = ("STRING",)
@@ -193,6 +194,18 @@ class H3ReferenceMemorySampler(H3MultishotSampler):
             "default": 0.0, "min": 0.0, "max": 180.0, "step": 0.1,
             "tooltip": "Optional final second to repaint. 0 uses the end "
                        "of the source clip."})
+        optional["studio_inpaint_crop_mode"] = ([
+            "tracked", "combined", "zoomed"], {
+                "default": "tracked",
+                "tooltip": "MaskVid crop planner. Tracked is the stable "
+                           "default; combined keeps one static crop."})
+        optional["studio_inpaint_crop_scale"] = ("FLOAT", {
+            "default": 1.5, "min": 1.0, "max": 4.0, "step": 0.05,
+            "tooltip": "Padding around the tracked subject before H3."})
+        optional["studio_inpaint_feather"] = ("INT", {
+            "default": 24, "min": 0, "max": 128, "step": 4,
+            "tooltip": "Inward blend width when the edited crop is pasted "
+                       "back onto the original frames."})
         return {
             "required": required,
             "optional": optional,
@@ -240,7 +253,10 @@ class H3ReferenceMemorySampler(H3MultishotSampler):
             studio_source_context_clip_index=0,
             studio_inpaint_mask=None, studio_inpaint_grow=8,
             studio_inpaint_start_seconds=0.0,
-            studio_inpaint_end_seconds=0.0):
+            studio_inpaint_end_seconds=0.0,
+            studio_inpaint_crop_mode="tracked",
+            studio_inpaint_crop_scale=1.5,
+            studio_inpaint_feather=24):
         import torch
         import node_helpers
         from comfy_extras import nodes_custom_sampler as ncs
@@ -269,6 +285,53 @@ class H3ReferenceMemorySampler(H3MultishotSampler):
         inpaint_enabled = (
             operation_mode == "VIDEO EDITING"
             and studio_inpaint_mask is not None)
+        original_ref_video = ref_video_0
+        inpaint_bboxes = None
+        if inpaint_enabled:
+            if bool(studio_upscale):
+                raise ValueError(
+                    "Masking H3 non supporta il latent upscale: scegli una "
+                    "risoluzione H3 nativa fino a 0.98 MP.")
+            crop_cls = comfy_nodes.NODE_CLASS_MAPPINGS.get(
+                "MVEx_SubjectCrop")
+            if crop_cls is None:
+                raise RuntimeError(
+                    "MVEx_SubjectCrop non disponibile. Installa "
+                    "MaskVidExperiments e riavvia ComfyUI.")
+            crop_mode = str(studio_inpaint_crop_mode or "tracked").lower()
+            crop_scale = min(
+                4.0, max(1.0, float(studio_inpaint_crop_scale)))
+            aspect_ratio = float(width) / max(1.0, float(height))
+            mode = {
+                "mode": crop_mode,
+                "crop_scale": crop_scale,
+                "aspect_ratio": aspect_ratio,
+            }
+            if crop_mode != "combined":
+                mode.update({
+                    "padding": "firm",
+                    "prefer": "stillness",
+                    "seamless_loop": False,
+                })
+            cropped = crop_cls.execute(
+                original_images=original_ref_video,
+                masks=studio_inpaint_mask,
+                mode=mode,
+                divisible_by=32,
+                upscale_megapixels=0.0,
+            )
+            ref_video_0 = cropped[0]
+            studio_inpaint_mask = cropped[1]
+            inpaint_bboxes = cropped[2]
+            print(
+                "[H3ReferenceMemory] MaskVid %s crop: %dx%d source -> "
+                "%dx%d work crop, scale=%.2f." % (
+                    crop_mode,
+                    int(original_ref_video.shape[2]),
+                    int(original_ref_video.shape[1]),
+                    int(ref_video_0.shape[2]), int(ref_video_0.shape[1]),
+                    crop_scale),
+                flush=True)
         ref_images = (
             ref_image_0, ref_image_1, ref_image_2, ref_image_3,
             ref_image_4, ref_image_5, ref_image_6, ref_image_7,
@@ -358,6 +421,42 @@ class H3ReferenceMemorySampler(H3MultishotSampler):
             if local_end <= 0 or local_start >= int(segment.shape[0]):
                 segment.zero_()
             return segment
+
+        def operation_original_segment(shot_index, requested_count=None):
+            """Original full frames matching a VIDEO EDITING source slice."""
+            if original_ref_video is None:
+                return None
+            total = int(original_ref_video.shape[0])
+            requested = int(frames_per_shot)
+            if requested > 360:
+                source_stride, segment_frames = 360, 360
+            else:
+                source_stride, segment_frames = requested - 1, requested
+            start = int(shot_index) * source_stride
+            end = min(total, start + segment_frames)
+            segment = original_ref_video[start:end]
+            wanted = int(requested_count or segment.shape[0])
+            if int(segment.shape[0]) < wanted:
+                segment = torch.cat((segment, segment[-1:].repeat(
+                    wanted - int(segment.shape[0]), 1, 1, 1)), dim=0)
+            return segment[:wanted]
+
+        def operation_bbox_segment(shot_index, requested_count):
+            if inpaint_bboxes is None:
+                return None
+            requested = int(frames_per_shot)
+            source_stride = 360 if requested > 360 else requested - 1
+            segment_frames = 360 if requested > 360 else requested
+            start = int(shot_index) * source_stride
+            end = min(len(inpaint_bboxes), start + segment_frames)
+            values = list(inpaint_bboxes[start:end])
+            if not values:
+                raise ValueError(
+                    "MaskVid crop plan ends before clip %d." %
+                    (shot_index + 1))
+            while len(values) < int(requested_count):
+                values.append(values[-1])
+            return values[:int(requested_count)]
 
         initial_video, initial_video_audio = operation_video_segment(0)
         # VIDEO EXTENSION is a continuation boundary, not a reference-video
@@ -465,10 +564,15 @@ class H3ReferenceMemorySampler(H3MultishotSampler):
             sigmas = ncs.BasicScheduler().get_sigmas(
                 model, scheduler, steps, 1.0)[0]
         sampler = ncs.KSamplerSelect().get_sampler(sampler_name)[0]
+        store_width = (
+            int(original_ref_video.shape[2]) if inpaint_enabled
+            else target_width if studio_upscale else width)
+        store_height = (
+            int(original_ref_video.shape[1]) if inpaint_enabled
+            else target_height if studio_upscale else height)
         frame_store = _MasterFrameStore(
             torch, stream_to_disk, n * frames_per_shot,
-            target_width if studio_upscale else width,
-            target_height if studio_upscale else height)
+            store_width, store_height)
         audio_parts = []
         sample_rate = None
         history = []
@@ -873,13 +977,48 @@ class H3ReferenceMemorySampler(H3MultishotSampler):
             sample_rate = audio["sample_rate"]
             waveform = audio["waveform"]
 
+            # Continuity is tracked in crop space. Only after decoding do we
+            # paste the edited subject back onto exact original source frames.
+            history_image = images
+            if inpaint_enabled:
+                uncrop_cls = comfy_nodes.NODE_CLASS_MAPPINGS.get(
+                    "MVEx_SubjectUncrop")
+                if uncrop_cls is None:
+                    raise RuntimeError(
+                        "MVEx_SubjectUncrop non disponibile. Installa "
+                        "MaskVidExperiments e riavvia ComfyUI.")
+                frame_count_out = int(images.shape[0])
+                original_segment = operation_original_segment(
+                    shot_index, frame_count_out)
+                bbox_segment = operation_bbox_segment(
+                    shot_index, frame_count_out)
+                mask_segment = operation_mask_segment(shot_index)
+                if int(mask_segment.shape[0]) < frame_count_out:
+                    mask_segment = torch.cat((
+                        mask_segment,
+                        mask_segment[-1:].repeat(
+                            frame_count_out - int(mask_segment.shape[0]),
+                            1, 1)), dim=0)
+                images = uncrop_cls.execute(
+                    cropped_images=images,
+                    original_images=original_segment,
+                    bboxes=bbox_segment,
+                    feather=max(0, int(studio_inpaint_feather)),
+                    cropped_masks=mask_segment[:frame_count_out],
+                )[0]
+                print(
+                    "[H3ReferenceMemory] MaskVid uncrop clip %d/%d: "
+                    "outside-mask pixels restored from source." %
+                    (shot_index + 1, n),
+                    flush=True)
+
             if anchor is None and anchor_frames > 0:
                 anchor = images[:1].detach().to("cpu").clone()
                 print(
                     "[H3ReferenceMemory] persistent opening anchor captured "
                     "from shot 1 frame 1.",
                     flush=True)
-            history.append(images[-1:].detach().to("cpu").clone())
+            history.append(history_image[-1:].detach().to("cpu").clone())
             if len(history) > 8:
                 history.pop(0)
 
@@ -904,7 +1043,7 @@ class H3ReferenceMemorySampler(H3MultishotSampler):
             # per-shot GPU intermediates, even in the normal RAM-output mode;
             # otherwise clip N remains live while clip N+1 is sampled and VRAM
             # grows until a later clip OOMs.
-            del images, samples, output, audio, waveform, denoised
+            del images, history_image, samples, output, audio, waveform, denoised
             del noise, guider, conditioning, latent, tokens, visual_overlap
             del memory_images, memory_context, keyframes, guide_context
             del marker_guides, encoder_context
@@ -913,8 +1052,8 @@ class H3ReferenceMemorySampler(H3MultishotSampler):
 
         master = frame_store.finish()
         master_waveform = _xfade_audio(audio_parts, sample_rate)
-        if operation_mode == "VIDEO EDITING" and ref_video_0 is not None:
-            source_frames = int(ref_video_0.shape[0])
+        if operation_mode == "VIDEO EDITING" and original_ref_video is not None:
+            source_frames = int(original_ref_video.shape[0])
             master = master[:source_frames]
             source_samples = int(round(
                 source_frames * float(sample_rate) / 24.0))
