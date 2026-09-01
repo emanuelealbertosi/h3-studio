@@ -65,7 +65,8 @@ const [, sampler] = entry(prompt, "H3ReferenceMemorySampler");
 const [, planner] = entry(prompt, "H3AIOAutopromptRequest");
 
 assert.deepEqual(segment.inputs.video_frames, [routerId, 7]);
-assert.equal(segment.inputs.text_prompt, "vestito della donna");
+assert.equal(segment.inputs.text_prompt, "the dress worn by the woman");
+assert.equal(segment.inputs.score_threshold, 0.2);
 assert.deepEqual(propagate.inputs.sam3_model_config, [loaderId, 0]);
 assert.deepEqual(propagate.inputs.video_state, [segmentId, 0]);
 assert.deepEqual(output.inputs.masks, [propagateId, 0]);
@@ -78,6 +79,7 @@ assert.equal(sampler.inputs.studio_inpaint_crop_scale, 1.5);
 assert.equal(sampler.inputs.studio_inpaint_feather, 24);
 assert.match(String(planner.inputs.natural_prompt), /modify only the tracked region/i);
 assert.match(String(planner.inputs.natural_prompt), /outside that subject region/i);
+assert.match(String(planner.inputs.natural_prompt), /complete and exclusive edit specification/i);
 assert.equal(prepared.request.generationMode, "VIDEO EDITING");
 
 assert.throws(

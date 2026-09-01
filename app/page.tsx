@@ -5206,13 +5206,50 @@ function StudioApp() {
 
   async function startGeneration() {
     const generationMode = generationModeByUi[mode];
-    const pictureCount = mediaAssets.filter((asset) => asset.kind === "picture").length;
-    const videoCount = mediaAssets.filter((asset) => asset.kind === "video").length;
+    let submissionAssets = mediaAssets;
+    let pictureCount = submissionAssets.filter((asset) => asset.kind === "picture").length;
+    let videoCount = submissionAssets.filter((asset) => asset.kind === "video").length;
+    if (mode === "masking" && videoCount === 0) {
+      const readyCandidates = visibleCandidates.filter(
+        (candidate) => candidate.status === "ready" && candidate.mediaPath,
+      );
+      const sourceCandidate =
+        readyCandidates.find((candidate) => candidate.id === selected) ??
+        (readyCandidates.length === 1 ? readyCandidates[0] : null);
+      if (sourceCandidate) {
+        const sourceVariant = sourceCandidate.variants?.find(
+          (variant) =>
+            variant.status === "ready" &&
+            variant.id === sourceCandidate.activeVariantId &&
+            variant.output,
+        );
+        const mediaPath = sourceVariant?.output?.mediaPath ?? sourceCandidate.mediaPath!;
+        const url = new URL(mediaPath, bridgeUrl);
+        const filename = url.searchParams.get("filename") ?? `candidate_${sourceCandidate.id}.mp4`;
+        const subfolder = url.searchParams.get("subfolder") ?? "";
+        const type = url.searchParams.get("type") ?? "output";
+        submissionAssets = [{
+          kind: "video",
+          file: `${subfolder ? `${subfolder}/` : ""}${filename} [${type}]`,
+          name: `Video candidato ${sourceCandidate.id}`,
+          caption: prompt.slice(0, 180) || `Candidato ${sourceCandidate.id}`,
+          mention: uniqueMention(`Video candidato ${sourceCandidate.id}`, []),
+          mediaPath,
+          has_audio: true,
+          audio_mode: "paired",
+          uid: crypto.randomUUID(),
+        }];
+        setMediaAssets(submissionAssets);
+        setSourceJobId(currentJobId);
+        pictureCount = 0;
+        videoCount = 1;
+      }
+    }
     if (videoEngine === "ltx25") {
-      const validT2v = generationMode === "T2V" && mediaAssets.length === 0;
+      const validT2v = generationMode === "T2V" && submissionAssets.length === 0;
       const validI2v =
         generationMode === "I2V" &&
-        mediaAssets.length === 1 &&
+        submissionAssets.length === 1 &&
         pictureCount === 1;
       if (!validT2v && !validI2v) {
         setRunMessage(
@@ -5250,7 +5287,7 @@ function StudioApp() {
     }
     if (
       generationMode === "R2V" &&
-      mediaAssets.length === 0
+      submissionAssets.length === 0
     ) {
       setRunMessage("Reference richiede almeno un'immagine, video o audio.");
       return;
@@ -5285,7 +5322,7 @@ function StudioApp() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           videoEngine,
-          prompt: resolvePromptMentions(prompt, mediaAssets),
+          prompt: resolvePromptMentions(prompt, submissionAssets),
           candidateCount,
           shotCount,
           durationSeconds: duration,
@@ -5297,8 +5334,8 @@ function StudioApp() {
           turboEnabled: false,
           seed: seedMode === "random" ? undefined : numericSeed,
           mediaState:
-            generationMode === "T2V" ? "[]" : JSON.stringify(mediaAssets),
-          referenceRoles: buildReferenceRoles(mediaAssets, referenceRoles),
+            generationMode === "T2V" ? "[]" : JSON.stringify(submissionAssets),
+          referenceRoles: buildReferenceRoles(submissionAssets, referenceRoles),
           keyframePositions,
           sourceVideoAudio: "AUTO",
           projectId: studioProjectId || null,
@@ -5733,7 +5770,7 @@ function StudioApp() {
   function prepareVideoOperation(
     mediaPath: string,
     filename: string,
-    operation: "continue" | "edit" | "reference",
+    operation: "continue" | "edit" | "masking" | "reference",
     context?: { projectId?: string | null; sourceJobId?: string | null },
   ) {
     setStudioMediaMode("video");
@@ -5757,7 +5794,7 @@ function StudioApp() {
       },
     ]);
     setMode(operation);
-    if (operation === "edit") {
+    if (operation === "edit" || operation === "masking") {
       setQualityMode("fast");
       setTurboEnabled(false);
     }
@@ -5769,6 +5806,8 @@ function StudioApp() {
         ? "Clip sorgente pronta: descrivi soltanto la nuova continuazione; il vecchio prompt non viene riutilizzato"
         : operation === "edit"
           ? "Clip sorgente pronta per un edit non distruttivo"
+          : operation === "masking"
+            ? "Clip sorgente pronta per Masking H3: descrivi l’elemento da tracciare"
           : "Clip aggiunta come riferimento video",
     );
   }
@@ -7134,6 +7173,7 @@ function StudioApp() {
             )}
             </div>
 
+            {runMessage && <div className="run-message" role="status" aria-live="polite">{runMessage}</div>}
             <div className="composer-footer">
               <div className="preset-note">
                 <span className="fast-badge">{`${effectiveSteps} STEP`}</span>
@@ -7149,7 +7189,6 @@ function StudioApp() {
                 </button>
               </div>
             </div>
-            {runMessage && <div className="run-message">{runMessage}</div>}
           </section>
 
           {projectJobs.length > 0 && (
@@ -7459,6 +7498,21 @@ function StudioApp() {
                               type="button"
                             >
                               Edita
+                            </button>
+                            <button
+                              disabled={!displayMediaPath}
+                              onClick={() =>
+                                displayMediaPath &&
+                                prepareVideoOperation(
+                                  displayMediaPath,
+                                  "candidate_" + candidate.id + ".mp4",
+                                  "masking",
+                                  { projectId: studioProjectId, sourceJobId: currentJobId },
+                                )
+                              }
+                              type="button"
+                            >
+                              Masking
                             </button>
                             <button className="regenerate-action" disabled={isRunning} onClick={() => setRegenerateTarget({ candidateId: candidate.id, prompt })} type="button">
                               ↻ Rigenera

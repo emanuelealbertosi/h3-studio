@@ -510,7 +510,7 @@ function audioPolicyPrompt(request: StudioJobRequest) {
     prompt += "\n\nSEAMLESS START: Begin from the exact final state of Video 1 and preserve visual and motion continuity through the first second. No cut, scene reset, teleport or pose reset. Then transition naturally into the requested action and camera direction.";
   }
   if (request.generationMode === "VIDEO EDITING" && request.inpaintTarget) {
-    prompt += `\n\nMASKED VIDEO EDIT: modify only the tracked region described as "${request.inpaintTarget}". Preserve every pixel outside that subject region, including camera, framing, background, lighting and all other people. Apply the requested transformation consistently across time without replacing the whole shot.`;
+    prompt += `\n\nMASKED VIDEO EDIT: modify only the tracked region described as "${request.inpaintTarget}". Preserve every pixel outside that subject region, including camera, framing, background, lighting and all other people. Apply the requested transformation consistently across time without replacing the whole shot. The user's current request is the complete and exclusive edit specification: do not infer, continue, restore or add any transformation, action, age change, wardrobe change, nudity, subject or story detail that is not explicitly requested in the current prompt.`;
   }
   if (!request.muteDiegetic && !request.muteNonDiegetic) return prompt;
   const directive = request.muteDiegetic && request.muteNonDiegetic
@@ -635,6 +635,25 @@ function resolveEngineSettings(
   };
 }
 
+function historyExecutionError(entry: { status?: Record<string, unknown> } | undefined) {
+  const messages = entry?.status?.messages;
+  if (!Array.isArray(messages)) return null;
+  for (const message of [...messages].reverse()) {
+    if (!Array.isArray(message) || message[0] !== "execution_error" || !isRecord(message[1])) continue;
+    const detail = message[1];
+    const raw = typeof detail.exception_message === "string"
+      ? detail.exception_message
+      : typeof detail.exception_type === "string"
+        ? detail.exception_type
+        : "Esecuzione ComfyUI fallita";
+    if (/all masks are empty|nothing to crop/i.test(raw)) {
+      return "SAM3 non ha riconosciuto l’elemento descritto nel video. Prova un nome più semplice e specifico, per esempio: vestito, donna, capelli o automobile.";
+    }
+    return raw.slice(0, 1_000);
+  }
+  return null;
+}
+
 function attachH3Masking(
   prompt: ComfyApiPrompt,
   sampler: ComfyApiNode,
@@ -662,9 +681,9 @@ function attachH3Masking(
     inputs: {
       prompt_mode: "text",
       video_frames: [routerId, 7],
-      text_prompt: request.inpaintTarget,
+      text_prompt: sam3TargetPrompt(request.inpaintTarget),
       frame_idx: 0,
-      score_threshold: 0.3,
+      score_threshold: 0.2,
     },
     _meta: { title: "H3 Studio — trova il soggetto" },
   };
@@ -697,6 +716,26 @@ function attachH3Masking(
   sampler.inputs.studio_inpaint_crop_mode = "tracked";
   sampler.inputs.studio_inpaint_crop_scale = 1.5;
   sampler.inputs.studio_inpaint_feather = 24;
+}
+
+function sam3TargetPrompt(value: string) {
+  const target = value.replace(/\s+/g, " ").trim();
+  const normalized = target.toLocaleLowerCase("it-IT");
+  const aliases: Array<[RegExp, string]> = [
+    [/\b(?:vestito|abito)\b.*\b(?:donna|ragazza|signora)\b|\b(?:donna|ragazza|signora)\b.*\b(?:vestito|abito)\b/i, "the dress worn by the woman"],
+    [/\b(?:vestito|abito)\b/i, "the dress"],
+    [/\b(?:maglietta|camicia|camicetta|top)\b/i, "the shirt"],
+    [/\b(?:pantaloni|jeans)\b/i, "the pants"],
+    [/\b(?:giacca|cappotto)\b/i, "the jacket"],
+    [/\b(?:capelli|chioma)\b/i, "the hair"],
+    [/\b(?:viso|faccia|volto)\b/i, "the face"],
+    [/\b(?:donna|ragazza|signora)\b/i, "the woman"],
+    [/\b(?:uomo|ragazzo|signore)\b/i, "the man"],
+    [/\b(?:auto|automobile|macchina)\b/i, "the car"],
+    [/\b(?:cane)\b/i, "the dog"],
+    [/\b(?:gatto)\b/i, "the cat"],
+  ];
+  return aliases.find(([pattern]) => pattern.test(normalized))?.[1] ?? target;
 }
 
 function resolveLtx25EngineSettings(
@@ -1216,6 +1255,7 @@ export class StudioJobService {
           ? entry.status.status_str
           : null;
       const output = entry ? findVideoOutput(entry.outputs) : candidate.output;
+      const executionError = historyExecutionError(entry);
       const liveProgress = this.progressTracker.get(candidate.promptId);
       const currentNodeClass = this.progressTracker.nodeClass(
         candidate.promptId,
@@ -1240,11 +1280,16 @@ export class StudioJobService {
       else if (queue.pendingPromptIds.has(candidate.promptId)) status = "queued";
 
       this.jobs.updateCandidate(job.id, candidate.index, status, output);
+      if (status === "failed" && executionError) {
+        this.jobs.failCandidate(job.id, candidate.index, executionError);
+      }
       const terminal = status === "ready" || status === "failed";
+      const failureError = candidate.error ?? executionError;
       return {
         ...candidate,
         status,
         output,
+        error: status === "failed" ? failureError : candidate.error,
         phase:
           status === "ready"
             ? "completed"
@@ -1255,7 +1300,7 @@ export class StudioJobService {
           status === "ready"
             ? "Completato"
             : status === "failed"
-              ? candidate.error ?? "Esecuzione fallita"
+              ? failureError ?? "Esecuzione fallita"
               : liveProgress?.phaseLabel ??
           (status === "queued"
             ? "In coda"
