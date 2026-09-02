@@ -10,6 +10,7 @@ import {
   IMAGE_COMPOSITION_PRESETS,
   imageEditKeepAspectDimensions,
 } from "../lib/image-composition.js";
+import { normalizeJobLoraOverrides, resolveJobLoras } from "../lib/job-loras.js";
 import { JobRepository } from "../bridge/job-repository.js";
 import {
   ImageJobRepository,
@@ -21,7 +22,9 @@ import {
   buildFlux2KleinEditPrompt,
   buildKreaGeneratePrompt,
   buildMiniMaxH3ImagePrompt,
+  buildQwenImageEditPrompt,
   DEFAULT_MINIMAX_H3_IMAGE_SETTINGS,
+  DEFAULT_QWEN_IMAGE_EDIT_SETTINGS,
 } from "../bridge/image-workflow-builder.js";
 import {
   ImageStudioService,
@@ -73,6 +76,7 @@ try {
   assert.match(imageStudioSource, /IMAGE_COMPOSITION_PRESETS\.map/);
   assert.match(imageStudioSource, /type ImageMode = "generate" \| "edit" \| "anima"/);
   assert.match(imageStudioSource, />Anima<\/button>/);
+  assert.match(imageStudioSource, />Qwen Edit<\/button>/);
   assert.match(imageStudioSource, /api\/image-jobs\/\$\{job\.id\}\/regenerate/);
   assert.match(imageStudioSource, /RegenerateDialog/);
   assert.match(pageSource, /ANIME IMAGE ENGINE/);
@@ -86,6 +90,10 @@ try {
   assert.match(serverSource, /\/api\/image-jobs\/:jobId\/regenerate/);
   assert.match(imageStudioSource, /Mantieni proporzioni · Reference 1/);
   assert.match(imageStudioSource, /imageEditKeepAspectDimensions/);
+  assert.match(imageStudioSource, /function readImageDimensions/);
+  assert.match(imageStudioSource, /naturalWidth/);
+  assert.match(imageStudioSource, /readLocalImageDimensions\(file\)/);
+  assert.match(imageStudioSource, /Rilevamento formato reference/);
   assert.match(
     imageStudioSource,
     /JSON\.stringify\(\{[\s\S]*?effectivePrompt: engineEffectivePrompt,[\s\S]*?compositionPreset,/,
@@ -131,6 +139,18 @@ try {
   assert.ok(Math.abs(landscapeKeep.width / landscapeKeep.height - 16 / 9) < 0.02);
   assert.equal(imageEditKeepAspectDimensions(null, 1080), null);
   assert.equal(IMAGE_EDIT_KEEP_ASPECT_FORMAT, "keep-source-aspect");
+  const normalizedLoraOverrides = normalizeJobLoraOverrides([
+    { name: "global.safetensors", strength: 0.8, enabled: false },
+    { name: "job.safetensors", strength: 1.1, enabled: true },
+  ]);
+  assert.deepEqual(
+    resolveJobLoras([{ name: "global.safetensors", strength: 0.8 }], normalizedLoraOverrides),
+    [{ name: "job.safetensors", strength: 1.1 }],
+  );
+  assert.throws(
+    () => resolveJobLoras([], normalizeJobLoraOverrides(Array.from({ length: 6 }, (_, index) => ({ name: `lora-${index}`, strength: 1 })))),
+    /attivare al massimo 5 LoRA/,
+  );
   assert.equal(
     IMAGE_COMPOSITION_PRESETS.find((preset) => preset.value === "landscape")?.label,
     "Luogo",
@@ -276,6 +296,26 @@ try {
     engine: "minimax",
     references: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(reference),
   }), /massimo 9 reference/i);
+  const normalizedQwenEdit = normalizeImageRequest({
+    projectId: "project-test",
+    mode: "edit",
+    engine: "qwen",
+    prompt: "Change the coat to white",
+    candidateCount: 1,
+    aspectFormat: "1:1",
+    width: 1024,
+    height: 1024,
+    seedMode: "random",
+    references: [1, 2, 3].map(reference),
+    tag: "character",
+  });
+  assert.equal(normalizedQwenEdit.imageEngine, "qwen");
+  assert.equal(normalizedQwenEdit.references.length, 3);
+  assert.throws(() => normalizeImageRequest({
+    ...normalizedQwenEdit,
+    engine: "qwen",
+    references: [1, 2, 3, 4].map(reference),
+  }), /Qwen Image Edit supporta al massimo 3 reference/);
   assert.throws(
     () => normalizeImageRequest({
       ...normalizedComposition,
@@ -545,6 +585,53 @@ try {
   assert.match(String(oneReferenceGraph["4"].inputs.text), /Image 1 = base image/);
   assert.equal(oneReferenceGraph["10"], undefined);
   assert.equal(oneReferenceGraph["11"], undefined);
+  const loraEditGraph = buildFlux2KleinEditPrompt({
+    prompt: "Change the coat to red",
+    seed: 9,
+    width: 1024,
+    height: 1024,
+    filenamePrefix: "tests/lora-edit",
+    settings: editSettings,
+    loras: [
+      { name: "nsfw-detail.safetensors", strength: 0.8 },
+      { name: "style.safetensors", strength: 0.55 },
+    ],
+    references: [reference(1)],
+  });
+  assert.equal(loraEditGraph["70"].inputs.lora_name, "nsfw-detail.safetensors");
+  assert.deepEqual(loraEditGraph["71"].inputs.model, ["70", 0]);
+  assert.deepEqual(loraEditGraph["60"].inputs.model, ["71", 0]);
+
+  const qwenEditGraph = buildQwenImageEditPrompt({
+    prompt: "Change the coat to white and preserve everything else",
+    seed: 10,
+    width: 1344,
+    height: 768,
+    filenamePrefix: "tests/qwen-edit",
+    references: [reference(1), reference(2), reference(3)],
+    loras: [{ name: "qwen-detail.safetensors", strength: 0.7 }],
+  });
+  assert.equal(qwenEditGraph["1"].inputs.unet_name, DEFAULT_QWEN_IMAGE_EDIT_SETTINGS.model);
+  assert.equal(qwenEditGraph["2"].inputs.type, "qwen_image");
+  assert.equal(
+    qwenEditGraph["5"].inputs.lora_name,
+    DEFAULT_QWEN_IMAGE_EDIT_SETTINGS.acceleratorLora,
+  );
+  assert.equal(qwenEditGraph["20"].inputs.lora_name, "qwen-detail.safetensors");
+  assert.deepEqual(qwenEditGraph["20"].inputs.model, ["5", 0]);
+  assert.deepEqual(qwenEditGraph["60"].inputs.image3, ["35", 0]);
+  assert.deepEqual(qwenEditGraph["61"].inputs.image3, ["35", 0]);
+  assert.deepEqual(qwenEditGraph["65"].inputs.positive, ["62", 0]);
+  assert.equal(qwenEditGraph["65"].inputs.steps, 4);
+  assert.equal(qwenEditGraph["64"].inputs.width, 1344);
+  assert.throws(() => buildQwenImageEditPrompt({
+    prompt: "Too many references",
+    seed: 11,
+    width: 1024,
+    height: 1024,
+    filenamePrefix: "tests/qwen-four",
+    references: [1, 2, 3, 4].map(reference),
+  }), /1 a 3 reference/);
 
   const outputReferenceGraph = buildFlux2KleinEditPrompt({
     prompt: "Reuse an H3 Studio output",

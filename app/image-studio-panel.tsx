@@ -3,6 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import RegenerateDialog from "./regenerate-dialog";
+import JobLoraSelector, {
+  loraOverridesPayload,
+  selectionsFromGlobal,
+  type JobLoraCatalogEntry,
+  type JobLoraSelection,
+} from "./job-lora-selector";
 import {
   composeImagePrompt,
   IMAGE_EDIT_KEEP_ASPECT_FORMAT,
@@ -14,7 +20,7 @@ import {
 
 type SeedMode = "random" | "base" | "fixed";
 type ImageMode = "generate" | "edit" | "anima";
-type ImageEngineChoice = "default" | "minimax";
+type ImageEngineChoice = "default" | "minimax" | "qwen";
 type H3ImageSteps = 8 | 12 | 20 | 30;
 type H3ImageMegapixels = 0.5 | 0.7 | 0.98 | 2;
 type ImageTag = "untagged" | "character" | "object" | "background";
@@ -132,8 +138,21 @@ type ImageLibraryItem = {
 type ImageStudioStatus = {
   generate: { ready: boolean };
   edit: { ready: boolean };
+  qwenEdit: { ready: boolean };
   anima: { ready: boolean };
   minimax: { ready: boolean };
+};
+
+type LoraOptions = {
+  available: string[];
+  catalog: Record<string, JobLoraCatalogEntry>;
+  global: {
+    imageH3: Array<{ name: string; strength: number }>;
+    krea: Array<{ name: string; strength: number }>;
+    fluxEdit: Array<{ name: string; strength: number }>;
+    qwenEdit: Array<{ name: string; strength: number }>;
+    anima: Array<{ name: string; strength: number }>;
+  };
 };
 
 type PromptPlannerStatus = { ready: boolean; model: string; unloadPolicy: string };
@@ -176,6 +195,29 @@ const roles: Array<{ value: ReferenceRole; label: string }> = [
 
 function mediaUrl(bridgeUrl: string, path: string) {
   return /^https?:\/\//i.test(path) ? path : `${bridgeUrl}${path}`;
+}
+
+function readImageDimensions(source: string) {
+  return new Promise<{ width: number; height: number } | null>((resolve) => {
+    const image = new window.Image();
+    image.decoding = "async";
+    image.onload = () => {
+      const width = image.naturalWidth;
+      const height = image.naturalHeight;
+      resolve(width > 0 && height > 0 ? { width, height } : null);
+    };
+    image.onerror = () => resolve(null);
+    image.src = source;
+  });
+}
+
+async function readLocalImageDimensions(file: File) {
+  const source = URL.createObjectURL(file);
+  try {
+    return await readImageDimensions(source);
+  } finally {
+    URL.revokeObjectURL(source);
+  }
 }
 
 function downloadUrl(bridgeUrl: string, path: string) {
@@ -323,11 +365,21 @@ export default function ImageStudioPanel({
   );
   const [engineStatus, setEngineStatus] = useState<ImageStudioStatus | null>(null);
   const [engineStatusError, setEngineStatusError] = useState<string | null>(null);
+  const [loraOptions, setLoraOptions] = useState<LoraOptions | null>(null);
+  const [jobLoras, setJobLoras] = useState<JobLoraSelection[]>([]);
+  const [dimensionProbeActive, setDimensionProbeActive] = useState(false);
+  const [dimensionProbeFailed, setDimensionProbeFailed] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const composerRef = useRef<HTMLElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const loadGenerationRef = useRef(0);
   const usingMiniMax = engineChoice === "minimax" && mode !== "anima";
+  const usingQwen = engineChoice === "qwen" && mode === "edit";
+  const editEngineLabel = usingMiniMax
+    ? "Image H3"
+    : usingQwen
+      ? "Qwen Edit"
+      : "Flux Klein";
   const keepAspectDimensions = imageEditKeepAspectDimensions(
     references[0]?.width,
     references[0]?.height,
@@ -370,11 +422,13 @@ export default function ImageStudioPanel({
         return candidateLinks.some((link) => link.projectId === projectId);
       })
     : Array.from({ length: candidateCount }, (_, index): ImageCandidate => ({ index: index + 1, seed: 0, status: "idle", output: null }));
-  const referenceLimit = usingMiniMax ? 9 : 4;
+  const referenceLimit = usingMiniMax ? 9 : usingQwen ? 3 : 4;
   const miniMaxReferenceCount = mode === "edit" ? references.length : 0;
   const miniMaxImageMode = miniMaxReferenceCount === 0 ? "T2I" : miniMaxReferenceCount === 1 ? "I2I" : "REFERENCE";
   const selectedEngineReady = usingMiniMax
     ? engineStatus?.minimax.ready === true
+    : usingQwen
+      ? engineStatus?.qwenEdit.ready === true
     : mode === "edit"
       ? engineStatus?.edit.ready === true
     : mode === "anima"
@@ -389,6 +443,43 @@ export default function ImageStudioPanel({
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, [libraryOpen]);
+
+  useEffect(() => {
+    const unresolved = references.filter((reference) =>
+      !imageEditKeepAspectDimensions(reference.width, reference.height),
+    );
+    if (!unresolved.length) {
+      setDimensionProbeActive(false);
+      setDimensionProbeFailed(false);
+      return;
+    }
+    let disposed = false;
+    setDimensionProbeActive(true);
+    setDimensionProbeFailed(false);
+    void Promise.all(unresolved.map(async (reference) => {
+      const path = reference.mediaPath ?? referenceMediaPath(reference.file);
+      if (!path) return null;
+      const dimensions = await readImageDimensions(mediaUrl(bridgeUrl, path));
+      return dimensions ? { uid: reference.uid, ...dimensions } : null;
+    })).then((results) => {
+      if (disposed) return;
+      const detected = new Map(
+        results.flatMap((result) => result ? [[result.uid, result] as const] : []),
+      );
+      if (detected.size) {
+        setReferences((current) => current.map((reference) => {
+          const dimensions = detected.get(reference.uid);
+          return dimensions && !imageEditKeepAspectDimensions(reference.width, reference.height)
+            ? { ...reference, width: dimensions.width, height: dimensions.height }
+            : reference;
+        }));
+      }
+      setDimensionProbeFailed(detected.size !== unresolved.length);
+    }).finally(() => {
+      if (!disposed) setDimensionProbeActive(false);
+    });
+    return () => { disposed = true; };
+  }, [bridgeUrl, references]);
 
   async function openImageLibrary() {
     setLibraryOpen(true);
@@ -491,7 +582,7 @@ export default function ImageStudioPanel({
         return current;
       }
       if (current.length >= referenceLimit) {
-        setMessage(`${usingMiniMax ? "Image H3" : "Flux Klein"} accetta al massimo ${referenceLimit} reference`);
+        setMessage(`${editEngineLabel} accetta al massimo ${referenceLimit} reference`);
         return current;
       }
       const next = [...current, {
@@ -503,7 +594,7 @@ export default function ImageStudioPanel({
         role: (current.length === 0 ? "base" : "other") as ReferenceRole,
         uid: crypto.randomUUID(),
       }];
-      setMessage(`${image.name} allegata a ${usingMiniMax ? "Image H3" : "Flux Klein Edit"}`);
+      setMessage(`${image.name} allegata a ${editEngineLabel}`);
       return next;
     });
     setMode("edit");
@@ -544,7 +635,13 @@ export default function ImageStudioPanel({
     setActiveJobId(selected && active(selected) ? selected.id : null);
     if (selected) {
       setMode(selected.mode);
-      setEngineChoice(typeof selected.engine === "object" && selected.engine.kind === "minimax-h3-image" ? "minimax" : "default");
+      setEngineChoice(
+        typeof selected.engine === "object" && selected.engine.kind === "minimax-h3-image"
+          ? "minimax"
+          : typeof selected.engine === "object" && selected.engine.kind === "qwen-image-edit"
+            ? "qwen"
+            : "default",
+      );
       setPrompt(selected.prompt);
       setPlannerIdea(selected.prompt);
       setPlannerReady(true);
@@ -596,6 +693,34 @@ export default function ImageStudioPanel({
 
   useEffect(() => {
     let disposed = false;
+    void fetch(bridgeUrl + "/api/lora-options", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as LoraOptions & { error?: string };
+        if (!response.ok || !payload.available || !payload.global) {
+          throw new Error(payload.error ?? "LoRA non disponibili");
+        }
+        if (!disposed) setLoraOptions(payload);
+      })
+      .catch(() => { if (!disposed) setLoraOptions(null); });
+    return () => { disposed = true; };
+  }, [bridgeUrl]);
+
+  useEffect(() => {
+    if (!loraOptions) return;
+    const defaults = engineChoice === "minimax"
+      ? loraOptions.global.imageH3
+      : engineChoice === "qwen"
+        ? loraOptions.global.qwenEdit
+      : mode === "anima"
+        ? loraOptions.global.anima
+        : mode === "edit"
+          ? loraOptions.global.fluxEdit
+          : loraOptions.global.krea;
+    setJobLoras(selectionsFromGlobal(defaults));
+  }, [engineChoice, loraOptions, mode]);
+
+  useEffect(() => {
+    let disposed = false;
     void fetch(bridgeUrl + "/api/prompt-planner/capabilities", { cache: "no-store" })
       .then(async (response) => {
         const payload = await response.json() as { planner?: PromptPlannerStatus; error?: string };
@@ -638,6 +763,7 @@ export default function ImageStudioPanel({
     try {
       const added: ImageReference[] = [];
       for (const file of selected) {
+        const localDimensions = await readLocalImageDimensions(file);
         const body = new FormData(); body.append("file", file, file.name);
         const query = `?${new URLSearchParams({ projectId }).toString()}`;
         const response = await fetch(`${bridgeUrl}/api/assets/upload${query}`, { method: "POST", body });
@@ -646,6 +772,8 @@ export default function ImageStudioPanel({
         if (payload.asset.kind && payload.asset.kind !== "picture") throw new Error(`${file.name} non è un'immagine`);
         added.push({
           ...payload.asset,
+          width: payload.asset.width ?? localDimensions?.width ?? null,
+          height: payload.asset.height ?? localDimensions?.height ?? null,
           mediaPath: payload.asset.mediaPath ?? referenceMediaPath(payload.asset.file),
           role: references.length + added.length === 0 ? "base" : "subject",
           uid: crypto.randomUUID(),
@@ -723,7 +851,7 @@ export default function ImageStudioPanel({
       const engineEffectivePrompt = composeImagePrompt(enginePrompt, compositionPreset);
       const response = await fetch(`${bridgeUrl}/api/image-jobs`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId, mode, engine: engineChoice, prompt: enginePrompt, effectivePrompt: engineEffectivePrompt, compositionPreset, candidateCount, aspectFormat: selectedFormat.value, width: selectedFormat.width, height: selectedFormat.height, h3Steps, h3Megapixels, seedMode, seed: seedMode === "random" ? undefined : numericSeed, references: mode === "edit" ? references.map((reference) => ({ file: reference.file, name: reference.name, width: reference.width, height: reference.height, role: reference.role })) : [], tag }),
+        body: JSON.stringify({ projectId, mode, engine: engineChoice, prompt: enginePrompt, effectivePrompt: engineEffectivePrompt, compositionPreset, candidateCount, aspectFormat: selectedFormat.value, width: selectedFormat.width, height: selectedFormat.height, h3Steps, h3Megapixels, seedMode, seed: seedMode === "random" ? undefined : numericSeed, references: mode === "edit" ? references.map((reference) => ({ file: reference.file, name: reference.name, width: reference.width, height: reference.height, role: reference.role })) : [], loraOverrides: loraOverridesPayload(jobLoras), tag }),
       });
       const payload = (await response.json()) as { job?: ImageJob; error?: string };
       if (!response.ok || !payload.job) throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
@@ -880,7 +1008,7 @@ export default function ImageStudioPanel({
                   className={item.id === job?.id ? "active" : ""}
                   key={item.id}
                   onClick={() => {
-                    setJob(item); setActiveJobId(active(item) ? item.id : null); setMode(item.mode); setEngineChoice(typeof item.engine === "object" && item.engine.kind === "minimax-h3-image" ? "minimax" : "default"); setPrompt(item.prompt); setPlannerIdea(item.prompt); setPlannerReady(true); setPlannerSummary("Prompt gia preparato per questo batch."); setCompositionPreset(item.compositionPreset ?? "free"); setCandidateCount(item.candidateCount); if (typeof item.engine === "object" && item.engine.kind === "minimax-h3-image") { setH3Steps(h3StepsFromEngine(item.engine)); setH3Megapixels(h3MegapixelsFromJob(item)); }
+                    setJob(item); setActiveJobId(active(item) ? item.id : null); setMode(item.mode); setEngineChoice(typeof item.engine === "object" && item.engine.kind === "minimax-h3-image" ? "minimax" : typeof item.engine === "object" && item.engine.kind === "qwen-image-edit" ? "qwen" : "default"); setPrompt(item.prompt); setPlannerIdea(item.prompt); setPlannerReady(true); setPlannerSummary("Prompt gia preparato per questo batch."); setCompositionPreset(item.compositionPreset ?? "free"); setCandidateCount(item.candidateCount); if (typeof item.engine === "object" && item.engine.kind === "minimax-h3-image") { setH3Steps(h3StepsFromEngine(item.engine)); setH3Megapixels(h3MegapixelsFromJob(item)); }
                     setFormat((item.aspectFormat === IMAGE_EDIT_KEEP_ASPECT_FORMAT || formats.some((candidate) => candidate.value === item.aspectFormat) ? item.aspectFormat : "1:1") as ImageFormatValue);
                     setSeedMode(item.seedMode);
                     setSeedValue(item.requestedSeed === null || item.requestedSeed === undefined ? "1024" : String(item.requestedSeed));
@@ -1006,7 +1134,7 @@ export default function ImageStudioPanel({
           {(!plannerEnabled || plannerReady) && <label className="prompt-field">
             <span>{plannerEnabled ? "Prompt tecnico inviato al motore" : mode === "edit" ? "Descrivi la modifica" : mode === "anima" ? "Descrivi l'illustrazione anime" : "Descrivi l'immagine"}</span>
             <textarea ref={promptRef} onChange={(event) => setPrompt(event.target.value)} placeholder={mode === "edit" ? "Mantieni il soggetto e cambia sfondo, luce, abito…" : mode === "anima" ? "Personaggio, posa, abiti, ambiente, inquadratura, luce e stile anime…" : "Soggetto, ambiente, inquadratura, luce e stile…"} rows={plannerEnabled ? 4 : 2} value={prompt} />
-            <span className="prompt-hint">{mode === "edit" ? "Le reference vengono inviate a Flux Klein nell'ordine mostrato." : mode === "anima" ? "Usa il profilo Anima configurato in Admin e genera fino a quattro variazioni." : "Genera fino a quattro variazioni nello stesso batch."}</span>
+            <span className="prompt-hint">{mode === "edit" ? `Le reference vengono inviate a ${editEngineLabel} nell'ordine mostrato.` : mode === "anima" ? "Usa il profilo Anima configurato in Admin e genera fino a quattro variazioni." : "Genera fino a quattro variazioni nello stesso batch."}</span>
           </label>}
 
           <fieldset className="image-composition-presets">
@@ -1061,7 +1189,7 @@ export default function ImageStudioPanel({
 
           <div className="image-control-grid">
             <fieldset className="segmented-control"><legend>Modalità</legend><div><button className={mode === "generate" ? "selected" : ""} onClick={() => { setMode("generate"); setEngineChoice("default"); setPlannerReady(false); if (format === IMAGE_EDIT_KEEP_ASPECT_FORMAT) setFormat("1:1"); }} type="button">Genera</button><button className={mode === "edit" ? "selected" : ""} onClick={() => { setMode("edit"); setEngineChoice("default"); setPlannerReady(false); if (!references.length) void openImageLibrary(); }} type="button">Edit</button><button className={mode === "anima" ? "selected" : ""} onClick={() => { setMode("anima"); setEngineChoice("default"); setPlannerReady(false); if (format === IMAGE_EDIT_KEEP_ASPECT_FORMAT) setFormat("1:1"); }} type="button">Anima</button></div></fieldset>
-            {mode !== "anima" && <fieldset className="segmented-control image-engine-switch"><legend>Motore</legend><div><button className={engineChoice === "default" ? "selected" : ""} onClick={() => { setEngineChoice("default"); setReferences((current) => current.slice(0, 4)); setMessage(mode === "edit" ? "Flux Klein selezionato per Edit" : "Krea selezionato per la generazione"); }} type="button">{mode === "edit" ? "Flux Klein" : "Krea"}</button><button className={engineChoice === "minimax" ? "selected" : ""} onClick={() => { setEngineChoice("minimax"); setMessage(`Image H3 selezionato · ${mode === "edit" ? references.length === 1 ? "I2I" : references.length > 1 ? "Reference" : "allega almeno una immagine" : "T2I"}`); }} type="button">Image H3</button></div></fieldset>}
+            {mode !== "anima" && <fieldset className="segmented-control image-engine-switch"><legend>Motore</legend><div><button className={engineChoice === "default" ? "selected" : ""} onClick={() => { setEngineChoice("default"); setReferences((current) => current.slice(0, 4)); setMessage(mode === "edit" ? "Flux Klein selezionato per Edit" : "Krea selezionato per la generazione"); }} type="button">{mode === "edit" ? "Flux Klein" : "Krea"}</button>{mode === "edit" && <button className={engineChoice === "qwen" ? "selected" : ""} onClick={() => { setEngineChoice("qwen"); setReferences((current) => current.slice(0, 3)); setMessage("Qwen Edit selezionato · massimo 3 reference"); }} type="button">Qwen Edit</button>}<button className={engineChoice === "minimax" ? "selected" : ""} onClick={() => { setEngineChoice("minimax"); setMessage(`Image H3 selezionato · ${mode === "edit" ? references.length === 1 ? "I2I" : references.length > 1 ? "Reference" : "allega almeno una immagine" : "T2I"}`); }} type="button">Image H3</button></div></fieldset>}
             <label className="select-control">
               <span>Formato</span>
               <select
@@ -1083,13 +1211,25 @@ export default function ImageStudioPanel({
 
           <fieldset className="image-initial-tags"><legend>Tag nel progetto</legend><div>{tags.map((item) => <button className={tag === item.value ? "selected" : ""} key={item.value} onClick={() => setTag(item.value)} type="button">{item.label}</button>)}</div><p>Il tag indica come riusare l’asset; non cambia il prompt.</p></fieldset>
 
+          <JobLoraSelector
+            available={loraOptions?.available ?? []}
+            catalog={loraOptions?.catalog ?? {}}
+            onChange={setJobLoras}
+            value={jobLoras}
+          />
+
           {mode === "edit" && (
             <div className="asset-panel image-reference-panel">
-              <div className="asset-panel-heading"><div><strong>{usingMiniMax ? "Reference Image H3" : "Reference Flux Klein"}</strong><span>{usingMiniMax ? "1 immagine = I2I · 2–9 immagini = Reference" : "Da 1 a 4 immagini · ordine e ruolo modificabili"}</span></div><div className="asset-source-actions"><button onClick={() => void openImageLibrary()} type="button">▧ Scegli dalla libreria</button><label className="asset-upload">{uploading ? "Caricamento…" : `+ Carica (${references.length}/${referenceLimit})`}<input accept="image/*" disabled={uploading || references.length >= referenceLimit} multiple onChange={(event) => { void upload(event.currentTarget.files); event.currentTarget.value = ""; }} type="file" /></label></div></div>
+              <div className="asset-panel-heading"><div><strong>{`Reference ${editEngineLabel}`}</strong><span>{usingMiniMax ? "1 immagine = I2I · 2–9 immagini = Reference" : usingQwen ? "Da 1 a 3 immagini · ordine e ruolo modificabili" : "Da 1 a 4 immagini · ordine e ruolo modificabili"}</span></div><div className="asset-source-actions"><button onClick={() => void openImageLibrary()} type="button">▧ Scegli dalla libreria</button><label className="asset-upload">{uploading ? "Caricamento…" : `+ Carica (${references.length}/${referenceLimit})`}<input accept="image/*" disabled={uploading || references.length >= referenceLimit} multiple onChange={(event) => { void upload(event.currentTarget.files); event.currentTarget.value = ""; }} type="file" /></label></div></div>
               <div className="image-reference-list">
                 {!references.length ? <span className="asset-empty">Carica una base e, se servono, soggetto, stile, posa o sfondo.</span> : references.map((reference, index) => (
                   <article key={reference.uid}>
-                    <div className="image-reference-preview">{reference.mediaPath ? <img alt={reference.name ?? "Reference"} src={mediaUrl(bridgeUrl, reference.mediaPath)} /> : <span>{index + 1}</span>}<i>{index + 1}</i></div>
+                    <div className="image-reference-preview">{reference.mediaPath ? <img alt={reference.name ?? "Reference"} onLoad={(event) => {
+                      const width = event.currentTarget.naturalWidth;
+                      const height = event.currentTarget.naturalHeight;
+                      if (width <= 0 || height <= 0 || imageEditKeepAspectDimensions(reference.width, reference.height)) return;
+                      setReferences((current) => current.map((item) => item.uid === reference.uid ? { ...item, width, height } : item));
+                    }} src={mediaUrl(bridgeUrl, reference.mediaPath)} /> : <span>{index + 1}</span>}<i>{index + 1}</i></div>
                     <div><strong>{reference.name ?? reference.file}</strong><small>{reference.width && reference.height ? `${reference.width} × ${reference.height}` : "Reference"}</small></div>
                     <label><span>Ruolo</span><select onChange={(event) => setReferences((current) => current.map((item) => item.uid === reference.uid ? { ...item, role: event.target.value as ReferenceRole } : item))} value={reference.role}>{roles.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select></label>
                     <div className="image-reference-order"><button className="video-reference" onClick={() => onUseAsVideoReference({
@@ -1158,8 +1298,8 @@ export default function ImageStudioPanel({
           <div className={selectedEngineReady ? "image-engine-state ready" : "image-engine-state blocked"}>
             {selectedEngineReady ? "Motore immagini pronto" : engineStatusError ?? "Dipendenze motore mancanti"}
           </div>
-          <div className="preset-note"><span className="fast-badge">{usingMiniMax ? `IMAGE H3 · ${miniMaxImageMode} · ${h3Steps} STEP` : mode === "edit" ? "FLUX KLEIN EDIT" : mode === "anima" ? "ANIMA" : "KREA"}</span>{keepAspectUnavailable ? "Reference 1 senza dimensioni" : `${selectedFormat.width} × ${selectedFormat.height} · ${(selectedFormat.width * selectedFormat.height / (1024 * 1024)).toFixed(2)} MP`} · {selectedComposition.shortLabel}</div>
-          <div className="generation-cta"><div><span>Output</span><strong>{candidateCount} immagin{candidateCount === 1 ? "e" : "i"} · {tag === "untagged" ? "senza tag" : tags.find((item) => item.value === tag)?.label}</strong></div><button disabled={busy === "run" || busy === "planner" || active(job) || !projectId || !selectedEngineReady || turnaroundFormatMismatch || keepAspectUnavailable || (plannerEnabled && (!plannerStatus?.ready || !plannerIdea.trim()))} onClick={() => void run()} type="button">{busy === "planner" ? "LLM prepara..." : busy === "run" || active(job) ? "Generazione in corso" : turnaroundFormatMismatch ? "Formato 16:9 richiesto" : keepAspectUnavailable ? "Dimensioni reference mancanti" : !selectedEngineReady ? "Motore non pronto" : mode === "edit" ? "Crea " + candidateCount + " edit" : mode === "anima" ? "Genera " + candidateCount + " anime" : "Genera " + candidateCount + " immagini"}</button></div>
+          <div className="preset-note"><span className="fast-badge">{usingMiniMax ? `IMAGE H3 · ${miniMaxImageMode} · ${h3Steps} STEP` : usingQwen ? "QWEN EDIT · 4 STEP" : mode === "edit" ? "FLUX KLEIN EDIT" : mode === "anima" ? "ANIMA" : "KREA"}</span>{keepAspectUnavailable ? dimensionProbeActive ? "Rilevamento formato reference..." : dimensionProbeFailed ? "Formato Reference 1 non leggibile" : "Reference 1 senza dimensioni" : `${selectedFormat.width} × ${selectedFormat.height} · ${(selectedFormat.width * selectedFormat.height / (1024 * 1024)).toFixed(2)} MP`} · {jobLoras.filter((item) => item.name && item.enabled).length} LoRA · {selectedComposition.shortLabel}</div>
+          <div className="generation-cta"><div><span>Output</span><strong>{candidateCount} immagin{candidateCount === 1 ? "e" : "i"} · {tag === "untagged" ? "senza tag" : tags.find((item) => item.value === tag)?.label}</strong></div><button disabled={busy === "run" || busy === "planner" || active(job) || !projectId || !selectedEngineReady || turnaroundFormatMismatch || keepAspectUnavailable || (plannerEnabled && (!plannerStatus?.ready || !plannerIdea.trim()))} onClick={() => void run()} type="button">{busy === "planner" ? "LLM prepara..." : busy === "run" || active(job) ? "Generazione in corso" : turnaroundFormatMismatch ? "Formato 16:9 richiesto" : keepAspectUnavailable ? dimensionProbeActive ? "Rilevo formato reference..." : "Dimensioni reference mancanti" : !selectedEngineReady ? "Motore non pronto" : mode === "edit" ? "Crea " + candidateCount + " edit" : mode === "anima" ? "Genera " + candidateCount + " anime" : "Genera " + candidateCount + " immagini"}</button></div>
         </div>
         {message && <div className="run-message">{message}</div>}
       </section>

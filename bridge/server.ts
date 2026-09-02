@@ -2,11 +2,12 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { createReadStream, statSync } from "node:fs";
-import { readFile, unlink } from "node:fs/promises";
+import { readFile, rm, unlink } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { ComfyClient } from "./comfy-client.js";
+import { ComfyAdmissionController, isComfyBusyError } from "./comfy-admission.js";
 import { config } from "./config.js";
 import { WorkflowStore } from "./workflow-store.js";
 import { publicDryRun, StudioJobService } from "./studio-job.js";
@@ -33,7 +34,9 @@ import { AudioJobRepository } from "./audio-job-repository.js";
 import { AudioStudioService } from "./audio-studio-service.js";
 import { PromptPlannerService } from "./prompt-planner.js";
 import { LlmRuntimeControl } from "./llm-runtime-control.js";
+import { LoraCatalogService } from "./lora-catalog.js";
 import { SamRuntimeControl } from "./sam-runtime-control.js";
+import { LlmProviderService, PlannerSecretStore } from "./llm-provider.js";
 import {
   InstallSettingsStore,
   WORKFLOW_CATALOG,
@@ -91,12 +94,16 @@ function scheduleBridgeRestart() {
   }, 500).unref();
 }
 const comfy = new ComfyClient(installSettings.comfyUrl, config.comfyTimeoutMs);
+const comfyAdmission = new ComfyAdmissionController(comfy);
+const loraCatalog = new LoraCatalogService(config.dataDir, installSettings.comfyOutputDir);
 const workflowStore = new WorkflowStore(
   workflowPath(config.workflowOutputDir, installSettings.videoWorkflowId),
   config.workflowOutputDir,
 );
 const runtimeSettings = new RuntimeSettingsStore(config.dataDir);
-const promptPlanner = new PromptPlannerService(comfy, runtimeSettings);
+const plannerSecrets = new PlannerSecretStore(config.dataDir);
+const llmProvider = new LlmProviderService(comfy, runtimeSettings, plannerSecrets);
+const promptPlanner = new PromptPlannerService(llmProvider);
 const llmRuntime = new LlmRuntimeControl();
 const samRuntime = new SamRuntimeControl();
 const progressTracker = new ComfyProgressTracker(installSettings.comfyUrl);
@@ -137,11 +144,13 @@ const studioJobs = new StudioJobService(
   progressTracker,
   jobRepository,
   samRuntime,
+  llmProvider,
 );
 const audioStudio = new AudioStudioService(
   comfy,
   audioJobRepository,
   runtimeSettings,
+  llmProvider,
   progressTracker,
   externalMedia,
   installSettings.comfyOutputDir,
@@ -154,6 +163,7 @@ const chat = new ChatService(
   comfy,
   chatRepository,
   runtimeSettings,
+  llmProvider,
   studioJobs,
   imageStudio,
   audioStudio,
@@ -173,16 +183,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function executionErrorStatus(error: unknown, fallback = 400) {
+  return isComfyBusyError(error) ? 409 : fallback;
+}
 
-async function removeComfyOutputFiles(
-  files: Array<{ filename: string; subfolder: string; type: string }>,
-) {
-  const root = path.resolve(installSettings.comfyOutputDir);
+
+type ManagedComfyFile = { filename: string; subfolder: string; type: string };
+
+function externalMediaFile(value: string): ManagedComfyFile | null {
+  const match = /^(.*?)(?: \[(input|output|temp)\])?$/.exec(value.trim());
+  const normalized = (match?.[1] ?? value).replace(/\\/g, "/");
+  const filename = path.posix.basename(normalized);
+  const subfolder = path.posix.dirname(normalized);
+  if (!filename || filename === "." || filename === "..") return null;
+  return {
+    filename,
+    subfolder: subfolder === "." ? "" : subfolder,
+    type: match?.[2] ?? "input",
+  };
+}
+
+async function removeComfyManagedFiles(files: ManagedComfyFile[]) {
+  const outputRoot = path.resolve(installSettings.comfyOutputDir);
+  const comfyRoot = path.dirname(outputRoot);
+  const roots = {
+    input: path.resolve(comfyRoot, "input"),
+    output: outputRoot,
+    temp: path.resolve(comfyRoot, "temp"),
+  } as const;
   const warnings: string[] = [];
   const unique = new Set<string>();
   let removedFiles = 0;
   for (const file of files) {
-    if (file.type !== "output") continue;
+    if (file.type !== "input" && file.type !== "output" && file.type !== "temp") {
+      warnings.push(`Tipo file ignorato: ${file.filename}`);
+      continue;
+    }
+    const root = roots[file.type];
     const target = path.resolve(root, file.subfolder, file.filename);
     const relative = path.relative(root, target);
     if (relative.startsWith("..") || path.isAbsolute(relative) || unique.has(target)) {
@@ -200,6 +237,25 @@ async function removeComfyOutputFiles(
     }
   }
   return { removedFiles, warnings };
+}
+
+async function removeComfyOutputFiles(files: ManagedComfyFile[]) {
+  return removeComfyManagedFiles(files.filter((file) => file.type === "output"));
+}
+
+async function removeProjectExports(projectId: string) {
+  const root = path.resolve(config.dataDir, "exports");
+  const target = path.resolve(root, projectId);
+  const relative = path.relative(root, target);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    return { removed: false, warning: "Cartella export non rimossa: percorso non valido" };
+  }
+  try {
+    await rm(target, { recursive: true, force: true });
+    return { removed: true, warning: null };
+  } catch {
+    return { removed: false, warning: "Cartella export non rimossa" };
+  }
 }
 
 async function deleteChatMedia(conversationId: string) {
@@ -505,13 +561,15 @@ app.post("/api/jobs/dry-run", async (request, reply) => {
 
 app.post("/api/jobs", async (request, reply) => {
   try {
-    await comfy.chatUnload().catch(() => undefined);
-    const job = await studioJobs.submit(request.body);
+    const job = await comfyAdmission.run("generazione video", async () => {
+      await comfy.chatUnload().catch(() => undefined);
+      return studioJobs.submit(request.body);
+    });
     return reply.status(202).send({ ok: true, job });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invio job fallito";
     app.log.error(error, "Invio job H3 Studio fallito");
-    return reply.status(400).send({ ok: false, error: message });
+    return reply.status(executionErrorStatus(error)).send({ ok: false, error: message });
   }
 });
 
@@ -520,7 +578,6 @@ app.post<{
   Body: { candidateIndex?: number; prompt?: unknown };
 }>("/api/jobs/:jobId/regenerate", async (request, reply) => {
   try {
-    await comfy.chatUnload().catch(() => undefined);
     const rawIndex = request.body?.candidateIndex;
     const candidateIndex = rawIndex === undefined ? undefined : Number(rawIndex);
     if (
@@ -529,11 +586,14 @@ app.post<{
     ) {
       return reply.status(400).send({ ok: false, error: "Candidato video non valido" });
     }
-    const job = await studioJobs.regenerate(
-      request.params.jobId,
-      candidateIndex,
-      request.body?.prompt,
-    );
+    const job = await comfyAdmission.run("rigenerazione video", async () => {
+      await comfy.chatUnload().catch(() => undefined);
+      return studioJobs.regenerate(
+        request.params.jobId,
+        candidateIndex,
+        request.body?.prompt,
+      );
+    });
     return reply.status(202).send({
       ok: true,
       job: { ...job, variants: [] },
@@ -541,7 +601,7 @@ app.post<{
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Rigenerazione video fallita";
-    return reply.status(400).send({ ok: false, error: message });
+    return reply.status(executionErrorStatus(error)).send({ ok: false, error: message });
   }
 });
 
@@ -590,13 +650,73 @@ app.get("/api/prompt-planner/capabilities", async (_request, reply) => {
   }
 });
 
+app.get("/api/lora-options", async (_request, reply) => {
+  try {
+    const [settings, loras] = await Promise.all([
+      runtimeSettings.get(),
+      comfy.models("loras"),
+    ]);
+    const [catalog, catalogStatus] = await Promise.all([
+      loraCatalog.forAvailable(loras),
+      loraCatalog.status(),
+    ]);
+    return {
+      ok: true,
+      available: [...new Set(loras)].sort(),
+      catalog,
+      catalogStatus,
+      global: {
+        videoH3: settings.h3.loras,
+        imageH3: settings.h3.loras,
+        krea: settings.krea.loras,
+        fluxEdit: [],
+        qwenEdit: [],
+        anima: settings.anima.loras,
+      },
+      maxPerJob: 5,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Elenco LoRA non disponibile";
+    return reply.status(503).send({ ok: false, error: message });
+  }
+});
+
+app.get("/api/admin/lora-catalog", async (request, reply) => {
+  if (!adminAuth.isAuthenticated(request.headers.cookie)) {
+    return reply.status(401).send({ ok: false, error: "Accesso Admin richiesto" });
+  }
+  return { ok: true, catalog: await loraCatalog.status() };
+});
+
+app.post("/api/admin/lora-catalog/refresh", async (request, reply) => {
+  if (!adminAuth.isAuthenticated(request.headers.cookie)) {
+    return reply.status(401).send({ ok: false, error: "Accesso Admin richiesto" });
+  }
+  try {
+    const result = await loraCatalog.scan((message) => app.log.info(message));
+    return {
+      ok: true,
+      catalog: await loraCatalog.status(),
+      scanned: result.files.length,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Catalogo LoRA non aggiornato";
+    app.log.error(error, "Aggiornamento catalogo LoRA fallito");
+    return reply.status(502).send({ ok: false, error: message });
+  }
+});
+
 app.post("/api/prompt-planner", async (request, reply) => {
   try {
-    return reply.status(200).send({ ok: true, plan: await promptPlanner.plan(request.body) });
+    const plan = await comfyAdmission.run(
+      "preparazione prompt LLM",
+      () => promptPlanner.plan(request.body),
+    );
+    return reply.status(200).send({ ok: true, plan });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Prompt Compiler non disponibile";
     app.log.error(error, "Compilazione prompt LLM fallita");
-    return reply.status(400).send({ ok: false, error: message });
+    return reply.status(executionErrorStatus(error)).send({ ok: false, error: message });
   }
 });
 
@@ -620,13 +740,15 @@ app.post("/api/image-jobs/dry-run", async (request, reply) => {
 
 app.post("/api/image-jobs", async (request, reply) => {
   try {
-    await comfy.chatUnload().catch(() => undefined);
-    const job = await imageStudio.submit(request.body);
+    const job = await comfyAdmission.run("generazione immagine", async () => {
+      await comfy.chatUnload().catch(() => undefined);
+      return imageStudio.submit(request.body);
+    });
     return reply.status(202).send({ ok: true, job });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invio immagine fallito";
     app.log.error(error, "Invio job immagine H3 Studio fallito");
-    return reply.status(400).send({ ok: false, error: message });
+    return reply.status(executionErrorStatus(error)).send({ ok: false, error: message });
   }
 });
 
@@ -641,47 +763,62 @@ app.get("/api/audio-jobs/capabilities", async (_request, reply) => {
 
 app.post("/api/audio-jobs", async (request, reply) => {
   try {
-    const job = await audioStudio.submit(request.body);
+    const job = await comfyAdmission.run(
+      "generazione audio",
+      () => audioStudio.submit(request.body),
+    );
     return reply.status(202).send({ ok: true, job });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invio audio fallito";
     app.log.error(error, "Invio job audio H3 Studio fallito");
-    return reply.status(400).send({ ok: false, error: message });
+    return reply.status(executionErrorStatus(error)).send({ ok: false, error: message });
   }
 });
 
 app.post("/api/audio-jobs/transcribe-reference", async (request, reply) => {
   try {
-    return reply.status(200).send({ ok: true, transcription: await audioStudio.transcribeReference(request.body) });
+    const transcription = await comfyAdmission.run(
+      "trascrizione audio",
+      () => audioStudio.transcribeReference(request.body),
+    );
+    return reply.status(200).send({ ok: true, transcription });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Trascrizione reference non disponibile";
     app.log.error(error, "Trascrizione reference TTS fallita");
-    return reply.status(400).send({ ok: false, error: message });
+    return reply.status(executionErrorStatus(error)).send({ ok: false, error: message });
   }
 });
 
 app.post("/api/audio-jobs/music-plan", async (request, reply) => {
   try {
-    return reply.status(200).send({ ok: true, plan: await audioStudio.planMusic(request.body) });
+    const plan = await comfyAdmission.run(
+      "pianificazione musica LLM",
+      () => audioStudio.planMusic(request.body),
+    );
+    return reply.status(200).send({ ok: true, plan });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Music Planner non disponibile";
     app.log.error(error, "Pianificazione musicale LLM fallita");
-    return reply.status(400).send({ ok: false, error: message });
+    return reply.status(executionErrorStatus(error)).send({ ok: false, error: message });
   }
 });
 
 app.post("/api/audio-jobs/speech-track-plan", async (request, reply) => {
   try {
+    const plan = await comfyAdmission.run(
+      "pianificazione parlato LLM",
+      () => audioStudio.planSpeechTrack(request.body),
+    );
     return reply.status(200).send({
       ok: true,
-      plan: await audioStudio.planSpeechTrack(request.body),
+      plan,
     });
   } catch (error) {
     const message = error instanceof Error
       ? error.message
       : "Planner Parlato → brano non disponibile";
     app.log.error(error, "Pianificazione Parlato → brano fallita");
-    return reply.status(400).send({ ok: false, error: message });
+    return reply.status(executionErrorStatus(error)).send({ ok: false, error: message });
   }
 });
 
@@ -812,11 +949,14 @@ app.post<{
     const conversation = chat.conversation(request.params.conversationId).conversation;
     return {
       ok: true,
-      ...(await chat.send(conversation.projectId, request.body ?? {}, conversation.id)),
+      ...(await comfyAdmission.run(
+        "messaggio Chat",
+        () => chat.send(conversation.projectId, request.body ?? {}, conversation.id),
+      )),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Messaggio Chat fallito";
-    return reply.status(400).send({ ok: false, error: message });
+    return reply.status(executionErrorStatus(error)).send({ ok: false, error: message });
   }
 });
 
@@ -833,16 +973,19 @@ app.post<{
     }
     return {
       ok: true,
-      ...(await chat.regenerateConversationAction(
-        request.params.conversationId,
-        messageId,
-        request.body?.prompt,
-        request.body?.lyrics,
+      ...(await comfyAdmission.run(
+        "rigenerazione dalla Chat",
+        () => chat.regenerateConversationAction(
+          request.params.conversationId,
+          messageId,
+          request.body?.prompt,
+          request.body?.lyrics,
+        ),
       )),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Rigenerazione Chat fallita";
-    return reply.status(400).send({ ok: false, error: message });
+    return reply.status(executionErrorStatus(error)).send({ ok: false, error: message });
   }
 });
 
@@ -899,10 +1042,16 @@ app.post<{
   Body: { content?: unknown; attachments?: unknown; route?: unknown };
 }>("/api/chat/:projectId/messages", async (request, reply) => {
   try {
-    return { ok: true, ...(await chat.send(request.params.projectId, request.body ?? {})) };
+    return {
+      ok: true,
+      ...(await comfyAdmission.run(
+        "messaggio Chat",
+        () => chat.send(request.params.projectId, request.body ?? {}),
+      )),
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Messaggio Chat fallito";
-    return reply.status(400).send({ ok: false, error: message });
+    return reply.status(executionErrorStatus(error)).send({ ok: false, error: message });
   }
 });
 
@@ -923,7 +1072,6 @@ app.post<{
   Body: { candidateIndex?: number; prompt?: unknown };
 }>("/api/image-jobs/:jobId/regenerate", async (request, reply) => {
   try {
-    await comfy.chatUnload().catch(() => undefined);
     const rawIndex = request.body?.candidateIndex;
     const candidateIndex = rawIndex === undefined ? undefined : Number(rawIndex);
     if (
@@ -932,11 +1080,14 @@ app.post<{
     ) {
       return reply.status(400).send({ ok: false, error: "Candidato immagine non valido" });
     }
-    const job = await imageStudio.regenerate(
-      request.params.jobId,
-      candidateIndex,
-      request.body?.prompt,
-    );
+    const job = await comfyAdmission.run("rigenerazione immagine", async () => {
+      await comfy.chatUnload().catch(() => undefined);
+      return imageStudio.regenerate(
+        request.params.jobId,
+        candidateIndex,
+        request.body?.prompt,
+      );
+    });
     return reply.status(202).send({
       ok: true,
       job,
@@ -944,7 +1095,7 @@ app.post<{
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Rigenerazione immagine fallita";
-    return reply.status(400).send({ ok: false, error: message });
+    return reply.status(executionErrorStatus(error)).send({ ok: false, error: message });
   }
 });
 
@@ -1089,19 +1240,21 @@ app.post<{
   };
 }>("/api/jobs/:jobId/candidates/:candidateIndex/variants", async (request, reply) => {
   try {
-    await comfy.chatUnload().catch(() => undefined);
-    const variant = await postprocess.create(
-      request.params.jobId,
-      Number(request.params.candidateIndex),
-      request.body?.kind,
-      request.body?.sourceVariantId,
-      request.body?.targetMegapixels,
-    );
+    const variant = await comfyAdmission.run("post-process video", async () => {
+      await comfy.chatUnload().catch(() => undefined);
+      return postprocess.create(
+        request.params.jobId,
+        Number(request.params.candidateIndex),
+        request.body?.kind,
+        request.body?.sourceVariantId,
+        request.body?.targetMegapixels,
+      );
+    });
     return reply.status(202).send({ ok: true, variant });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Post-process non avviato";
     app.log.error(error, "Avvio variante candidato fallito");
-    return reply.status(400).send({ ok: false, error: message });
+    return reply.status(executionErrorStatus(error)).send({ ok: false, error: message });
   }
 });
 
@@ -1317,12 +1470,15 @@ app.post<{
   try {
     return reply.status(202).send({
       ok: true,
-      asset: await kreaAssets.submit(request.params.assetId, request.body ?? {}),
+      asset: await comfyAdmission.run(
+        "generazione Krea",
+        () => kreaAssets.submit(request.params.assetId, request.body ?? {}),
+      ),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Generazione Krea 2 fallita";
     app.log.error(error, "Invio character/object sheet Krea 2 fallito");
-    return reply.status(400).send({ ok: false, error: message });
+    return reply.status(executionErrorStatus(error)).send({ ok: false, error: message });
   }
 });
 
@@ -1346,6 +1502,83 @@ app.get<{ Params: { projectId: string } }>(
       return reply.status(404).send({ ok: false, error: "Progetto non trovato" });
     }
     return { ok: true, project };
+  },
+);
+
+app.delete<{ Params: { projectId: string } }>(
+  "/api/projects/:projectId",
+  async (request, reply) => {
+    try {
+      const plan = projectRepository.deletionPlan(request.params.projectId);
+      const busyCount = plan.busy.video + plan.busy.image + plan.busy.audio;
+      if (busyCount > 0) {
+        return reply.status(409).send({
+          ok: false,
+          error: `Interrompi prima le generazioni attive del progetto: ${plan.busy.video} video, ${plan.busy.image} immagini, ${plan.busy.audio} audio`,
+        });
+      }
+
+      const files: ManagedComfyFile[] = [];
+      let removedClips = 0;
+      for (const candidate of plan.videoCandidates) {
+        const deleted = jobRepository.deleteCandidate(candidate.job_id, candidate.candidate_index);
+        removedClips += deleted.removedClips;
+        files.push(...deleted.files);
+      }
+      for (const candidate of plan.imageCandidates) {
+        const deleted = imageStudio.deleteCandidate(candidate.job_id, candidate.candidate_index);
+        files.push(...deleted.files);
+      }
+
+      const externalIds = new Set(plan.externalMedia.map((media) => media.id));
+      for (const jobId of plan.audioJobs) {
+        const deleted = await audioStudio.delete(jobId);
+        const preserveOutput = Boolean(
+          deleted.externalMediaId && !externalIds.has(deleted.externalMediaId),
+        );
+        if (deleted.deleted.output && !preserveOutput) {
+          files.push({
+            filename: deleted.deleted.output.filename,
+            subfolder: deleted.deleted.output.subfolder,
+            type: deleted.deleted.output.type,
+          });
+        }
+      }
+      for (const media of plan.externalMedia) {
+        const descriptor = externalMediaFile(media.file);
+        if (descriptor) files.push(descriptor);
+        try { externalMedia.delete(media.id); } catch { /* eliminato insieme al job audio */ }
+      }
+
+      const deletion = projectRepository.delete(request.params.projectId);
+      const [storage, exports] = await Promise.all([
+        removeComfyManagedFiles(files),
+        removeProjectExports(request.params.projectId),
+      ]);
+      const warnings = [
+        ...storage.warnings,
+        ...(exports.warning ? [exports.warning] : []),
+      ];
+      return {
+        ok: true,
+        deletion: {
+          ...deletion,
+          removedVideoJobs: new Set(plan.videoCandidates.map((item) => item.job_id)).size,
+          removedVideoCandidates: plan.videoCandidates.length,
+          removedImageCandidates: plan.imageCandidates.length,
+          removedAudioJobs: plan.audioJobs.length,
+          removedExternalMedia: plan.externalMedia.length,
+          removedClips,
+          removedFiles: storage.removedFiles,
+          removedExports: exports.removed,
+          preserved: plan.preserved,
+          warnings,
+        },
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Eliminazione progetto fallita";
+      return reply.status(message === "Progetto non trovato" ? 404 : 400).send({ ok: false, error: message });
+    }
   },
 );
 
@@ -1678,7 +1911,7 @@ app.get<{
 });
 
 async function engineSettingsPayload() {
-  const [settings, models, loras, textEncoders, vaes, latentUpscalers, llmFiles, chatRuntime, workflow, imageAttentionBackends, audioStatus] = await Promise.all([
+  const [settings, models, loras, textEncoders, vaes, latentUpscalers, llmFiles, chatRuntime, workflow, imageAttentionBackends, audioStatus, plannerStatus] = await Promise.all([
     runtimeSettings.get(),
     comfy.models("diffusion_models"),
     comfy.models("loras"),
@@ -1690,6 +1923,7 @@ async function engineSettingsPayload() {
     workflowStore.status(),
     imageStudio.attentionBackends().catch((): string[] => []),
     audioStudio.status().catch(() => null),
+    llmProvider.status("planner").catch(() => null),
   ]);
   return {
     ok: true,
@@ -1728,6 +1962,16 @@ async function engineSettingsPayload() {
         version: chatRuntime.runtimeVersion ?? null,
         error: chatRuntime.error ?? null,
       } : { ready: false, loaded: false, version: null, error: "Nodo H3 Studio Chat non caricato: riavvia ComfyUI" },
+      planner: plannerStatus ?? {
+        ready: false,
+        backend: "local",
+        configuredBackend: settings.planner.backend,
+        model: settings.chat.model,
+        baseUrl: null,
+        apiKeyConfigured: false,
+        fallbackLocal: false,
+        error: "Planner non disponibile",
+      },
       imageAttentionBackends,
       stepRange: { min: 4, max: 40 },
     },
@@ -1823,6 +2067,42 @@ app.get("/api/admin/llm-runtime", async (request, reply) => {
   return { ok: true, status: await llmRuntime.status() };
 });
 
+app.put<{
+  Body: { apiKey?: unknown; clear?: unknown };
+}>("/api/admin/planner-secret", async (request, reply) => {
+  if (!adminAuth.isAuthenticated(request.headers.cookie)) {
+    return reply.status(401).send({ ok: false, error: "Accesso Admin richiesto" });
+  }
+  try {
+    if (request.body?.clear === true) await plannerSecrets.clear();
+    else await plannerSecrets.set(request.body?.apiKey);
+    return {
+      ok: true,
+      apiKeyConfigured: await plannerSecrets.has(),
+      message: request.body?.clear === true
+        ? "Chiave API Planner rimossa"
+        : "Chiave API Planner salvata nel bridge",
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Chiave API non salvata";
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
+app.post<{
+  Body: { baseUrl?: unknown; model?: unknown; apiKey?: unknown };
+}>("/api/admin/planner-test", async (request, reply) => {
+  if (!adminAuth.isAuthenticated(request.headers.cookie)) {
+    return reply.status(401).send({ ok: false, error: "Accesso Admin richiesto" });
+  }
+  try {
+    return await llmProvider.testRemote(request.body ?? {});
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Test Planner remoto fallito";
+    return reply.status(502).send({ ok: false, error: message });
+  }
+});
+
 app.post<{ Body: { pid?: unknown } }>(
   "/api/admin/llm-runtime/unload",
   async (request, reply) => {
@@ -1890,6 +2170,8 @@ async function saveEngineSettings(
       (body as { anima?: unknown }).anima ?? currentSettings.anima;
     const chatSettings =
       (body as { chat?: unknown }).chat ?? currentSettings.chat;
+    const plannerSettings =
+      (body as { planner?: unknown }).planner ?? currentSettings.planner;
     const tts = (body as { tts?: unknown }).tts ?? currentSettings.tts;
     const music = (body as { music?: unknown }).music ?? currentSettings.music;
     const voiceConversion = (body as { voiceConversion?: unknown }).voiceConversion
@@ -1902,6 +2184,7 @@ async function saveEngineSettings(
       typeof imageEdit !== "object" || imageEdit === null || Array.isArray(imageEdit) ||
       typeof anima !== "object" || anima === null || Array.isArray(anima)
       || typeof chatSettings !== "object" || chatSettings === null || Array.isArray(chatSettings)
+      || typeof plannerSettings !== "object" || plannerSettings === null || Array.isArray(plannerSettings)
       || typeof tts !== "object" || tts === null || Array.isArray(tts)
       || typeof music !== "object" || music === null || Array.isArray(music)
       || typeof voiceConversion !== "object" || voiceConversion === null || Array.isArray(voiceConversion)
@@ -1963,10 +2246,16 @@ async function saveEngineSettings(
           llmFiles.filter((file) => /mmproj.*\.gguf$/i.test(file)),
       ),
     ];
-    if (!availableChatModels.includes(String((chatSettings as { model?: unknown }).model ?? ""))) {
+    const plannerBackend = String(
+      (plannerSettings as { backend?: unknown }).backend ?? "local",
+    );
+    const plannerUseForChat =
+      (plannerSettings as { useForChat?: unknown }).useForChat === true;
+    const localChatRequired = plannerBackend !== "remote" || !plannerUseForChat;
+    if (localChatRequired && !availableChatModels.includes(String((chatSettings as { model?: unknown }).model ?? ""))) {
       return reply.status(400).send({ ok: false, error: "Modello LLM Chat non installato" });
     }
-    if (!availableChatProjectors.includes(String((chatSettings as { projector?: unknown }).projector ?? ""))) {
+    if (localChatRequired && !availableChatProjectors.includes(String((chatSettings as { projector?: unknown }).projector ?? ""))) {
       return reply.status(400).send({ ok: false, error: "Projector mmproj Chat non installato" });
     }
     if (!models.includes(String((music as { model?: unknown }).model ?? ""))) {
@@ -2001,7 +2290,16 @@ async function saveEngineSettings(
     if (missingLora) {
       return reply.status(400).send({ ok: false, error: `LoRA non installato: ${missingLora}` });
     }
-    const settings = await runtimeSettings.update({ ...body, imageEdit, anima, chat: chatSettings, tts, music, voiceConversion });
+    const settings = await runtimeSettings.update({
+      ...body,
+      imageEdit,
+      anima,
+      chat: chatSettings,
+      planner: plannerSettings,
+      tts,
+      music,
+      voiceConversion,
+    });
     return { ok: true, settings };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Impostazioni non valide";

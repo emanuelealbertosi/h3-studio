@@ -35,7 +35,12 @@ export type ImageJobStatus =
   | "cancelled";
 
 export type ImageEngineSnapshot = {
-  kind: "krea" | "flux2-klein-edit" | "anima" | "minimax-h3-image";
+  kind:
+    | "krea"
+    | "flux2-klein-edit"
+    | "qwen-image-edit"
+    | "anima"
+    | "minimax-h3-image";
   model: string;
   encoder: string;
   vae: string;
@@ -51,6 +56,7 @@ export type ImageEngineSnapshot = {
   compositionPreset?: ImageCompositionPreset;
   effectivePrompt?: string;
   loras?: Array<{ name: string; strength: number }>;
+  jobLoras?: Array<{ name: string; strength: number }>;
   imageMode?: "t2i" | "i2i" | "reference";
   megapixels?: number;
   turboLora?: string;

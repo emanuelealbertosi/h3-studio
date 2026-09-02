@@ -9,6 +9,13 @@ import ChatPanel from "./chat-panel";
 import AudioStudioPanel from "./audio-studio-panel";
 import RegenerateDialog from "./regenerate-dialog";
 import { compatibleEngineOptions } from "./engine-options";
+import JobLoraSelector, {
+  loraOverridesPayload,
+  selectionsFromApplied,
+  selectionsFromGlobal,
+  type JobLoraCatalogEntry,
+  type JobLoraSelection,
+} from "./job-lora-selector";
 
 type CandidateStatus =
   | "idle"
@@ -474,6 +481,18 @@ type EngineLoraSlot = {
   strength: number;
 };
 
+type LoraOptionsResponse = {
+  available: string[];
+  catalog: Record<string, JobLoraCatalogEntry>;
+  global: {
+    videoH3: EngineLoraSlot[];
+    imageH3: EngineLoraSlot[];
+    krea: EngineLoraSlot[];
+    fluxEdit: EngineLoraSlot[];
+    anima: EngineLoraSlot[];
+  };
+};
+
 
 function preferredFlux2Encoder(model: string, encoders: string[], fallback: string) {
   const pattern = /(?:9b|snofs)/i.test(model) ? /qwen.*3.*8b/i : /qwen.*3.*4b/i;
@@ -558,6 +577,16 @@ type EngineAdminResponse = {
       temperature: number;
       topP: number;
     };
+    planner: {
+      backend: "local" | "remote" | "auto";
+      baseUrl: string;
+      model: string;
+      timeoutSeconds: number;
+      maxTokens: number;
+      temperature: number;
+      topP: number;
+      useForChat: boolean;
+    };
     tts: {
       root: string;
       voice: string;
@@ -595,6 +624,16 @@ type EngineAdminResponse = {
     chatModels: string[];
     chatProjectors: string[];
     chatRuntime: { ready: boolean; loaded: boolean; version: string | null; error: string | null };
+    planner: {
+      ready: boolean;
+      backend: "local" | "remote";
+      configuredBackend: "local" | "remote" | "auto";
+      model: string;
+      baseUrl: string | null;
+      apiKeyConfigured: boolean;
+      fallbackLocal: boolean;
+      error: string | null;
+    };
     imageAttentionBackends: string[];
   };
 };
@@ -717,6 +756,9 @@ type ProjectSummary = {
   clipCount: number;
   timelineCount: number;
   jobCount: number;
+  imageCount: number;
+  audioCount: number;
+  externalMediaCount: number;
 };
 
 type ProjectTimelineSummary = {
@@ -879,10 +921,12 @@ function HistoryPanel({
   onOpen,
   onUseClip,
   onNewGeneration,
+  onProjectDeleted,
 }: {
   onOpen: (job: RemoteJob) => void;
   onUseClip: (clip: ProjectClip, mode: "continue" | "edit" | "reference") => void;
   onNewGeneration: (projectId?: string) => void;
+  onProjectDeleted: (projectId: string) => Promise<void>;
 }) {
   const [jobs, setJobs] = useState<RemoteJob[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -897,6 +941,8 @@ function HistoryPanel({
   const [exportedMediaPath, setExportedMediaPath] = useState("");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("Caricamento cronologia…");
+  const [deleteProjectTarget, setDeleteProjectTarget] = useState<ProjectSummary | null>(null);
+  const [deletingProject, setDeletingProject] = useState(false);
 
   async function loadJobs(targetProjectId = projectId) {
     setLoading(true);
@@ -993,6 +1039,52 @@ function HistoryPanel({
       onNewGeneration(payload.project.id);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Creazione fallita");
+    }
+  }
+
+  async function confirmProjectDeletion() {
+    if (!deleteProjectTarget || deletingProject) return;
+    const target = deleteProjectTarget;
+    setDeletingProject(true);
+    setMessage(`Eliminazione di “${target.name}”…`);
+    try {
+      const response = await fetch(`${bridgeUrl}/api/projects/${target.id}`, {
+        method: "DELETE",
+      });
+      const payload = (await response.json()) as {
+        deletion?: {
+          removedVideoJobs: number;
+          removedImageCandidates: number;
+          removedAudioJobs: number;
+          removedExternalMedia: number;
+          removedFiles: number;
+          preserved: { videoJobs: number; imageCandidates: number; externalMedia: number };
+          warnings: string[];
+        };
+        error?: string;
+      };
+      if (!response.ok || !payload.deletion) {
+        throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+      }
+      setDeleteProjectTarget(null);
+      setProjectId("");
+      setTimelineId("");
+      setProject(null);
+      setJobs([]);
+      await onProjectDeleted(target.id);
+      await loadProjects();
+      const preserved = payload.deletion.preserved.videoJobs
+        + payload.deletion.preserved.imageCandidates
+        + payload.deletion.preserved.externalMedia;
+      setMessage(
+        `Progetto “${target.name}” eliminato · ${payload.deletion.removedFiles} file rimossi` +
+        (preserved ? ` · ${preserved} media condivisi conservati` : "") +
+        (payload.deletion.warnings.length ? ` · ${payload.deletion.warnings.join(" · ")}` : ""),
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Eliminazione progetto fallita");
+    } finally {
+      setDeletingProject(false);
     }
   }
 
@@ -1108,6 +1200,14 @@ function HistoryPanel({
         <div className="history-heading-actions">
           <button className="primary-action" onClick={() => onNewGeneration(projectId || undefined)} type="button">
             + Nuova generazione
+          </button>
+          <button
+            className="danger"
+            disabled={!project || deletingProject}
+            onClick={() => project && setDeleteProjectTarget(project)}
+            type="button"
+          >
+            Elimina progetto
           </button>
           <button disabled={loading} onClick={refreshAll} type="button">
             {loading ? "Aggiornamento…" : "Aggiorna"}
@@ -1376,6 +1476,36 @@ function HistoryPanel({
           );
         })}
       </div>
+
+      {deleteProjectTarget && <div
+        className="chat-delete-backdrop"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !deletingProject) setDeleteProjectTarget(null);
+        }}
+      >
+        <section className="chat-delete-dialog project-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="project-delete-title">
+          <span className="section-index">ELIMINA PROGETTO</span>
+          <h3 id="project-delete-title">Eliminare “{deleteProjectTarget.name}”?</h3>
+          <p>Questa operazione è definitiva e comprende anche la cancellazione dei file dal disco.</p>
+          <div className="project-delete-summary">
+            <span><strong>{deleteProjectTarget.jobCount}</strong> generazioni video</span>
+            <span><strong>{deleteProjectTarget.imageCount}</strong> immagini</span>
+            <span><strong>{deleteProjectTarget.audioCount}</strong> audio</span>
+            <span><strong>{deleteProjectTarget.timelineCount}</strong> montaggi</span>
+            <span><strong>{deleteProjectTarget.clipCount}</strong> clip</span>
+            <span><strong>{deleteProjectTarget.externalMediaCount}</strong> media caricati</span>
+          </div>
+          <div className="chat-delete-warning">
+            Verranno eliminati chat e memoria, job, varianti Face/Upscale, montaggi, output ComfyUI, upload esclusivi ed export. I media condivisi con altri progetti verranno conservati.
+          </div>
+          <footer>
+            <button disabled={deletingProject} onClick={() => setDeleteProjectTarget(null)} type="button">Annulla</button>
+            <button className="danger" disabled={deletingProject} onClick={() => void confirmProjectDeletion()} type="button">
+              {deletingProject ? "Eliminazione…" : "Elimina progetto e file"}
+            </button>
+          </footer>
+        </section>
+      </div>}
     </section>
   );
 }
@@ -3538,6 +3668,8 @@ function AdminPanel() {
   const [restarting, setRestarting] = useState(false);
   const [llmBusyPid, setLlmBusyPid] = useState<number | null>(null);
   const [llmRuntime, setLlmRuntime] = useState<AdminLlmRuntimeStatus | null>(null);
+  const [plannerApiKey, setPlannerApiKey] = useState("");
+  const [plannerTesting, setPlannerTesting] = useState(false);
   const [loginRequired, setLoginRequired] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
 
@@ -3694,6 +3826,19 @@ function AdminPanel() {
       if (!response.ok || !payload.settings) {
         throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
       }
+      if (plannerApiKey.trim()) {
+        const secretResponse = await fetch(`${bridgeUrl}/api/admin/planner-secret`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ apiKey: plannerApiKey }),
+        });
+        const secretPayload = (await secretResponse.json()) as { error?: string };
+        if (!secretResponse.ok) {
+          throw new Error(secretPayload.error ?? "Chiave API Planner non salvata");
+        }
+        setPlannerApiKey("");
+      }
       const verifyResponse = await fetch(`${bridgeUrl}/api/admin/engine-settings`, {
         cache: "no-store",
         credentials: "include",
@@ -3772,6 +3917,58 @@ function AdminPanel() {
       setSaveNotice({ kind: "success", text: successMessage });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function testRemotePlanner() {
+    const current = dataRef.current;
+    if (!current || plannerTesting) return;
+    setPlannerTesting(true);
+    setMessage("Verifica API Planner remoto...");
+    try {
+      const response = await fetch(`${bridgeUrl}/api/admin/planner-test`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          baseUrl: current.settings.planner.baseUrl,
+          model: current.settings.planner.model,
+          apiKey: plannerApiKey || undefined,
+        }),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean; error?: string; latencyMs?: number; response?: string;
+      };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? `Bridge HTTP ${response.status}`);
+      }
+      setMessage(`Planner remoto raggiungibile in ${payload.latencyMs ?? 0} ms � ${payload.response ?? "OK"}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Test Planner remoto fallito");
+    } finally {
+      setPlannerTesting(false);
+    }
+  }
+
+  async function clearRemotePlannerKey() {
+    if (!window.confirm("Rimuovere la chiave API Planner salvata nel bridge?")) return;
+    setPlannerTesting(true);
+    try {
+      const response = await fetch(`${bridgeUrl}/api/admin/planner-secret`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ clear: true }),
+      });
+      const payload = (await response.json()) as { ok?: boolean; error?: string; message?: string };
+      if (!response.ok || !payload.ok) throw new Error(payload.error ?? "Chiave non rimossa");
+      setPlannerApiKey("");
+      await loadSettings();
+      setMessage(payload.message ?? "Chiave API Planner rimossa");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Chiave API non rimossa");
+    } finally {
+      setPlannerTesting(false);
     }
   }
 
@@ -4491,6 +4688,101 @@ function AdminPanel() {
             <article className="engine-config-card chat-engine-card">
               <div className="engine-config-heading">
                 <div>
+                  <span>PLANNER AI</span>
+                  <h3>Planner locale o remoto</h3>
+                </div>
+                <b className={data.capabilities.planner.ready ? "admin-ready" : "admin-warning"}>
+                  {data.capabilities.planner.ready
+                    ? data.capabilities.planner.backend === "remote" ? "API" : "LOCALE"
+                    : "SETUP"}
+                </b>
+              </div>
+              <div className="admin-form image-edit-engine-form">
+                <label>
+                  <span>Backend Planner</span>
+                  <select value={data.settings.planner.backend} onChange={(event) => setData({
+                    ...data,
+                    settings: {
+                      ...data.settings,
+                      planner: {
+                        ...data.settings.planner,
+                        backend: event.target.value as "local" | "remote" | "auto",
+                      },
+                    },
+                  })}>
+                    <option value="local">Locale � GGUF</option>
+                    <option value="remote">Remoto � solo API</option>
+                    <option value="auto">Automatico � API poi fallback locale</option>
+                  </select>
+                </label>
+                <label>
+                  <span>URL API OpenAI-compatible</span>
+                  <input
+                    disabled={data.settings.planner.backend === "local"}
+                    onChange={(event) => setData({
+                      ...data,
+                      settings: {
+                        ...data.settings,
+                        planner: { ...data.settings.planner, baseUrl: event.target.value },
+                      },
+                    })}
+                    placeholder="https://api.openai.com/v1"
+                    value={data.settings.planner.baseUrl}
+                  />
+                </label>
+                <label>
+                  <span>Nome modello remoto</span>
+                  <input
+                    disabled={data.settings.planner.backend === "local"}
+                    onChange={(event) => setData({
+                      ...data,
+                      settings: {
+                        ...data.settings,
+                        planner: { ...data.settings.planner, model: event.target.value },
+                      },
+                    })}
+                    placeholder="nome-modello-del-provider"
+                    value={data.settings.planner.model}
+                  />
+                </label>
+                <label>
+                  <span>Chiave API</span>
+                  <input
+                    autoComplete="new-password"
+                    disabled={data.settings.planner.backend === "local"}
+                    onChange={(event) => setPlannerApiKey(event.target.value)}
+                    placeholder={data.capabilities.planner.apiKeyConfigured
+                      ? "Chiave gia salvata � lascia vuoto per mantenerla"
+                      : "Opzionale per server senza autenticazione"}
+                    type="password"
+                    value={plannerApiKey}
+                  />
+                </label>
+                <label><span>Timeout API (secondi)</span><input disabled={data.settings.planner.backend === "local"} min="10" max="900" step="10" type="number" value={data.settings.planner.timeoutSeconds} onChange={(event) => setData({ ...data, settings: { ...data.settings, planner: { ...data.settings.planner, timeoutSeconds: Number(event.target.value) } } })} /></label>
+                <label><span>Token massimi Planner</span><input disabled={data.settings.planner.backend === "local"} min="128" max="32768" step="128" type="number" value={data.settings.planner.maxTokens} onChange={(event) => setData({ ...data, settings: { ...data.settings, planner: { ...data.settings.planner, maxTokens: Number(event.target.value) } } })} /></label>
+                <label><span>Temperature Planner</span><input disabled={data.settings.planner.backend === "local"} min="0" max="2" step="0.05" type="number" value={data.settings.planner.temperature} onChange={(event) => setData({ ...data, settings: { ...data.settings, planner: { ...data.settings.planner, temperature: Number(event.target.value) } } })} /></label>
+                <label><span>Top P Planner</span><input disabled={data.settings.planner.backend === "local"} min="0.01" max="1" step="0.01" type="number" value={data.settings.planner.topP} onChange={(event) => setData({ ...data, settings: { ...data.settings, planner: { ...data.settings.planner, topP: Number(event.target.value) } } })} /></label>
+                <label className="admin-inline-check">
+                  <input checked={data.settings.planner.useForChat} disabled={data.settings.planner.backend === "local"} onChange={(event) => setData({ ...data, settings: { ...data.settings, planner: { ...data.settings.planner, useForChat: event.target.checked } } })} type="checkbox" />
+                  <span>Usa il modello remoto anche per conversazione e memoria Chat</span>
+                </label>
+                <div className="planner-admin-actions">
+                  <button className="secondary" disabled={plannerTesting || data.settings.planner.backend === "local" || !data.settings.planner.baseUrl.trim() || !data.settings.planner.model.trim()} onClick={() => void testRemotePlanner()} type="button">
+                    {plannerTesting ? "Verifica..." : "Verifica connessione"}
+                  </button>
+                  {data.capabilities.planner.apiKeyConfigured && (
+                    <button className="secondary" disabled={plannerTesting} onClick={() => void clearRemotePlannerKey()} type="button">Rimuovi chiave</button>
+                  )}
+                </div>
+                <p className="image-edit-profile-note">
+                  Video H3, Image H3, Krea, Edit, Anima, TTS e Musica usano questa scelta. In Automatico l'API e primaria e il GGUF locale interviene soltanto in caso di errore. La chiave resta nel bridge e non viene mai restituita al browser o inserita nei job.
+                </p>
+              </div>
+            </article>
+
+            <article className="engine-config-card chat-engine-card">
+              <div className="engine-config-heading">
+                <div>
                   <span>LOCAL AI</span>
                   <h3>LLM Vision Chat</h3>
                 </div>
@@ -4581,6 +4873,8 @@ function StudioApp() {
   const [inpaintEndSeconds, setInpaintEndSeconds] = useState(0);
   const [qualityMode, setQualityMode] = useState<QualityMode>("fast");
   const [videoEngine, setVideoEngine] = useState<VideoEngine>("h3");
+  const [videoLoraOptions, setVideoLoraOptions] = useState<LoraOptionsResponse | null>(null);
+  const [videoJobLoras, setVideoJobLoras] = useState<JobLoraSelection[]>([]);
   const [turboEnabled, setTurboEnabled] = useState(false);
   const [candidateCount, setCandidateCount] = useState(4);
   const [shotCount, setShotCount] = useState(1);
@@ -4648,6 +4942,25 @@ function StudioApp() {
   const upscaleCancelRef = useRef<HTMLButtonElement>(null);
   const upscaleConfirmRef = useRef<HTMLButtonElement>(null);
   const upscaleTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    void fetch(bridgeUrl + "/api/lora-options", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as LoraOptionsResponse & { error?: string };
+        if (!response.ok || !payload.available || !payload.global) {
+          throw new Error(payload.error ?? "LoRA non disponibili");
+        }
+        if (!disposed) {
+          setVideoLoraOptions(payload);
+          setVideoJobLoras((current) => current.length
+            ? current
+            : selectionsFromGlobal(payload.global.videoH3));
+        }
+      })
+      .catch(() => { if (!disposed) setVideoLoraOptions(null); });
+    return () => { disposed = true; };
+  }, []);
 
   useEffect(() => {
     if (!pendingUpscaleRequest) return;
@@ -4886,6 +5199,7 @@ function StudioApp() {
     setSelected(null);
     setPrompt("");
     setVideoEngine("h3");
+    setVideoJobLoras(selectionsFromGlobal(videoLoraOptions?.global.videoH3 ?? []));
     setMediaAssets([]);
     setReferenceRoles("AUTO");
     setKeyframePositions("AUTO");
@@ -4910,6 +5224,14 @@ function StudioApp() {
     setPendingUpscaleRequest(null);
     setCurrentJobId(job.id);
     setVideoEngine(job.request.videoEngine === "ltx25" ? "ltx25" : "h3");
+    setVideoJobLoras(
+      job.request.videoEngine === "ltx25"
+        ? []
+        : selectionsFromApplied(
+            videoLoraOptions?.global.videoH3 ?? [],
+            job.engine.loras ?? [],
+          ),
+    );
     setPrompt(job.request.prompt);
     setCandidateCount(job.request.candidateCount);
     setShotCount(job.request.shotCount ?? 1);
@@ -5346,6 +5668,7 @@ function StudioApp() {
           inpaintMaskGrow,
           inpaintStartSeconds,
           inpaintEndSeconds,
+          loraOverrides: videoEngine === "h3" ? loraOverridesPayload(videoJobLoras) : [],
         }),
       });
       const payload = (await response.json()) as {
@@ -6359,6 +6682,7 @@ function StudioApp() {
               onOpen={(job) => openJob(job)}
               onUseClip={(clip, operation) => prepareClipOperation(clip, operation)}
               onNewGeneration={(projectId) => beginNewGeneration(projectId)}
+              onProjectDeleted={async () => { await loadStudioProjects(); }}
             />
           ) : activeView === "montages" ? (
             <MontagesPanel
@@ -6747,6 +7071,15 @@ function StudioApp() {
                 </div>
               </fieldset>
             </div>
+
+            <JobLoraSelector
+              available={videoLoraOptions?.available ?? []}
+              catalog={videoLoraOptions?.catalog ?? {}}
+              disabled={videoEngine === "ltx25"}
+              disabledReason={videoEngine === "ltx25" ? "LTX 2.5 è escluso: usa soltanto LoRA dichiarati compatibili con quel motore quando verrà aggiunto un profilo dedicato." : undefined}
+              onChange={setVideoJobLoras}
+              value={videoJobLoras}
+            />
 
             {mode === "masking" && (
               <fieldset className="audio-policy">
@@ -7177,7 +7510,7 @@ function StudioApp() {
             <div className="composer-footer">
               <div className="preset-note">
                 <span className="fast-badge">{`${effectiveSteps} STEP`}</span>
-                {videoEngine === "ltx25" ? qualityMode === "max" ? `LTX 2.5 Quality · 8+3 step · output ~${formatMegapixels(megapixels * 4)} MP` : "LTX 2.5 Fast · 8 step" : `H3 standard · ${effectiveSteps} step`} · {shotCount > 1 ? `${shotCount} shot × ${duration}s ≈ ${shotCount * duration}s` : `${duration}s`} · {formatMegapixels(megapixels)} MP
+                {videoEngine === "ltx25" ? qualityMode === "max" ? `LTX 2.5 Quality · 8+3 step · output ~${formatMegapixels(megapixels * 4)} MP` : "LTX 2.5 Fast · 8 step" : `H3 standard · ${effectiveSteps} step`} · {videoEngine === "h3" ? `${videoJobLoras.filter((item) => item.name && item.enabled).length} LoRA · ` : ""}{shotCount > 1 ? `${shotCount} shot × ${duration}s ≈ ${shotCount * duration}s` : `${duration}s`} · {formatMegapixels(megapixels)} MP
               </div>
               <div className="generation-cta">
                 <div>

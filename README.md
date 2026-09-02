@@ -104,6 +104,26 @@ Il Prompt Compiler AI usa il modello LLM configurato nella Chat per trasformare 
 richiesta naturale multilingua nel formato specifico di Krea, Flux Edit o Anima;
 il risultato resta modificabile e il modello LLM viene scaricato prima del render.
 
+### Planner AI locale o remoto
+
+La card **Admin → Planner AI** può usare il GGUF locale oppure qualsiasi endpoint
+OpenAI-compatible che esponga `POST /chat/completions`. La scelta vale per il
+planner Video H3 e per i compiler Image H3, Krea, Flux Edit, Anima, TTS e Musica:
+
+- **Locale** usa il modello e il projector GGUF della Chat tramite ComfyUI;
+- **Remoto** usa soltanto URL e modello API configurati e segnala l'errore senza
+  caricare il GGUF locale;
+- **Automatico** prova prima l'API e usa il GGUF locale se la richiesta remota
+  fallisce, quindi richiede che anche il runtime Chat locale sia configurato.
+
+URL, modello, timeout, token, temperature e top-p sono salvati nelle impostazioni
+runtime locali. La chiave API è separata dalla password Admin, resta nel solo
+bridge in `data/planner-api-key.txt` e non viene restituita al browser né inserita
+nei job. **Verifica connessione** prova i valori correnti prima del salvataggio.
+L'opzione **Usa il modello remoto anche per conversazione e memoria Chat** è
+disattivata per impostazione predefinita: se rimane spenta, la Chat continua a
+usare il proprio GGUF anche quando i planner usano l'API.
+
 
 Lo **Studio Audio** è la terza modalità dello stesso progetto. **Higgs Audio
 v3 TTS** genera parlato e supporta il cloning one-shot da un campione caricato
@@ -204,6 +224,10 @@ Il contratto della Chat locale si verifica con `npm run test:chat`.
 3. Avvia `START_H3_STUDIO.bat` su Windows o `./START_H3_STUDIO.sh` su Linux.
 4. Al primo avvio crea la password Admin e configura URL, cartella output e workflow.
 5. Riavvia una volta H3 Studio e apri `http://localhost:3000`.
+
+Per arrestare completamente frontend, bridge e relativi processi figli usa
+`STOP_H3_STUDIO.bat` su Windows o `./STOP_H3_STUDIO.sh` su Linux. Lo stop non
+termina ComfyUI e lascia attivi gli eventuali proxy Tailscale.
 
 Il launcher installa automaticamente le dipendenze npm quando mancano e avvia
 bridge e interfaccia in due console separate. I workflow pronti, il manifest

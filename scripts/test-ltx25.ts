@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -236,6 +237,48 @@ try {
     "legacy-no-video-engine",
   );
   assert.equal(legacyH3.request.videoEngine, "h3");
+  const h3WithGlobal = {
+    ...DEFAULT_RUNTIME_SETTINGS,
+    h3: {
+      ...DEFAULT_RUNTIME_SETTINGS.h3,
+      loras: [{ name: "global-style.safetensors", strength: 0.7 }],
+    },
+  };
+  const h3PerJobLora = prepareStudioJob(
+    h3Source,
+    {
+      ...request,
+      videoEngine: "h3",
+      durationSeconds: 5,
+      loraOverrides: [
+        { name: "global-style.safetensors", strength: 0.7, enabled: false },
+        { name: "job-nsfw.safetensors", strength: 0.85, enabled: true },
+      ],
+    },
+    h3WithGlobal,
+    "h3-per-job-lora",
+  );
+  assert.deepEqual(h3PerJobLora.engineSettings.loras, [
+    { name: "job-nsfw.safetensors", strength: 0.85 },
+  ]);
+  assert.throws(
+    () => prepareStudioJob({}, {
+      ...request,
+      loraOverrides: [{ name: "ltx-incompatible.safetensors", strength: 1, enabled: true }],
+    }, DEFAULT_RUNTIME_SETTINGS),
+    /LTX 2\.5 richiede adattatori compatibili dedicati/,
+  );
+  assert.throws(
+    () => prepareStudioJob(h3Source, {
+      ...request,
+      videoEngine: "h3",
+      durationSeconds: 5,
+      loraOverrides: Array.from({ length: 6 }, (_, index) => ({
+        name: `lora-${index}.safetensors`, strength: 1, enabled: true,
+      })),
+    }, DEFAULT_RUNTIME_SETTINGS),
+    /al massimo 5 LoRA/,
+  );
 
   const store = new RuntimeSettingsStore(temp);
   const changedLtx = {
@@ -458,5 +501,5 @@ try {
   jobs.close();
   console.log("LTX 2.5 workflow tests passed");
 } finally {
-  rmSync(temp, { recursive: true, force: true });
+  await rm(temp, { recursive: true, force: true, maxRetries: 20, retryDelay: 150 });
 }

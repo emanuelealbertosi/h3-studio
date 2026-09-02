@@ -40,6 +40,18 @@ La modalità predefinita è conservativa: per i requisiti Python si può usare
 anche ComfyUI Manager. Il secondo launcher esegue `npm install` soltanto se le
 dipendenze web non sono presenti, poi apre `http://localhost:3000`.
 
+Per chiudere H3 Studio senza lasciare bridge o worker in background:
+
+```powershell
+.\STOP_H3_STUDIO.bat
+```
+
+Lo script riconosce soltanto i processi appartenenti alla stessa cartella del
+progetto, arresta l'intero albero di frontend e bridge e verifica le porte 3000
+e bridge. Non termina ComfyUI, non chiude il servizio Tailscale e rifiuta di
+terminare un eventuale listener estraneo. Per l'uso non interattivo è
+disponibile `STOP_H3_STUDIO.bat --no-pause`.
+
 Su Linux gli equivalenti sono:
 
 ```bash
@@ -128,6 +140,45 @@ o nel percorso indicato dalla stessa variabile. L'Admin rileva e termina in
 sicurezza il processo effimero sia su Windows sia su Linux.
 Il server effimero viene terminato prima di Video, Image, Face e Upscale, quindi
 LM Studio non deve essere aperto e il modello non rimane in VRAM durante i render.
+
+## Planner AI OpenAI-compatible
+
+Il planner può restare interamente locale oppure usare un servizio remoto che
+implementi la Chat Completions API in formato OpenAI. Non occorre cambiare i
+workflow: il bridge invia i messaggi a `POST /chat/completions`, aggiungendo il
+percorso all'URL base quando non è già presente, e inoltra `Authorization: Bearer`
+solo quando è stata configurata una chiave.
+
+Configurazione dalla card **Admin → Planner AI**:
+
+1. scegliere **Locale**, **Remoto** o **Automatico**;
+2. per Remoto/Automatico indicare l'URL base, per esempio
+   `https://api.openai.com/v1`, e il nome esatto del modello esposto dal provider;
+3. inserire la chiave API, se richiesta dal server, e regolare timeout, token
+   massimi, temperature e top-p;
+4. usare **Verifica connessione**: il test usa i valori ancora presenti nel form
+   e chiede la risposta breve `H3_OK` senza avviare render;
+5. salvare le impostazioni Admin. Lasciare vuoto il campo chiave nei salvataggi
+   successivi per conservare quella esistente; **Rimuovi chiave** la elimina.
+
+**Automatico** usa l'API come prima scelta e ripete la richiesta sul GGUF locale
+quando la chiamata remota fallisce. Per questo profilo modello, projector e runtime
+Chat locali rimangono obbligatori. **Remoto** non esegue fallback: è utile quando
+si vuole evitare del tutto il caricamento del planner GGUF, ma un errore API ferma
+la relativa operazione. **Locale** ignora URL, modello remoto e chiave.
+
+La scelta copre Video H3 e i compiler per Image H3, Krea, Flux Edit, Anima, TTS e
+Musica. La casella **Usa il modello remoto anche per conversazione e memoria Chat**
+estende il provider alla conversazione e alla compattazione della memoria; se è
+disattivata, la Chat continua a usare il GGUF locale. In modalità Automatico il
+fallback locale vale anche per la Chat quando la casella è attiva.
+
+I parametri non sensibili sono memorizzati in `data/runtime-settings.json`. La
+chiave non viene salvata nello stesso JSON: usa `data/planner-api-key.txt`, è
+gestita solo dalle route Admin autenticate, non viene mai riletta dal browser e
+non compare negli snapshot dei job. È distinta sia dalla password Admin sia da
+eventuali credenziali ComfyUI. Proteggere comunque la cartella `data/` con i
+permessi dell'account che esegue H3 Studio.
 
 ## Dati esclusi da Git
 

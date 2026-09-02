@@ -71,6 +71,17 @@ export type ChatEngineSettings = {
   topP: number;
 };
 
+export type PlannerEngineSettings = {
+  backend: "local" | "remote" | "auto";
+  baseUrl: string;
+  model: string;
+  timeoutSeconds: number;
+  maxTokens: number;
+  temperature: number;
+  topP: number;
+  useForChat: boolean;
+};
+
 export type TtsEngineSettings = {
   root: string;
   voice: string;
@@ -108,6 +119,7 @@ export type RuntimeSettings = {
   imageEdit: ImageEditEngineSettings;
   anima: AnimaEngineSettings;
   chat: ChatEngineSettings;
+  planner: PlannerEngineSettings;
   tts: TtsEngineSettings;
   music: MusicEngineSettings;
   voiceConversion: VoiceConversionEngineSettings;
@@ -199,6 +211,16 @@ export const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
     temperature: 0.35,
     topP: 0.9,
   },
+  planner: {
+    backend: "local",
+    baseUrl: "https://api.openai.com/v1",
+    model: "",
+    timeoutSeconds: 120,
+    maxTokens: 8_192,
+    temperature: 0.2,
+    topP: 0.9,
+    useForChat: false,
+  },
   tts: {
     root: "F:\\higgsaudio\\HiggsAudio-Studio",
     voice: "English_Female.wav",
@@ -250,6 +272,7 @@ function cloneDefaults(): RuntimeSettings {
       loras: DEFAULT_RUNTIME_SETTINGS.anima.loras.map((slot) => ({ ...slot })),
     },
     chat: { ...DEFAULT_RUNTIME_SETTINGS.chat },
+    planner: { ...DEFAULT_RUNTIME_SETTINGS.planner },
     tts: { ...DEFAULT_RUNTIME_SETTINGS.tts },
     music: { ...DEFAULT_RUNTIME_SETTINGS.music },
     voiceConversion: { ...DEFAULT_RUNTIME_SETTINGS.voiceConversion },
@@ -310,6 +333,7 @@ function migrateLegacySettings(value: Record<string, unknown>): RuntimeSettings 
     imageEdit: defaults.imageEdit,
     anima: defaults.anima,
     chat: defaults.chat,
+    planner: defaults.planner,
     tts: defaults.tts,
     music: defaults.music,
     voiceConversion: defaults.voiceConversion,
@@ -330,6 +354,7 @@ function validateSettings(value: unknown): RuntimeSettings {
   const imageEdit = isRecord(value.imageEdit) ? value.imageEdit : defaults.imageEdit;
   const anima = isRecord(value.anima) ? value.anima : defaults.anima;
   const chat = isRecord(value.chat) ? value.chat : defaults.chat;
+  const planner = isRecord(value.planner) ? value.planner : defaults.planner;
   const tts = isRecord(value.tts) ? value.tts : defaults.tts;
   const music = isRecord(value.music) ? value.music : defaults.music;
   const voiceConversion = isRecord(value.voiceConversion)
@@ -372,6 +397,17 @@ function validateSettings(value: unknown): RuntimeSettings {
   const chatMaxNewTokens = Number(chat.maxNewTokens);
   const chatTemperature = Number(chat.temperature);
   const chatTopP = Number(chat.topP);
+  const plannerBackend =
+    planner.backend === "local" || planner.backend === "remote" || planner.backend === "auto"
+      ? planner.backend
+      : null;
+  const plannerBaseUrl = typeof planner.baseUrl === "string" ? planner.baseUrl.trim() : "";
+  const plannerModel = typeof planner.model === "string" ? planner.model.trim() : "";
+  const plannerTimeoutSeconds = Number(planner.timeoutSeconds);
+  const plannerMaxTokens = Number(planner.maxTokens);
+  const plannerTemperature = Number(planner.temperature);
+  const plannerTopP = Number(planner.topP);
+  const plannerUseForChat = planner.useForChat === true;
   const ttsRoot = typeof tts.root === "string" ? tts.root.trim() : "";
   const ttsVoice = typeof tts.voice === "string" ? tts.voice.trim() : "";
   const ttsTemperature = Number(tts.temperature);
@@ -449,10 +485,34 @@ function validateSettings(value: unknown): RuntimeSettings {
   if (!Number.isFinite(animaCfg) || animaCfg < 0 || animaCfg > 20) {
     throw new Error("Il CFG Anima deve essere compreso fra 0 e 20");
   }
-  if (!chatModel || !/\.gguf$/i.test(chatModel) || /mmproj/i.test(chatModel)) {
+  if (!plannerBackend) throw new Error("Backend Planner non valido");
+  if (plannerBackend !== "local") {
+    let remoteUrl: URL;
+    try { remoteUrl = new URL(plannerBaseUrl); }
+    catch { throw new Error("URL Planner remoto non valido"); }
+    if (!["http:", "https:"].includes(remoteUrl.protocol)) {
+      throw new Error("L'URL Planner remoto deve usare HTTP oppure HTTPS");
+    }
+    if (!plannerModel) throw new Error("Indica il nome del modello Planner remoto");
+  }
+  if (!Number.isInteger(plannerTimeoutSeconds) || plannerTimeoutSeconds < 10 || plannerTimeoutSeconds > 900) {
+    throw new Error("Il timeout Planner deve essere compreso fra 10 e 900 secondi");
+  }
+  if (!Number.isInteger(plannerMaxTokens) || plannerMaxTokens < 128 || plannerMaxTokens > 32768) {
+    throw new Error("I token Planner devono essere compresi fra 128 e 32.768");
+  }
+  if (!Number.isFinite(plannerTemperature) || plannerTemperature < 0 || plannerTemperature > 2) {
+    throw new Error("La temperature Planner deve essere compresa fra 0 e 2");
+  }
+  if (!Number.isFinite(plannerTopP) || plannerTopP <= 0 || plannerTopP > 1) {
+    throw new Error("Top P Planner deve essere maggiore di 0 e non superiore a 1");
+  }
+  const localChatRequired =
+    plannerBackend !== "remote" || !plannerUseForChat;
+  if (localChatRequired && (!chatModel || !/\.gguf$/i.test(chatModel) || /mmproj/i.test(chatModel))) {
     throw new Error("Seleziona un modello LLM GGUF valido per la Chat");
   }
-  if (!chatProjector || !/mmproj.*\.gguf$/i.test(chatProjector)) {
+  if (localChatRequired && (!chatProjector || !/mmproj.*\.gguf$/i.test(chatProjector))) {
     throw new Error("Seleziona il projector mmproj GGUF per la Chat vision");
   }
   if (!Number.isInteger(chatNCtx) || chatNCtx < 2_048 || chatNCtx > 262_144) {
@@ -562,6 +622,16 @@ function validateSettings(value: unknown): RuntimeSettings {
       temperature: chatTemperature,
       topP: chatTopP,
     },
+    planner: {
+      backend: plannerBackend,
+      baseUrl: plannerBaseUrl,
+      model: plannerModel,
+      timeoutSeconds: plannerTimeoutSeconds,
+      maxTokens: plannerMaxTokens,
+      temperature: plannerTemperature,
+      topP: plannerTopP,
+      useForChat: plannerUseForChat,
+    },
     tts: {
       root: ttsRoot,
       voice: ttsVoice,
@@ -622,6 +692,7 @@ export class RuntimeSettingsStore {
           ltx25: isRecord(value.ltx25) ? value.ltx25 : current.ltx25,
           anima: isRecord(value.anima) ? value.anima : current.anima,
           chat: isRecord(value.chat) ? value.chat : current.chat,
+          planner: isRecord(value.planner) ? value.planner : current.planner,
           tts: isRecord(value.tts) ? value.tts : current.tts,
           music: isRecord(value.music) ? value.music : current.music,
           voiceConversion: isRecord(value.voiceConversion)

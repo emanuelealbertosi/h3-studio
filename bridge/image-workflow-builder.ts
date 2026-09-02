@@ -2,11 +2,13 @@ import type { ComfyApiNode, ComfyApiPrompt } from "./comfy-client.js";
 import type { ImageJobReferenceInput } from "./image-job-repository.js";
 import type {
   AnimaEngineSettings,
+  EngineLoraSettings,
   ImageEditEngineSettings,
   KreaEngineSettings,
 } from "./runtime-settings.js";
 
 export const IMAGE_EDIT_MAX_REFERENCES = 4;
+export const QWEN_IMAGE_EDIT_MAX_REFERENCES = 3;
 export const MINIMAX_H3_IMAGE_MAX_REFERENCES = 9;
 export const MINIMAX_H3_IMAGE_STEPS = [8, 12, 20, 30] as const;
 export const MINIMAX_H3_IMAGE_MEGAPIXELS = [0.5, 0.7, 0.98, 2] as const;
@@ -24,6 +26,29 @@ export type MiniMaxH3ImageSettings = {
   detailStrength: number;
   preserveStrength: number;
   steps: MiniMaxH3ImageStepCount;
+  loras: EngineLoraSettings[];
+};
+export type QwenImageEditSettings = {
+  model: string;
+  encoder: string;
+  vae: string;
+  acceleratorLora: string;
+  acceleratorStrength: number;
+  steps: number;
+  cfg: number;
+  shift: number;
+  referenceMegapixels: number;
+};
+export const DEFAULT_QWEN_IMAGE_EDIT_SETTINGS: QwenImageEditSettings = {
+  model: "qwenImageEdit2511_fp8.safetensors",
+  encoder: "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+  vae: "qwen_image_vae.safetensors",
+  acceleratorLora: "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+  acceleratorStrength: 1,
+  steps: 4,
+  cfg: 1,
+  shift: 3.1,
+  referenceMegapixels: 1.5,
 };
 export const DEFAULT_MINIMAX_H3_IMAGE_SETTINGS: Omit<MiniMaxH3ImageSettings, "model"> = {
   encoder: "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
@@ -34,6 +59,7 @@ export const DEFAULT_MINIMAX_H3_IMAGE_SETTINGS: Omit<MiniMaxH3ImageSettings, "mo
   detailStrength: 0.5,
   preserveStrength: 0.6,
   steps: 20,
+  loras: [],
 };
 const KREA_REBALANCE_WEIGHTS =
   "1.0,1.0,1.0,1.0,1.0,1.0,1.0,2.5,5.0,1.1,4.0,1.0";
@@ -293,6 +319,19 @@ export function buildMiniMaxH3ImagePrompt(input: {
     "MiniMax H3 shared image/video model",
   );
   let textModel: [string, number] = ["1", 0];
+  input.settings.loras.forEach((lora, index) => {
+    const id = String(40 + index);
+    apiPrompt[id] = node(
+      "LoraLoaderModelOnly",
+      {
+        model: textModel,
+        lora_name: lora.name,
+        strength_model: lora.strength,
+      },
+      `MiniMax H3 image LoRA ${index + 1}`,
+    );
+    textModel = [id, 0];
+  });
   const turboEnabled = input.settings.steps === 8 && Boolean(input.settings.turboLora);
   if (turboEnabled) {
     apiPrompt["2"] = node(
@@ -443,6 +482,7 @@ export function buildFlux2KleinEditPrompt(input: {
   height: number;
   filenamePrefix: string;
   settings: ImageEditEngineSettings;
+  loras?: EngineLoraSettings[];
   references: ImageJobReferenceInput[];
   template?: ComfyApiPrompt;
 }): ComfyApiPrompt {
@@ -460,7 +500,7 @@ export function buildFlux2KleinEditPrompt(input: {
   const apiPrompt: ComfyApiPrompt = cloneTemplate(input.template);
   // Reference chains and optional accelerators are rebuilt for the requested
   // 1–4 inputs. Other nodes in a compatible selected blueprint are preserved.
-  for (const id of ["10", "11", "60", "61", "62", "63"]) {
+  for (const id of ["10", "11", "60", "61", "62", "63", "70", "71", "72", "73", "74"]) {
     delete apiPrompt[id];
   }
   for (let id = 20; id <= 39; id += 1) delete apiPrompt[String(id)];
@@ -500,6 +540,19 @@ export function buildFlux2KleinEditPrompt(input: {
     ),
   });
   let guidedModel: [string, number] = ["1", 0];
+  (input.loras ?? []).forEach((lora, index) => {
+    const id = String(70 + index);
+    apiPrompt[id] = node(
+      "LoraLoaderModelOnly",
+      {
+        model: guidedModel,
+        lora_name: lora.name,
+        strength_model: lora.strength,
+      },
+      `Flux Edit LoRA ${index + 1}`,
+    );
+    guidedModel = [id, 0];
+  });
   if (input.settings.attentionBackend !== "auto") {
     apiPrompt["11"] = node(
       "ModelAttentionBackend",
@@ -594,6 +647,182 @@ export function buildFlux2KleinEditPrompt(input: {
     "SaveImage",
     { images: ["62", 0], filename_prefix: input.filenamePrefix },
     "Save edited image",
+  );
+  return apiPrompt;
+}
+
+export function buildQwenImageEditPrompt(input: {
+  prompt: string;
+  seed: number;
+  width: number;
+  height: number;
+  filenamePrefix: string;
+  settings?: QwenImageEditSettings;
+  loras?: EngineLoraSettings[];
+  references: ImageJobReferenceInput[];
+}): ComfyApiPrompt {
+  assertImageDimensions(input.width, input.height);
+  if (
+    input.references.length < 1 ||
+    input.references.length > QWEN_IMAGE_EDIT_MAX_REFERENCES
+  ) {
+    throw new Error("Qwen Image Edit richiede da 1 a 3 reference");
+  }
+  const settings = input.settings ?? DEFAULT_QWEN_IMAGE_EDIT_SETTINGS;
+  const referenceMap = input.references
+    .map((reference, index) =>
+      "Image " + (index + 1) + " = " +
+      REFERENCE_ROLE_LABELS[reference.role] + " (" + reference.name + ")"
+    )
+    .join("; ");
+  const editInstruction = input.prompt + "\n\nReference map: " + referenceMap + ".";
+  const apiPrompt: ComfyApiPrompt = {
+    "1": node(
+      "UNETLoader",
+      { unet_name: settings.model, weight_dtype: "default" },
+      "Qwen Image Edit 2511 FP8",
+    ),
+    "2": node(
+      "CLIPLoader",
+      { clip_name: settings.encoder, type: "qwen_image", device: "default" },
+      "Qwen Image Edit text encoder",
+    ),
+    "3": node("VAELoader", { vae_name: settings.vae }, "Qwen Image VAE"),
+    "4": node(
+      "PathchSageAttentionKJ",
+      {
+        model: ["1", 0],
+        sage_attention: "auto",
+        allow_compile: false,
+      },
+      "Qwen automatic SageAttention",
+    ),
+  };
+
+  let modelInput: [string, number] = ["4", 0];
+  if (settings.acceleratorLora) {
+    apiPrompt["5"] = node(
+      "LoraLoaderModelOnly",
+      {
+        model: modelInput,
+        lora_name: settings.acceleratorLora,
+        strength_model: settings.acceleratorStrength,
+      },
+      "Qwen Image Edit 2511 Lightning",
+    );
+    modelInput = ["5", 0];
+  }
+  (input.loras ?? []).forEach((lora, index) => {
+    const id = String(20 + index);
+    apiPrompt[id] = node(
+      "LoraLoaderModelOnly",
+      {
+        model: modelInput,
+        lora_name: lora.name,
+        strength_model: lora.strength,
+      },
+      `Qwen Edit LoRA ${index + 1}`,
+    );
+    modelInput = [id, 0];
+  });
+  apiPrompt["6"] = node(
+    "ModelSamplingAuraFlow",
+    { model: modelInput, shift: settings.shift },
+    "Qwen sampling shift",
+  );
+  apiPrompt["7"] = node(
+    "CFGNorm",
+    { model: ["6", 0], strength: 1, pre_cfg: false },
+    "Qwen CFG normalization",
+  );
+
+  const positiveInputs: Record<string, unknown> = {
+    clip: ["2", 0],
+    vae: ["3", 0],
+    prompt: editInstruction,
+  };
+  const negativeInputs: Record<string, unknown> = {
+    clip: ["2", 0],
+    vae: ["3", 0],
+    prompt: "low quality, blurry, compression artifacts",
+  };
+  input.references.forEach((reference, index) => {
+    const loadId = String(30 + index * 2);
+    const scaleId = String(31 + index * 2);
+    apiPrompt[loadId] = node(
+      "LoadImage",
+      { image: loadImageName(reference.file) },
+      `Qwen reference ${index + 1}: ${reference.role}`,
+    );
+    apiPrompt[scaleId] = node(
+      "ImageScaleToTotalPixels",
+      {
+        image: [loadId, 0],
+        upscale_method: "lanczos",
+        megapixels: settings.referenceMegapixels,
+        resolution_steps: 1,
+      },
+      `Normalize Qwen reference ${index + 1}`,
+    );
+    positiveInputs[`image${index + 1}`] = [scaleId, 0];
+    negativeInputs[`image${index + 1}`] = [scaleId, 0];
+  });
+  apiPrompt["60"] = node(
+    "TextEncodeQwenImageEditPlus",
+    positiveInputs,
+    "Qwen edit instruction",
+  );
+  apiPrompt["61"] = node(
+    "TextEncodeQwenImageEditPlus",
+    negativeInputs,
+    "Qwen edit negative",
+  );
+  apiPrompt["62"] = node(
+    "FluxKontextMultiReferenceLatentMethod",
+    {
+      conditioning: ["60", 0],
+      reference_latents_method: "index_timestep_zero",
+    },
+    "Qwen positive reference method",
+  );
+  apiPrompt["63"] = node(
+    "FluxKontextMultiReferenceLatentMethod",
+    {
+      conditioning: ["61", 0],
+      reference_latents_method: "index_timestep_zero",
+    },
+    "Qwen negative reference method",
+  );
+  apiPrompt["64"] = node(
+    "EmptySD3LatentImage",
+    { width: input.width, height: input.height, batch_size: 1 },
+    "Qwen output canvas",
+  );
+  apiPrompt["65"] = node(
+    "KSampler",
+    {
+      model: ["7", 0],
+      seed: input.seed,
+      steps: settings.steps,
+      cfg: settings.cfg,
+      sampler_name: "euler",
+      scheduler: "simple",
+      positive: ["62", 0],
+      negative: ["63", 0],
+      latent_image: ["64", 0],
+      denoise: 1,
+    },
+    "Qwen Image Edit sampler",
+  );
+  apiPrompt["66"] = node(
+    "VAEDecode",
+    { samples: ["65", 0], vae: ["3", 0] },
+    "Decode Qwen edit",
+  );
+  apiPrompt["67"] = node(
+    "SaveImage",
+    { images: ["66", 0], filename_prefix: input.filenamePrefix },
+    "Save Qwen edit",
   );
   return apiPrompt;
 }

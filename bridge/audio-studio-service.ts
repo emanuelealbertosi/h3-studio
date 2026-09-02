@@ -11,6 +11,7 @@ import type { ComfyProgressTracker } from "./comfy-progress.js";
 import { AudioJobRepository, type AudioOutput } from "./audio-job-repository.js";
 import type { ExternalMediaRepository } from "./external-media-repository.js";
 import type { RuntimeSettingsStore } from "./runtime-settings.js";
+import type { LlmProviderService } from "./llm-provider.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -270,6 +271,7 @@ export class AudioStudioService {
     private readonly comfy: ComfyClient,
     private readonly repository: AudioJobRepository,
     private readonly runtimeSettings: RuntimeSettingsStore,
+    private readonly llm: LlmProviderService,
     private readonly progressTracker: ComfyProgressTracker,
     private readonly externalMedia: ExternalMediaRepository,
     private readonly comfyOutputDir: string,
@@ -284,12 +286,12 @@ export class AudioStudioService {
     const voices = existsSync(voicesDir)
       ? (await readdir(voicesDir)).filter((file) => /\.(wav|mp3|ogg|flac)$/i.test(file)).sort()
       : [];
-    const [musicModels, encoders, vaes, musicNode, chatRuntime] = await Promise.all([
+    const [musicModels, encoders, vaes, musicNode, plannerRuntime] = await Promise.all([
       this.comfy.modelFiles("diffusion_models").catch((): string[] => []),
       this.comfy.modelFiles("text_encoders").catch((): string[] => []),
       this.comfy.modelFiles("vae").catch((): string[] => []),
       this.comfy.objectInfo("MiniMaxMusic3TextEncode").catch(() => null),
-      this.comfy.chatStatus().catch(() => null),
+      this.llm.status("planner").catch(() => null),
     ]);
     return {
       tts: {
@@ -298,8 +300,9 @@ export class AudioStudioService {
         voices,
         defaultVoice: settings.tts.voice,
         unloadPolicy: "always-after-job",
-        plannerReady: chatRuntime?.ready === true,
-        plannerModel: settings.chat.model,
+        plannerReady: plannerRuntime?.ready === true,
+        plannerModel: plannerRuntime?.model ?? settings.chat.model,
+        plannerBackend: plannerRuntime?.backend ?? "local",
         transcriptionReady: existsSync(path.join(root, "python", "python.exe")),
         transcriptionModel: "openai/whisper-small",
         transcriptionUnloadPolicy: "process-exit",
@@ -310,8 +313,9 @@ export class AudioStudioService {
           && encoders.includes(settings.music.encoder)
           && vaes.includes(settings.music.vae),
         ...settings.music,
-        plannerReady: chatRuntime?.ready === true,
-        plannerModel: settings.chat.model,
+        plannerReady: plannerRuntime?.ready === true,
+        plannerModel: plannerRuntime?.model ?? settings.chat.model,
+        plannerBackend: plannerRuntime?.backend ?? "local",
       },
       voiceConversion: (() => {
         const conversionRoot = settings.voiceConversion.root;
@@ -341,17 +345,13 @@ export class AudioStudioService {
     const instrumental = value.instrumental !== false;
     const durationSeconds = boundedNumber(value.durationSeconds ?? 30, "Durata", 5, 360);
     const providedLyrics = typeof value.lyrics === "string" ? value.lyrics.trim().slice(0, 30_000) : "";
-    const settings = (await this.runtimeSettings.get()).chat;
+    let plannerBackend: "local" | "remote" | null = null;
     try {
-      const response = await this.comfy.chatGenerate({
-        model: settings.model,
-        projector: settings.projector,
-        n_ctx: settings.nCtx,
-        n_gpu_layers: settings.nGpuLayers,
-        n_threads: settings.nThreads,
-        max_tokens: Math.max(1_024, Math.min(4_096, settings.maxNewTokens)),
+      const response = await this.llm.generate({
+        purpose: "planner",
+        maxTokens: 4_096,
         temperature: 0.35,
-        top_p: 0.9,
+        topP: 0.9,
         messages: [
           { role: "system", content: MUSIC_PLANNER_SYSTEM_PROMPT },
           {
@@ -364,14 +364,14 @@ export class AudioStudioService {
             ].join("\n\n"),
           },
         ],
-        images: [],
       });
+      plannerBackend = response.backend;
       if (!response.ok || !response.text?.trim()) {
         throw new Error(response.error ?? "LLM non ha preparato il brano");
       }
       return normalizeMusicPlan(response.text, instrumental);
     } finally {
-      await this.comfy.chatUnload().catch(() => undefined);
+      if (plannerBackend === "local") await this.llm.unloadLocal();
     }
   }
 

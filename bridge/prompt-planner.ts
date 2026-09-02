@@ -1,5 +1,4 @@
-import type { ComfyClient } from "./comfy-client.js";
-import type { RuntimeSettingsStore } from "./runtime-settings.js";
+import type { LlmProviderService } from "./llm-provider.js";
 
 export type PromptPlannerMode = "image_generate" | "image_edit" | "image_anima" | "tts";
 
@@ -79,20 +78,14 @@ export function normalizePromptPlan(raw: string, mode: PromptPlannerMode): Promp
 }
 
 export class PromptPlannerService {
-  constructor(
-    private readonly comfy: ComfyClient,
-    private readonly runtimeSettings: RuntimeSettingsStore,
-  ) {}
+  constructor(private readonly llm: LlmProviderService) {}
 
   async status() {
-    const [settings, runtime] = await Promise.all([
-      this.runtimeSettings.get(),
-      this.comfy.chatStatus().catch(() => null),
-    ]);
+    const runtime = await this.llm.status("planner");
     return {
-      ready: runtime?.ready === true,
-      model: settings.chat.model,
-      unloadPolicy: "always-after-plan",
+      ...runtime,
+      ready: runtime.ready === true,
+      unloadPolicy: runtime.backend === "local" ? "always-after-plan" : "remote-stateless",
     };
   }
 
@@ -115,17 +108,13 @@ export class PromptPlannerService {
           return `reference image ${index + 1}: role=${role}${name ? `, name=${name}` : ""}`;
         })
       : [];
-    const settings = (await this.runtimeSettings.get()).chat;
+    let backend: "local" | "remote" | null = null;
     try {
-      const response = await this.comfy.chatGenerate({
-        model: settings.model,
-        projector: settings.projector,
-        n_ctx: settings.nCtx,
-        n_gpu_layers: settings.nGpuLayers,
-        n_threads: settings.nThreads,
-        max_tokens: Math.max(768, Math.min(2_048, settings.maxNewTokens)),
+      const response = await this.llm.generate({
+        purpose: "planner",
+        maxTokens: 2_048,
         temperature: 0.2,
-        top_p: 0.9,
+        topP: 0.9,
         messages: [
           { role: "system", content: PLANNER_SYSTEM_PROMPT },
           {
@@ -138,14 +127,14 @@ export class PromptPlannerService {
             ].join("\n\n"),
           },
         ],
-        images: [],
       });
+      backend = response.backend;
       if (!response.ok || !response.text?.trim()) {
         throw new Error(response.error ?? "LLM non ha preparato il prompt");
       }
       return normalizePromptPlan(response.text, mode);
     } finally {
-      await this.comfy.chatUnload().catch(() => undefined);
+      if (backend === "local") await this.llm.unloadLocal();
     }
   }
 }

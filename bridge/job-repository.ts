@@ -726,6 +726,7 @@ export class JobRepository {
         inpaintMaskGrow: job.inpaint_mask_grow,
         inpaintStartSeconds: job.inpaint_start_seconds,
         inpaintEndSeconds: job.inpaint_end_seconds,
+        loraOverrides: engine.loras.map((lora) => ({ ...lora, enabled: true })),
       },
       candidates: candidates.map((candidate) => ({
         index: candidate.candidate_index,

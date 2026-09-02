@@ -10,6 +10,13 @@ import type { ComfyProgressTracker } from "./comfy-progress.js";
 import type { JobRepository } from "./job-repository.js";
 import { buildLtx25Prompt } from "./ltx25-workflow.js";
 import type { SamRuntimeControl } from "./sam-runtime-control.js";
+import type { LlmProviderService } from "./llm-provider.js";
+import { injectRemoteVideoPlan, planH3Video } from "./video-prompt-planner.js";
+import {
+  normalizeJobLoraOverrides,
+  resolveJobLoras,
+  type JobLoraOverride,
+} from "../lib/job-loras.js";
 
 const MAX_SEED = 9_007_199_254_740_000;
 const BASE_SECONDS_5S_05MP = 172;
@@ -95,6 +102,7 @@ export type StudioJobRequest = {
   inpaintMaskGrow: number;
   inpaintStartSeconds: number;
   inpaintEndSeconds: number;
+  loraOverrides?: JobLoraOverride[];
 };
 
 export type PreparedCandidate = {
@@ -448,6 +456,10 @@ function normalizeRequest(value: unknown): StudioJobRequest {
   ) {
     throw new Error("La fine dell'intervallo masking deve essere successiva all'inizio");
   }
+  const loraOverrides = normalizeJobLoraOverrides(value.loraOverrides);
+  if (videoEngine === "ltx25" && loraOverrides?.some((item) => item.enabled)) {
+    throw new Error("I LoRA per esecuzione sono disponibili con MiniMax H3; LTX 2.5 richiede adattatori compatibili dedicati");
+  }
 
   if (
     videoEngine === "ltx25" &&
@@ -498,6 +510,7 @@ function normalizeRequest(value: unknown): StudioJobRequest {
     inpaintMaskGrow,
     inpaintStartSeconds,
     inpaintEndSeconds,
+    loraOverrides,
   };
 }
 
@@ -621,7 +634,7 @@ function resolveEngineSettings(
       : request.qualityMode === "med"
         ? 20
         : 30;
-  const loras = runtimeSettings.h3.loras.map((slot) => ({ ...slot }));
+  const loras = resolveJobLoras(runtimeSettings.h3.loras, request.loraOverrides);
   const firstLora = loras[0];
   return {
     family: "h3",
@@ -1017,6 +1030,7 @@ export class StudioJobService {
     private readonly progressTracker: ComfyProgressTracker,
     private readonly jobs: JobRepository,
     private readonly samRuntime?: SamRuntimeControl,
+    private readonly llm?: LlmProviderService,
   ) {
     this.progressTracker.onNode(({ promptId, classType }) => {
       if (
@@ -1064,6 +1078,7 @@ export class StudioJobService {
     rawRequest: unknown,
     excludedSeeds: ReadonlySet<number> = new Set(),
     runtimeOverride?: RuntimeSettings,
+    compilePlanner = false,
   ) {
     const wantsMasking = isRecord(rawRequest) &&
       rawRequest.videoEngine !== "ltx25" &&
@@ -1124,19 +1139,40 @@ export class StudioJobService {
         throw new Error(`LTX 2.5 non pronto: mancano ${missing.join(", ")}`);
       }
     }
-    return {
-      prepared: prepareStudioJob(
-        sourcePrompt,
-        rawRequest,
-        runtimeSettings,
-        randomUUID(),
-        excludedSeeds,
-      ),
-    };
+    const prepared = prepareStudioJob(
+      sourcePrompt,
+      rawRequest,
+      runtimeSettings,
+      randomUUID(),
+      excludedSeeds,
+    );
+    if (
+      compilePlanner &&
+      prepared.request.videoEngine === "h3" &&
+      runtimeSettings.planner.backend !== "local"
+    ) {
+      if (!this.llm) throw new Error("Provider Planner remoto non configurato");
+      try {
+        const plan = await planH3Video(this.llm, prepared.request);
+        for (const candidate of prepared.candidates) {
+          injectRemoteVideoPlan(candidate.prompt, plan.response);
+        }
+      } finally {
+        if (runtimeSettings.planner.backend === "auto") {
+          await this.llm.unloadLocal();
+        }
+      }
+    }
+    if (prepared.engineSettings.loras.length) {
+      const installedLoras = await this.comfy.models("loras");
+      const missing = prepared.engineSettings.loras.find((lora) => !installedLoras.includes(lora.name));
+      if (missing) throw new Error(`LoRA non installato: ${missing.name}`);
+    }
+    return { prepared };
   }
 
   async submit(rawRequest: unknown) {
-    const { prepared } = await this.prepare(rawRequest);
+    const { prepared } = await this.prepare(rawRequest, new Set(), undefined, true);
     return this.submitPrepared(prepared);
   }
 
@@ -1193,6 +1229,7 @@ export class StudioJobService {
       },
       new Set(original.candidates.map((candidate) => candidate.seed)),
       preservedSettings,
+      true,
     );
     return this.submitPrepared(prepared);
   }

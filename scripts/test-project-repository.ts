@@ -5,6 +5,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { JobRepository } from "../bridge/job-repository.js";
 import { ProjectRepository } from "../bridge/project-repository.js";
+import { ExternalMediaRepository } from "../bridge/external-media-repository.js";
 
 const dataDir = mkdtempSync(path.join(tmpdir(), "h3-studio-projects-"));
 const jobs = new JobRepository(dataDir);
@@ -95,6 +96,7 @@ try {
   assert.equal(renamedJob?.candidates[0].displayName, "Duello del drago");
 
   const projects = new ProjectRepository(jobs.databasePath);
+  const externalMedia = new ExternalMediaRepository(jobs.databasePath);
   try {
     const first = projects.create("Progetto A");
     const second = projects.create("Progetto B");
@@ -159,6 +161,19 @@ try {
     const copied = projects.copyClip(withClip!.clips[0].id, second.id);
     assert.equal(copied?.clips.length, 1);
 
+    const sharedProject = projects.create("Progetto condiviso da eliminare");
+    assert(sharedProject);
+    const sharedCopy = projects.copyClip(withClip!.clips[0].id, sharedProject.id);
+    assert.equal(sharedCopy?.clips.length, 1);
+    const sharedPlan = projects.deletionPlan(sharedProject.id);
+    assert.equal(sharedPlan.videoCandidates.length, 0);
+    assert.equal(sharedPlan.preserved.videoJobs, 1);
+    projects.delete(sharedProject.id);
+    assert.equal(projects.get(sharedProject.id), null);
+    assert.equal(jobs.get("test-job")?.projectId, first.id);
+    assert.equal(projects.get(first.id)?.clips.length, 1);
+    assert.equal(projects.get(second.id)?.clips.length, 1);
+
     const moved = projects.moveClip(withClip!.clips[0].id, second.id);
     assert.equal(moved?.clips.length, 2);
     assert.equal(projects.get(first.id)?.clips.length, 0);
@@ -189,6 +204,24 @@ try {
     assert.equal(projects.get(second.id)?.clips.length, 0);
     assert.equal(jobs.get("test-job"), null);
 
+    const doomedProject = projects.create("Progetto da eliminare");
+    assert(doomedProject);
+    jobs.assignProject("failed-job", doomedProject.id);
+    const doomedUpload = externalMedia.upsert({
+      kind: "picture",
+      file: "uploads/doomed.png [input]",
+      name: "doomed.png",
+      original: "doomed.png",
+      size: 123,
+    }, doomedProject.id);
+    const doomedPlan = projects.deletionPlan(doomedProject.id);
+    assert.equal(doomedPlan.videoCandidates.length, 1);
+    assert.equal(doomedPlan.videoCandidates[0].job_id, "failed-job");
+    assert.equal(doomedPlan.videoCandidates[0].candidate_index, 1);
+    assert.equal(doomedPlan.externalMedia.length, 1);
+    assert.equal(doomedPlan.externalMedia[0].id, doomedUpload.id);
+    assert.deepEqual(doomedPlan.busy, { video: 0, image: 0, audio: 0 });
+    assert.throws(() => projects.delete(doomedProject.id), /Pulizia media incompleta/);
     const failedDeleted = jobs.deleteCandidate("failed-job", 1);
     assert.equal(failedDeleted.jobDeleted, true);
     assert.equal(failedDeleted.removedClips, 0);
@@ -200,7 +233,12 @@ try {
       },
     ]);
     assert.equal(jobs.get("failed-job"), null);
+    externalMedia.delete(doomedUpload.id);
+    const deletedProject = projects.delete(doomedProject.id);
+    assert.equal(deletedProject.name, "Progetto da eliminare");
+    assert.equal(projects.get(doomedProject.id), null);
   } finally {
+    externalMedia.close();
     projects.close();
   }
   console.log("Project repository: OK");

@@ -8,6 +8,7 @@ import type { ImageStudioService } from "./image-studio-service.js";
 import type { AudioStudioService } from "./audio-studio-service.js";
 import type { RuntimeSettingsStore } from "./runtime-settings.js";
 import type { AudioRoutingRole, GenerationMode, StudioJobService } from "./studio-job.js";
+import type { LlmMessage, LlmProviderService } from "./llm-provider.js";
 
 type PlannedAction = {
   type: "generate_video" | "generate_image" | "generate_minimax_image" | "edit_image" | "generate_anima" | "generate_tts" | "generate_music";
@@ -585,6 +586,7 @@ export class ChatService {
     private readonly comfy: ComfyClient,
     private readonly repository: ChatRepository,
     private readonly runtimeSettings: RuntimeSettingsStore,
+    private readonly llm: LlmProviderService,
     private readonly studioJobs: StudioJobService,
     private readonly imageStudio: ImageStudioService,
     private readonly audioStudio: AudioStudioService,
@@ -681,14 +683,7 @@ export class ChatService {
   async status() {
     const [settings, runtime] = await Promise.all([
       this.runtimeSettings.get(),
-      this.comfy.chatStatus().catch((error) => ({
-        ok: false,
-        ready: false,
-        loaded: false,
-        models: [] as string[],
-        projectors: [] as string[],
-        error: error instanceof Error ? error.message : "Nodo Chat non disponibile",
-      })),
+      this.llm.status("chat"),
     ]);
     return { ...runtime, settings: settings.chat };
   }
@@ -724,17 +719,17 @@ export class ChatService {
     const projectSystemPrompt = conversation.systemPromptEnabled
       ? conversation.systemPrompt.trim()
       : "";
-    const modelMessages = [
+    const modelMessages: LlmMessage[] = [
       { role: "system", content: CHAT_SYSTEM_PROMPT },
       { role: "system", content: routeInstruction(route) },
       ...(projectSystemPrompt
         ? [{
-            role: "system",
+            role: "system" as const,
             content: `PROJECT_CHAT_PERSONA (configured by the user for this project):\n${projectSystemPrompt}\n\nFor ordinary conversation, fully adopt this as your visible character, identity, relationship, tone, vocabulary and behavior. If asked who you are, answer according to this persona rather than identifying yourself as H3 Studio. Do not mention the underlying app or workflow router unless the user explicitly asks about the software. Ignore earlier assistant self-descriptions or tone when they conflict with this current persona. The persona must never alter the required JSON response schema, media routing, attachment numbering, technical constraints or safety rules.`,
           }]
         : []),
       ...(context.summary
-        ? [{ role: "system", content: `PROJECT_MEMORY:\n${context.summary}` }]
+        ? [{ role: "system" as const, content: `PROJECT_MEMORY:\n${context.summary}` }]
         : []),
       ...history.map((message) => ({
         role: message.role,
@@ -745,17 +740,12 @@ export class ChatService {
     ];
     let rawText = "";
     try {
-      const response = await this.comfy.chatGenerate({
-        model: settings.model,
-        projector: settings.projector,
-        n_ctx: settings.nCtx,
-        n_gpu_layers: settings.nGpuLayers,
-        n_threads: settings.nThreads,
-        max_tokens: settings.maxNewTokens,
+      const response = await this.llm.generate({
+        purpose: "chat",
+        maxTokens: settings.maxNewTokens,
         temperature: settings.temperature,
-        top_p: settings.topP,
+        topP: settings.topP,
         messages: modelMessages,
-        images: [],
       });
       if (!response.ok || !response.text) throw new Error(response.error ?? "LLM non ha risposto");
       rawText = response.text;
@@ -828,15 +818,11 @@ export class ChatService {
         : "";
       return `${message.role === "user" ? "UTENTE" : "ASSISTENTE"}: ${message.content.slice(0, 2_500)}${action}`;
     }).join("\n\n");
-    const response = await this.comfy.chatGenerate({
-      model: settings.model,
-      projector: settings.projector,
-      n_ctx: settings.nCtx,
-      n_gpu_layers: settings.nGpuLayers,
-      n_threads: settings.nThreads,
-      max_tokens: Math.min(1_024, settings.maxNewTokens),
+    const response = await this.llm.generate({
+      purpose: "chat",
+      maxTokens: Math.min(1_024, settings.maxNewTokens),
       temperature: 0.1,
-      top_p: 0.9,
+      topP: 0.9,
       messages: [
         { role: "system", content: MEMORY_SYSTEM_PROMPT },
         {
@@ -844,7 +830,6 @@ export class ChatService {
           content: `MEMORIA ESISTENTE:\n${context.summary || "(vuota)"}\n\nNUOVA TRASCRIZIONE:\n${transcript}`,
         },
       ],
-      images: [],
     });
     if (!response.ok || !response.text?.trim()) {
       throw new Error(response.error ?? "Compattazione memoria non disponibile");

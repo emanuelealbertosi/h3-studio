@@ -26,18 +26,25 @@ import {
   buildFlux2KleinEditPrompt,
   buildKreaGeneratePrompt,
   buildMiniMaxH3ImagePrompt,
+  buildQwenImageEditPrompt,
   DEFAULT_MINIMAX_H3_IMAGE_SETTINGS,
+  DEFAULT_QWEN_IMAGE_EDIT_SETTINGS,
   IMAGE_API_MAX_PIXELS,
   IMAGE_EDIT_MAX_REFERENCES,
   IMAGE_UI_TARGET_MAX_PIXELS,
   MINIMAX_H3_IMAGE_MEGAPIXELS,
   MINIMAX_H3_IMAGE_MAX_REFERENCES,
   MINIMAX_H3_IMAGE_STEPS,
+  QWEN_IMAGE_EDIT_MAX_REFERENCES,
   type MiniMaxH3ImageMegapixels,
   type MiniMaxH3ImageStepCount,
 } from "./image-workflow-builder.js";
 import type { RuntimeSettings, RuntimeSettingsStore } from "./runtime-settings.js";
 import type { ComfyProgressTracker } from "./comfy-progress.js";
+import {
+  normalizeJobLoraOverrides,
+  resolveJobLoras,
+} from "../lib/job-loras.js";
 
 const MAX_SEED = 9_007_199_254_740_000;
 const referenceRoles = new Set<ImageReferenceRole>([
@@ -140,7 +147,11 @@ export function normalizeImageRequest(value: unknown) {
     : value.mode === "anima"
       ? "anima"
       : "generate";
-  const imageEngine = value.engine === "minimax" ? "minimax" : "default";
+  const imageEngine = value.engine === "minimax"
+    ? "minimax"
+    : value.engine === "qwen" && imageMode === "edit"
+      ? "qwen"
+      : "default";
   // The persisted DB mode remains backward compatible; the engine snapshot
   // distinguishes Anima jobs from ordinary Krea generations.
   const mode: ImageJobMode = imageMode === "edit" ? "edit" : "generate";
@@ -231,11 +242,15 @@ export function normalizeImageRequest(value: unknown) {
   if (!Array.isArray(rawReferences)) throw new Error("Le reference devono essere un array");
   const referenceLimit = imageEngine === "minimax"
     ? MINIMAX_H3_IMAGE_MAX_REFERENCES
-    : IMAGE_EDIT_MAX_REFERENCES;
+    : imageEngine === "qwen"
+      ? QWEN_IMAGE_EDIT_MAX_REFERENCES
+      : IMAGE_EDIT_MAX_REFERENCES;
   if (rawReferences.length > referenceLimit) {
     throw new Error(imageEngine === "minimax"
       ? "Image H3 supporta al massimo 9 reference"
-      : "Flux.2 Klein Edit supporta al massimo 4 reference");
+      : imageEngine === "qwen"
+        ? "Qwen Image Edit supporta al massimo 3 reference"
+        : "Flux.2 Klein Edit supporta al massimo 4 reference");
   }
   if (imageMode === "edit" && rawReferences.length === 0) {
     throw new Error("La modalità Edit richiede almeno una reference");
@@ -244,6 +259,7 @@ export function normalizeImageRequest(value: unknown) {
     throw new Error("Le reference si usano in modalità Edit");
   }
   const references = rawReferences.map(normalizeReference);
+  const loraOverrides = normalizeJobLoraOverrides(value.loraOverrides);
   const requestedTag = typeof value.tag === "string" ? value.tag : "";
   const tag = projectTags.has(requestedTag as ImageProjectTag)
     ? (requestedTag as ImageProjectTag)
@@ -265,6 +281,7 @@ export function normalizeImageRequest(value: unknown) {
     seedMode,
     requestedSeed,
     references,
+    loraOverrides,
     tag,
   };
 }
@@ -349,26 +366,73 @@ export class ImageStudioService {
     runtimeOverride?: RuntimeSettings,
   ): Promise<PreparedImageJob> {
     const request = normalizeImageRequest(value);
+    const workflowTemplatePromise = request.imageEngine === "qwen"
+      ? Promise.resolve({} as ComfyApiPrompt)
+      : readWorkflowTemplate(
+          request.imageEngine === "minimax"
+            ? this.minimaxWorkflowPath
+            : request.imageMode === "edit"
+              ? this.editWorkflowPath
+            : request.imageMode === "anima"
+              ? this.animaWorkflowPath
+              : this.generateWorkflowPath,
+        );
     const [settings, workflowTemplate] = await Promise.all([
       runtimeOverride ?? this.runtimeSettings.get(),
-      readWorkflowTemplate(
-        request.imageEngine === "minimax"
-          ? this.minimaxWorkflowPath
-          : request.imageMode === "edit"
-            ? this.editWorkflowPath
-          : request.imageMode === "anima"
-            ? this.animaWorkflowPath
-            : this.generateWorkflowPath,
-      ),
+      workflowTemplatePromise,
     ]);
     const id = randomUUID();
     const baseSeed = request.requestedSeed ?? randomSeed();
     const usedRandomSeeds = new Set<number>();
+    const globalLoras = request.imageEngine === "minimax"
+      ? settings.h3.loras
+      : request.imageEngine === "qwen"
+        ? []
+      : request.imageMode === "anima"
+        ? settings.anima.loras
+        : request.imageMode === "edit"
+          ? []
+          : settings.krea.loras;
+    const jobLoras = resolveJobLoras(globalLoras, request.loraOverrides);
+    if (jobLoras.length) {
+      const installedLoras = await this.comfy.modelFiles("loras");
+      const missing = jobLoras.find((lora) => !installedLoras.includes(lora.name));
+      if (missing) throw new Error(`LoRA non installato: ${missing.name}`);
+    }
     const minimaxSettings = {
       model: settings.h3.model,
       ...DEFAULT_MINIMAX_H3_IMAGE_SETTINGS,
       steps: request.h3Steps,
+      loras: jobLoras,
+      turboLora: jobLoras.some((lora) => lora.name === DEFAULT_MINIMAX_H3_IMAGE_SETTINGS.turboLora)
+        ? ""
+        : DEFAULT_MINIMAX_H3_IMAGE_SETTINGS.turboLora,
+      detailLora: jobLoras.some((lora) => lora.name === DEFAULT_MINIMAX_H3_IMAGE_SETTINGS.detailLora)
+        ? ""
+        : DEFAULT_MINIMAX_H3_IMAGE_SETTINGS.detailLora,
     };
+    const minimaxSystemLoras = [
+      ...(minimaxSettings.steps === 8 && minimaxSettings.turboLora
+        ? [{ name: minimaxSettings.turboLora, strength: minimaxSettings.turboStrength }]
+        : []),
+      ...(request.references.length > 0 && minimaxSettings.detailLora
+        ? [{ name: minimaxSettings.detailLora, strength: minimaxSettings.detailStrength }]
+        : []),
+    ].filter((lora) => !jobLoras.some((item) => item.name === lora.name));
+    const qwenDefaults = DEFAULT_QWEN_IMAGE_EDIT_SETTINGS;
+    const qwenAcceleratorSelected = jobLoras.some(
+      (lora) => lora.name === qwenDefaults.acceleratorLora,
+    );
+    const qwenSettings = {
+      ...qwenDefaults,
+      acceleratorLora: qwenAcceleratorSelected ? "" : qwenDefaults.acceleratorLora,
+    };
+    const qwenSystemLoras = qwenSettings.acceleratorLora
+      ? [{
+          name: qwenSettings.acceleratorLora,
+          strength: qwenSettings.acceleratorStrength,
+        }]
+      : [];
     const engine = request.imageEngine === "minimax"
       ? {
           kind: "minimax-h3-image" as const,
@@ -392,15 +456,24 @@ export class ImageStudioService {
           detailLora: minimaxSettings.detailLora,
           detailStrength: minimaxSettings.detailStrength,
           preserveStrength: minimaxSettings.preserveStrength,
-          loras: [
-            ...(minimaxSettings.steps === 8 && minimaxSettings.turboLora
-              ? [{ name: minimaxSettings.turboLora, strength: minimaxSettings.turboStrength }]
-              : []),
-            ...(request.references.length > 0 && minimaxSettings.detailLora
-              ? [{ name: minimaxSettings.detailLora, strength: minimaxSettings.detailStrength }]
-              : []),
-          ],
+          loras: [...jobLoras, ...minimaxSystemLoras],
+          jobLoras,
         }
+      : request.imageEngine === "qwen"
+        ? {
+            kind: "qwen-image-edit" as const,
+            model: qwenSettings.model,
+            encoder: qwenSettings.encoder,
+            vae: qwenSettings.vae,
+            steps: qwenSettings.steps,
+            cfg: qwenSettings.cfg,
+            sampler: "euler",
+            scheduler: "simple",
+            compositionPreset: request.compositionPreset,
+            effectivePrompt: request.effectivePrompt,
+            loras: [...qwenSystemLoras, ...jobLoras],
+            jobLoras,
+          }
       : request.imageMode === "edit"
       ? {
           kind: "flux2-klein-edit" as const,
@@ -415,6 +488,8 @@ export class ImageStudioService {
           attentionBackend: settings.imageEdit.attentionBackend,
           compositionPreset: request.compositionPreset,
           effectivePrompt: request.effectivePrompt,
+          loras: jobLoras,
+          jobLoras,
         }
       : request.imageMode === "anima"
         ? {
@@ -428,7 +503,8 @@ export class ImageStudioService {
             scheduler: "simple",
             compositionPreset: request.compositionPreset,
             effectivePrompt: request.effectivePrompt,
-            loras: settings.anima.loras,
+            loras: jobLoras,
+            jobLoras,
           }
         : {
           kind: "krea" as const,
@@ -441,7 +517,8 @@ export class ImageStudioService {
           scheduler: "simple",
           compositionPreset: request.compositionPreset,
           effectivePrompt: request.effectivePrompt,
-          loras: settings.krea.loras,
+          loras: jobLoras,
+          jobLoras,
         };
     const candidates = Array.from({ length: request.candidateCount }, (_, offset) => {
       const index = offset + 1;
@@ -466,6 +543,17 @@ export class ImageStudioService {
             references: request.references,
             template: workflowTemplate,
           })
+        : request.imageEngine === "qwen"
+          ? buildQwenImageEditPrompt({
+              prompt: request.effectivePrompt,
+              seed,
+              width: request.width,
+              height: request.height,
+              filenamePrefix,
+              settings: qwenSettings,
+              loras: jobLoras,
+              references: request.references,
+            })
         : request.imageMode === "edit"
           ? buildFlux2KleinEditPrompt({
             prompt: request.effectivePrompt,
@@ -474,6 +562,7 @@ export class ImageStudioService {
             height: request.height,
             filenamePrefix,
             settings: settings.imageEdit,
+            loras: jobLoras,
             references: request.references,
             template: workflowTemplate,
           })
@@ -484,7 +573,7 @@ export class ImageStudioService {
               width: request.width,
               height: request.height,
               filenamePrefix,
-              settings: settings.anima,
+              settings: { ...settings.anima, loras: jobLoras },
               template: workflowTemplate,
             })
           : buildKreaGeneratePrompt({
@@ -493,7 +582,7 @@ export class ImageStudioService {
             width: request.width,
             height: request.height,
             filenamePrefix,
-            settings: settings.krea,
+            settings: { ...settings.krea, loras: jobLoras },
             template: workflowTemplate,
           });
       return { index, seed, filenamePrefix, apiPrompt };
@@ -559,12 +648,17 @@ export class ImageStudioService {
       (link) => link.projectId === original.originProjectId,
     );
     const mode = original.engine.kind === "anima" ? "anima" : original.mode;
-    const imageEngine = original.engine.kind === "minimax-h3-image" ? "minimax" : "default";
+    const imageEngine = original.engine.kind === "minimax-h3-image"
+      ? "minimax"
+      : original.engine.kind === "qwen-image-edit"
+        ? "qwen"
+        : "default";
     const currentSettings = await this.runtimeSettings.get();
+    const originalJobLoras = original.engine.jobLoras ?? original.engine.loras ?? [];
     const preservedSettings: RuntimeSettings = original.engine.kind === "minimax-h3-image"
       ? {
           ...currentSettings,
-          h3: { ...currentSettings.h3, model: original.engine.model },
+          h3: { ...currentSettings.h3, model: original.engine.model, loras: originalJobLoras },
         }
       : original.engine.kind === "anima"
       ? {
@@ -575,7 +669,7 @@ export class ImageStudioService {
             vae: original.engine.vae,
             steps: original.engine.steps,
             cfg: original.engine.cfg,
-            loras: original.engine.loras ?? [],
+            loras: originalJobLoras,
           },
         }
       : original.engine.kind === "flux2-klein-edit"
@@ -591,6 +685,8 @@ export class ImageStudioService {
               attentionBackend: original.engine.attentionBackend ?? currentSettings.imageEdit.attentionBackend,
             },
           }
+        : original.engine.kind === "qwen-image-edit"
+          ? currentSettings
         : {
             ...currentSettings,
             krea: {
@@ -598,7 +694,7 @@ export class ImageStudioService {
               encoder: original.engine.encoder,
               vae: original.engine.vae,
               steps: original.engine.steps,
-              loras: original.engine.loras ?? [],
+              loras: originalJobLoras,
             },
           };
     const prepared = await this.prepare(
@@ -618,6 +714,7 @@ export class ImageStudioService {
           : undefined,
         seedMode: "random",
         references: mode === "edit" ? original.references : [],
+        loraOverrides: originalJobLoras.map((lora) => ({ ...lora, enabled: true })),
         tag: originLink?.tag ?? "untagged",
       },
       new Set(original.candidates.map((candidate) => candidate.seed)),
@@ -818,6 +915,11 @@ export class ImageStudioService {
         ...DEFAULT_MINIMAX_H3_IMAGE_SETTINGS,
         maxReferences: MINIMAX_H3_IMAGE_MAX_REFERENCES,
       },
+      qwenEdit: {
+        kind: "qwen-image-edit",
+        ...DEFAULT_QWEN_IMAGE_EDIT_SETTINGS,
+        maxReferences: QWEN_IMAGE_EDIT_MAX_REFERENCES,
+      },
       limits: {
         uiTargetMaxPixels: IMAGE_UI_TARGET_MAX_PIXELS,
         apiMaxPixels: IMAGE_API_MAX_PIXELS,
@@ -857,6 +959,12 @@ export class ImageStudioService {
       "FluxKVCache",
       "ModelAttentionBackend",
       "LoraLoaderModelOnly",
+      "PathchSageAttentionKJ",
+      "ModelSamplingAuraFlow",
+      "CFGNorm",
+      "TextEncodeQwenImageEditPlus",
+      "FluxKontextMultiReferenceLatentMethod",
+      "EmptySD3LatentImage",
       "H3ImagePrepare",
       "H3ImageSamplingPreset",
       "H3ImageDecode",
@@ -955,6 +1063,37 @@ export class ImageStudioService {
       detailLora: loras.includes(minimaxDefaults.detailLora),
       nodes: Object.values(minimaxNodeChecks).every(Boolean),
     };
+    const qwenCoreClasses = [
+      "UNETLoader",
+      "CLIPLoader",
+      "VAELoader",
+      "LoraLoaderModelOnly",
+      "PathchSageAttentionKJ",
+      "ModelSamplingAuraFlow",
+      "CFGNorm",
+      "TextEncodeQwenImageEditPlus",
+      "FluxKontextMultiReferenceLatentMethod",
+      "ImageScaleToTotalPixels",
+      "EmptySD3LatentImage",
+      "KSampler",
+      "VAEDecode",
+      "SaveImage",
+      "LoadImage",
+    ];
+    const qwenNodeChecks = Object.fromEntries(
+      qwenCoreClasses.map((className) => [
+        className,
+        objectInfoContains(nodeInfo[classNames.indexOf(className)], className),
+      ]),
+    );
+    const qwenDefaults = DEFAULT_QWEN_IMAGE_EDIT_SETTINGS;
+    const qwenChecks = {
+      model: models.includes(qwenDefaults.model),
+      encoder: encoders.includes(qwenDefaults.encoder),
+      vae: vaes.includes(qwenDefaults.vae),
+      acceleratorLora: loras.includes(qwenDefaults.acceleratorLora),
+      nodes: Object.values(qwenNodeChecks).every(Boolean),
+    };
     const editChecks = {
       workflow: existsSync(this.editWorkflowPath),
       model: models.includes(settings.imageEdit.model),
@@ -971,7 +1110,8 @@ export class ImageStudioService {
       ready: Object.values(generateChecks).every(Boolean) &&
         Object.values(editChecks).every(Boolean) &&
         Object.values(animaChecks).every(Boolean) &&
-        Object.values(minimaxChecks).every(Boolean),
+        Object.values(minimaxChecks).every(Boolean) &&
+        Object.values(qwenChecks).every(Boolean),
       generate: {
         ready: Object.values(generateChecks).every(Boolean),
         checks: generateChecks,
@@ -1008,6 +1148,12 @@ export class ImageStudioService {
         },
         workflow: this.minimaxWorkflowPath,
         referenceLimit: MINIMAX_H3_IMAGE_MAX_REFERENCES,
+      },
+      qwenEdit: {
+        ready: Object.values(qwenChecks).every(Boolean),
+        checks: { ...qwenChecks, nodeClasses: qwenNodeChecks },
+        engine: qwenDefaults,
+        referenceLimit: QWEN_IMAGE_EDIT_MAX_REFERENCES,
       },
       capabilities: {
         models: [...new Set(models)].sort(),

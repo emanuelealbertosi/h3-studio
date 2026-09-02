@@ -42,11 +42,13 @@ set "H3_BRIDGE_HOST_RESOLVED="
 set "H3_BRIDGE_PORT_RESOLVED="
 set "H3_BRIDGE_URL_RESOLVED="
 set "H3_WEB_HOST_RESOLVED="
-for /f "tokens=1,2,3,4" %%H in ('node --env-file-if-exists=.env -e "const rawHost=String(process.env.H3_BRIDGE_HOST??'').trim();const host=rawHost.length?rawHost:'127.0.0.1';const rawWebHost=String(process.env.H3_WEB_HOST??'').trim();const webHost=rawWebHost.length?rawWebHost:'127.0.0.1';const parsed=Number.parseInt(String(process.env.H3_BRIDGE_PORT??''),10);const port=Number.isInteger(parsed)&&parsed>0&&parsed<=65535?parsed:8787;if (!/^[A-Za-z0-9._:-]+$/.test(host)||!/^[A-Za-z0-9._:-]+$/.test(webHost)) process.exit(2);const target=host==='0.0.0.0'?'127.0.0.1':host==='::'?'::1':host;const url='http://'+(target.includes(':')?'['+target+']':target)+':'+port;console.log(host,port,url,webHost)"') do (
+set "H3_WEB_URL_RESOLVED="
+for /f "tokens=1,2,3,4,5" %%H in ('node --env-file-if-exists=.env -e "const rawHost=String(process.env.H3_BRIDGE_HOST??'').trim();const host=rawHost.length?rawHost:'127.0.0.1';const rawWebHost=String(process.env.H3_WEB_HOST??'').trim();const webHost=rawWebHost.length?rawWebHost:'127.0.0.1';const parsed=Number.parseInt(String(process.env.H3_BRIDGE_PORT??''),10);const port=Number.isInteger(parsed)&&parsed>0&&parsed<=65535?parsed:8787;if (!/^[A-Za-z0-9._:-]+$/.test(host)||!/^[A-Za-z0-9._:-]+$/.test(webHost)) process.exit(2);const format=(value,port)=>'http://'+(value.includes(':')?'['+value+']':value)+':'+port;const target=host==='0.0.0.0'?'127.0.0.1':host==='::'?'::1':host;const webTarget=webHost==='0.0.0.0'?'127.0.0.1':webHost==='::'?'::1':webHost;console.log(host,port,format(target,port),webHost,format(webTarget,3000))"') do (
   set "H3_BRIDGE_HOST_RESOLVED=%%H"
   set "H3_BRIDGE_PORT_RESOLVED=%%I"
   set "H3_BRIDGE_URL_RESOLVED=%%J"
   set "H3_WEB_HOST_RESOLVED=%%K"
+  set "H3_WEB_URL_RESOLVED=%%L"
 )
 if not defined H3_BRIDGE_HOST_RESOLVED (
   echo [ERRORE] H3_BRIDGE_HOST, H3_BRIDGE_PORT o H3_WEB_HOST non validi.
@@ -73,8 +75,15 @@ if "%H3_BRIDGE_REUSE%"=="0" (
   echo [H3 Studio] Bridge gia attivo: avvio soltanto l'interfaccia.
 )
 
-echo [H3 Studio] Avvio interfaccia su http://localhost:3000
-start "H3 Studio - Web" cmd /k "cd /d ""%~dp0"" && node_modules\.bin\vinext.cmd dev --hostname %H3_WEB_HOST_RESOLVED%"
+echo [H3 Studio] Avvio interfaccia su %H3_WEB_URL_RESOLVED%
+start "H3 Studio - Web" cmd /k "cd /d ""%~dp0"" && node_modules\.bin\vinext.cmd dev --hostname %H3_WEB_HOST_RESOLVED% --port 3000 --strictPort"
+
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%CD%\scripts\wait-h3-studio-ready.ps1" -BridgeUrl "%H3_BRIDGE_URL_RESOLVED%/api/health" -WebUrl "%H3_WEB_URL_RESOLVED%/" -TimeoutSeconds 180
+if errorlevel 1 (
+  echo [ERRORE] H3 Studio non e diventato raggiungibile. Controlla le console Bridge e Web.
+  pause
+  exit /b 1
+)
 
 if /i "%H3_ENABLE_TAILSCALE%"=="1" (
   where tailscale.exe >nul 2>nul
@@ -86,12 +95,11 @@ if /i "%H3_ENABLE_TAILSCALE%"=="1" (
   )
 )
 
-timeout /t 5 /nobreak >nul
-start "" "http://localhost:3000"
+start "" "%H3_WEB_URL_RESOLVED%"
 
 echo.
 echo H3 Studio avviato. Lascia aperte le due console.
-echo Locale:    http://localhost:3000
+echo Locale:    %H3_WEB_URL_RESOLVED%
 echo Al primo avvio configura password Admin e collegamento ComfyUI nel browser.
 timeout /t 3 /nobreak >nul
 endlocal

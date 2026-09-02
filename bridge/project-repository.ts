@@ -3,7 +3,14 @@ import { DatabaseSync } from "node:sqlite";
 import type { MediaOutput } from "./studio-job.js";
 import { processingSeconds } from "./processing-time.js";
 
-type ProjectRow = { id: string; name: string; created_at: string; updated_at: string; clip_count: number; timeline_count: number; job_count: number; image_count: number };
+type ProjectRow = {
+  id: string; name: string; created_at: string; updated_at: string;
+  clip_count: number; timeline_count: number; job_count: number; image_count: number;
+  audio_count: number; external_media_count: number;
+};
+
+type ProjectDeletionCandidate = { job_id: string; candidate_index: number };
+type ProjectDeletionExternalMedia = { id: string; file: string };
 type TimelineRow = {
   id: string; project_id: string; project_name: string; name: string;
   external_audio_file: string | null; external_audio_name: string | null;
@@ -108,10 +115,12 @@ export class ProjectRepository {
        (SELECT COUNT(*) FROM project_clips WHERE project_clips.project_id = projects.id) AS clip_count,
        (SELECT COUNT(*) FROM project_timelines WHERE project_timelines.project_id = projects.id) AS timeline_count,
        (SELECT COUNT(*) FROM jobs WHERE jobs.project_id = projects.id) AS job_count,
-       (SELECT COUNT(*) FROM project_image_links WHERE project_image_links.project_id = projects.id) AS image_count
+       (SELECT COUNT(*) FROM project_image_links WHERE project_image_links.project_id = projects.id) AS image_count,
+       (SELECT COUNT(*) FROM audio_jobs WHERE audio_jobs.project_id = projects.id) AS audio_count,
+       (SELECT COUNT(*) FROM external_media WHERE external_media.origin_project_id = projects.id) AS external_media_count
        FROM projects ORDER BY projects.updated_at DESC`
     ).all() as unknown as ProjectRow[];
-    return rows.map(row => ({ id: row.id, name: row.name, createdAt: row.created_at, updatedAt: row.updated_at, clipCount: row.clip_count, timelineCount: row.timeline_count, jobCount: row.job_count, imageCount: row.image_count }));
+    return rows.map(row => ({ id: row.id, name: row.name, createdAt: row.created_at, updatedAt: row.updated_at, clipCount: row.clip_count, timelineCount: row.timeline_count, jobCount: row.job_count, imageCount: row.image_count, audioCount: row.audio_count, externalMediaCount: row.external_media_count }));
   }
   get(projectId: string) {
     const row = this.database.prepare(
@@ -119,12 +128,208 @@ export class ProjectRepository {
        (SELECT COUNT(*) FROM project_clips WHERE project_clips.project_id = projects.id) AS clip_count,
        (SELECT COUNT(*) FROM project_timelines WHERE project_timelines.project_id = projects.id) AS timeline_count,
        (SELECT COUNT(*) FROM jobs WHERE jobs.project_id = projects.id) AS job_count,
-       (SELECT COUNT(*) FROM project_image_links WHERE project_image_links.project_id = projects.id) AS image_count
+       (SELECT COUNT(*) FROM project_image_links WHERE project_image_links.project_id = projects.id) AS image_count,
+       (SELECT COUNT(*) FROM audio_jobs WHERE audio_jobs.project_id = projects.id) AS audio_count,
+       (SELECT COUNT(*) FROM external_media WHERE external_media.origin_project_id = projects.id) AS external_media_count
        FROM projects WHERE projects.id = ?`
     ).get(projectId) as ProjectRow | undefined;
     if (!row) return null;
     const timelines = this.listTimelines(projectId);
-    return { id: row.id, name: row.name, createdAt: row.created_at, updatedAt: row.updated_at, clipCount: row.clip_count, timelineCount: row.timeline_count, jobCount: row.job_count, imageCount: row.image_count, timelines, clips: timelines[0] ? this.getTimeline(timelines[0].id)?.clips ?? [] : [] };
+    return { id: row.id, name: row.name, createdAt: row.created_at, updatedAt: row.updated_at, clipCount: row.clip_count, timelineCount: row.timeline_count, jobCount: row.job_count, imageCount: row.image_count, audioCount: row.audio_count, externalMediaCount: row.external_media_count, timelines, clips: timelines[0] ? this.getTimeline(timelines[0].id)?.clips ?? [] : [] };
+  }
+
+  deletionPlan(projectId: string) {
+    const project = this.get(projectId);
+    if (!project) throw new Error("Progetto non trovato");
+
+    const videoCandidates = this.database.prepare(
+      `SELECT candidates.job_id, candidates.candidate_index
+       FROM candidates
+       JOIN jobs ON jobs.id = candidates.job_id
+       WHERE jobs.project_id = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM project_clips
+           WHERE project_clips.source_job_id = jobs.id
+             AND project_clips.project_id <> ?
+         )
+       ORDER BY candidates.job_id, candidates.candidate_index DESC`,
+    ).all(projectId, projectId) as unknown as ProjectDeletionCandidate[];
+    const imageCandidates = this.database.prepare(
+      `SELECT image_candidates.job_id, image_candidates.candidate_index
+       FROM image_candidates
+       JOIN image_jobs ON image_jobs.id = image_candidates.job_id
+       WHERE image_jobs.origin_project_id = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM project_image_links
+           WHERE project_image_links.image_job_id = image_candidates.job_id
+             AND project_image_links.image_candidate_index = image_candidates.candidate_index
+             AND project_image_links.project_id <> ?
+         )
+       ORDER BY image_candidates.job_id, image_candidates.candidate_index DESC`,
+    ).all(projectId, projectId) as unknown as ProjectDeletionCandidate[];
+    const audioJobs = (
+      this.database.prepare("SELECT id FROM audio_jobs WHERE project_id = ? ORDER BY created_at")
+        .all(projectId) as unknown as Array<{ id: string }>
+    ).map((row) => row.id);
+
+    const busyVideo = this.database.prepare(
+      `SELECT COUNT(*) AS count
+       FROM candidates
+       JOIN jobs ON jobs.id = candidates.job_id
+       WHERE jobs.project_id = ?
+         AND candidates.status NOT IN ('ready', 'failed')
+         AND NOT EXISTS (
+           SELECT 1 FROM project_clips
+           WHERE project_clips.source_job_id = jobs.id
+             AND project_clips.project_id <> ?
+         )`,
+    ).get(projectId, projectId) as { count: number };
+    const busyVariants = this.database.prepare(
+      `SELECT COUNT(*) AS count
+       FROM candidate_variants
+       JOIN jobs ON jobs.id = candidate_variants.source_job_id
+       WHERE jobs.project_id = ?
+         AND candidate_variants.status NOT IN ('ready', 'failed')
+         AND NOT EXISTS (
+           SELECT 1 FROM project_clips
+           WHERE project_clips.source_job_id = jobs.id
+             AND project_clips.project_id <> ?
+         )`,
+    ).get(projectId, projectId) as { count: number };
+    const busyImages = this.database.prepare(
+      `SELECT COUNT(*) AS count
+       FROM image_candidates
+       JOIN image_jobs ON image_jobs.id = image_candidates.job_id
+       WHERE image_jobs.origin_project_id = ?
+         AND image_candidates.status NOT IN ('ready', 'failed', 'cancelled')
+         AND NOT EXISTS (
+           SELECT 1 FROM project_image_links
+           WHERE project_image_links.image_job_id = image_candidates.job_id
+             AND project_image_links.image_candidate_index = image_candidates.candidate_index
+             AND project_image_links.project_id <> ?
+         )`,
+    ).get(projectId, projectId) as { count: number };
+    const busyAudio = this.database.prepare(
+      `SELECT COUNT(*) AS count FROM audio_jobs
+       WHERE project_id = ? AND status NOT IN ('ready', 'failed', 'cancelled')`,
+    ).get(projectId) as { count: number };
+
+    const externalRows = this.database.prepare(
+      "SELECT id, file FROM external_media WHERE origin_project_id = ? ORDER BY created_at",
+    ).all(projectId) as unknown as ProjectDeletionExternalMedia[];
+    const externalMedia = externalRows.filter((media) => !this.externalMediaUsedOutsideProject(media, projectId));
+    const preservedExternalMedia = externalRows.length - externalMedia.length;
+    const preservedVideoJobs = Number((this.database.prepare(
+      `SELECT COUNT(*) AS count FROM jobs
+       WHERE project_id = ? AND EXISTS (
+         SELECT 1 FROM project_clips
+         WHERE project_clips.source_job_id = jobs.id
+           AND project_clips.project_id <> ?
+       )`,
+    ).get(projectId, projectId) as { count: number }).count);
+    const preservedImageCandidates = Number((this.database.prepare(
+      `SELECT COUNT(*) AS count
+       FROM image_candidates
+       JOIN image_jobs ON image_jobs.id = image_candidates.job_id
+       WHERE image_jobs.origin_project_id = ? AND EXISTS (
+         SELECT 1 FROM project_image_links
+         WHERE project_image_links.image_job_id = image_candidates.job_id
+           AND project_image_links.image_candidate_index = image_candidates.candidate_index
+           AND project_image_links.project_id <> ?
+       )`,
+    ).get(projectId, projectId) as { count: number }).count);
+
+    return {
+      project,
+      videoCandidates,
+      imageCandidates,
+      audioJobs,
+      externalMedia,
+      busy: {
+        video: Number(busyVideo.count) + Number(busyVariants.count),
+        image: Number(busyImages.count),
+        audio: Number(busyAudio.count),
+      },
+      preserved: {
+        videoJobs: preservedVideoJobs,
+        imageCandidates: preservedImageCandidates,
+        externalMedia: preservedExternalMedia,
+      },
+    };
+  }
+
+  delete(projectId: string) {
+    const project = this.get(projectId);
+    if (!project) throw new Error("Progetto non trovato");
+    const remainingVideoCandidates = this.database.prepare(
+      `SELECT COUNT(*) AS count FROM candidates JOIN jobs ON jobs.id = candidates.job_id
+       WHERE jobs.project_id = ? AND NOT EXISTS (
+         SELECT 1 FROM project_clips
+         WHERE project_clips.source_job_id = jobs.id AND project_clips.project_id <> ?
+       )`,
+    ).get(projectId, projectId) as { count: number };
+    const remainingImageCandidates = this.database.prepare(
+      `SELECT COUNT(*) AS count FROM image_candidates
+       JOIN image_jobs ON image_jobs.id = image_candidates.job_id
+       WHERE image_jobs.origin_project_id = ? AND NOT EXISTS (
+         SELECT 1 FROM project_image_links
+         WHERE project_image_links.image_job_id = image_candidates.job_id
+           AND project_image_links.image_candidate_index = image_candidates.candidate_index
+           AND project_image_links.project_id <> ?
+       )`,
+    ).get(projectId, projectId) as { count: number };
+    if (Number(remainingVideoCandidates.count) > 0 || Number(remainingImageCandidates.count) > 0) {
+      throw new Error("Pulizia media incompleta: il progetto non è stato eliminato");
+    }
+
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.prepare(
+        `UPDATE jobs SET project_id = (
+           SELECT project_clips.project_id FROM project_clips
+           WHERE project_clips.source_job_id = jobs.id
+             AND project_clips.project_id <> ?
+           ORDER BY project_clips.created_at LIMIT 1
+         ) WHERE project_id = ? AND EXISTS (
+           SELECT 1 FROM project_clips
+           WHERE project_clips.source_job_id = jobs.id
+             AND project_clips.project_id <> ?
+         )`,
+      ).run(projectId, projectId, projectId);
+      this.database.prepare(
+        `DELETE FROM jobs WHERE project_id = ? AND NOT EXISTS (
+           SELECT 1 FROM project_clips
+           WHERE project_clips.source_job_id = jobs.id
+             AND project_clips.project_id <> ?
+         )`,
+      ).run(projectId, projectId);
+      this.database.prepare(
+        `UPDATE image_jobs SET origin_project_id = (
+           SELECT project_image_links.project_id FROM project_image_links
+           WHERE project_image_links.image_job_id = image_jobs.id
+             AND project_image_links.project_id <> ?
+           ORDER BY project_image_links.created_at LIMIT 1
+         ) WHERE origin_project_id = ? AND EXISTS (
+           SELECT 1 FROM project_image_links
+           WHERE project_image_links.image_job_id = image_jobs.id
+             AND project_image_links.project_id <> ?
+         )`,
+      ).run(projectId, projectId, projectId);
+      this.database.prepare(
+        `DELETE FROM image_jobs WHERE origin_project_id = ? AND NOT EXISTS (
+           SELECT 1 FROM project_image_links
+           WHERE project_image_links.image_job_id = image_jobs.id
+             AND project_image_links.project_id <> ?
+         )`,
+      ).run(projectId, projectId);
+      const result = this.database.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
+      if (result.changes !== 1) throw new Error("Progetto non trovato");
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+    return { id: project.id, name: project.name };
   }
   listTimelines(projectId: string) {
     const rows = this.database.prepare(
@@ -391,6 +596,51 @@ export class ProjectRepository {
         output_format: row.output_format,
       } as ClipRow),
     }));
+  }
+  private externalMediaUsedOutsideProject(media: ProjectDeletionExternalMedia, projectId: string) {
+    const directReference = this.database.prepare(
+      `SELECT 1
+       WHERE EXISTS (SELECT 1 FROM creative_asset_references WHERE file = ?)
+          OR EXISTS (SELECT 1 FROM audio_jobs WHERE project_id <> ? AND reference_file = ?)
+          OR EXISTS (
+            SELECT 1 FROM project_timelines
+            WHERE project_id <> ? AND external_audio_file = ?
+          )
+          OR EXISTS (
+            SELECT 1 FROM image_job_references
+            JOIN image_jobs ON image_jobs.id = image_job_references.job_id
+            WHERE image_job_references.file = ? AND (
+              image_jobs.origin_project_id IS NULL
+              OR image_jobs.origin_project_id <> ?
+              OR EXISTS (
+                SELECT 1 FROM project_image_links
+                WHERE project_image_links.image_job_id = image_jobs.id
+                  AND project_image_links.project_id <> ?
+              )
+            )
+          )`,
+    ).get(
+      media.file,
+      projectId,
+      media.file,
+      projectId,
+      media.file,
+      media.file,
+      projectId,
+      projectId,
+    );
+    if (directReference) return true;
+
+    const needles = [media.id, media.file];
+    const serializedRows = [
+      ...(this.database.prepare(
+        "SELECT media_state AS value FROM jobs WHERE project_id IS NULL OR project_id <> ?",
+      ).all(projectId) as unknown as Array<{ value: string }>),
+      ...(this.database.prepare(
+        "SELECT attachments_json AS value FROM chat_messages WHERE project_id <> ?",
+      ).all(projectId) as unknown as Array<{ value: string }>),
+    ];
+    return serializedRows.some((row) => needles.some((needle) => row.value.includes(needle)));
   }
   private projectExists(projectId: string) { return Boolean(this.database.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId)); }
   private touchProject(projectId: string, now = new Date().toISOString()) { this.database.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, projectId); }
