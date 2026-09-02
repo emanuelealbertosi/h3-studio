@@ -792,6 +792,9 @@ type ProjectClip = {
   trimStart: number;
   trimEnd: number;
   volume: number;
+  cropX: number;
+  cropY: number;
+  cropZoom: number;
   output: { mediaPath: string; filename: string };
   variants: Array<{
     id: string;
@@ -799,6 +802,26 @@ type ProjectClip = {
     targetMegapixels?: UpscaleTargetMegapixels | null;
     output: { mediaPath: string; filename: string };
   }>;
+};
+
+type TimelineAudioTrack = {
+  id: string;
+  timelineId: string;
+  position: number;
+  file: string;
+  name: string;
+  sourceDuration: number | null;
+  startTime: number;
+  trimStart: number;
+  trimEnd: number | null;
+  gain: number;
+  muted: boolean;
+  solo: boolean;
+  loop: boolean;
+  fadeIn: number;
+  fadeOut: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 function variantLabel(
@@ -880,7 +903,10 @@ type ProjectDetail = ProjectSummary & {
   clips: ProjectClip[];
 };
 
-type TimelineDetail = ProjectTimelineSummary & { clips: ProjectClip[] };
+type TimelineDetail = ProjectTimelineSummary & {
+  clips: ProjectClip[];
+  audioTracks: TimelineAudioTrack[];
+};
 
 type CreativeReference = {
   id: string;
@@ -1510,6 +1536,86 @@ function HistoryPanel({
   );
 }
 
+function timelineClock(seconds: number) {
+  const safe = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+  const minutes = Math.floor(safe / 60);
+  const remainder = safe - minutes * 60;
+  return `${String(minutes).padStart(2, "0")}:${remainder.toFixed(2).padStart(5, "0")}`;
+}
+
+function timelineAudioPath(file: string) {
+  const match = file.match(/^(.*?)(?: \[(input|output|temp)\])?$/i);
+  const relative = (match?.[1] ?? file).replace(/\\/g, "/");
+  const slash = relative.lastIndexOf("/");
+  const query = new URLSearchParams({
+    filename: slash >= 0 ? relative.slice(slash + 1) : relative,
+    subfolder: slash >= 0 ? relative.slice(0, slash) : "",
+    type: (match?.[2] ?? "input").toLowerCase(),
+  });
+  return `${bridgeUrl}/api/media?${query.toString()}`;
+}
+
+function VideoFilmstrip({ clip }: { clip: ProjectClip }) {
+  const count = Math.max(6, Math.min(12, Math.ceil(clip.sourceDuration * 1.4)));
+  return (
+    <div className="video-filmstrip" aria-hidden="true">
+      {Array.from({ length: count }, (_, index) => {
+        const time = Math.min(
+          Math.max(0, clip.sourceDuration - 0.03),
+          ((index + 0.5) / count) * clip.sourceDuration,
+        );
+        return <video
+          key={`${clip.id}-${index}`}
+          muted
+          onLoadedMetadata={event => { event.currentTarget.currentTime = time; }}
+          playsInline
+          preload="metadata"
+          src={`${bridgeUrl}${clip.output.mediaPath}`}
+        />;
+      })}
+    </div>
+  );
+}
+
+function AudioWaveform({ src }: { src: string }) {
+  const [peaks, setPeaks] = useState<number[]>(() => Array.from({ length: 64 }, (_, index) => 0.18 + ((index * 17) % 11) / 16));
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(src);
+        if (!response.ok) return;
+        const buffer = await response.arrayBuffer();
+        const context = new window.AudioContext();
+        try {
+          const decoded = await context.decodeAudioData(buffer.slice(0));
+          const channel = decoded.getChannelData(0);
+          const bucket = Math.max(1, Math.floor(channel.length / 64));
+          const next = Array.from({ length: 64 }, (_, index) => {
+            const start = index * bucket;
+            const end = Math.min(channel.length, start + bucket);
+            let peak = 0;
+            for (let sample = start; sample < end; sample += Math.max(1, Math.floor(bucket / 180))) {
+              peak = Math.max(peak, Math.abs(channel[sample] ?? 0));
+            }
+            return Math.max(0.06, peak);
+          });
+          if (!cancelled) setPeaks(next);
+        } finally {
+          void context.close();
+        }
+      } catch {
+        // The decorative fallback remains visible if the browser cannot decode the source.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [src]);
+  const max = Math.max(...peaks, 0.01);
+  return <div className="audio-waveform" aria-hidden="true">
+    {peaks.map((peak, index) => <i key={index} style={{ height: `${Math.max(8, (peak / max) * 100)}%` }} />)}
+  </div>;
+}
+
 function MontagesPanel({
   onUseClip,
   initialProjectId,
@@ -1531,6 +1637,7 @@ function MontagesPanel({
   const [loadingSources, setLoadingSources] = useState(false);
   const [newName, setNewName] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [playheadSeconds, setPlayheadSeconds] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("Caricamento montaggi…");
@@ -1660,9 +1767,12 @@ function MontagesPanel({
         trimStart: clip.trimStart,
         trimEnd: clip.trimEnd,
         volume: clip.volume,
+        cropX: clip.cropX,
+        cropY: clip.cropY,
+        cropZoom: clip.cropZoom,
         variantId: clip.sourceVariantId,
       });
-      if (updated) setMessage(`Trim salvato · ${(clip.trimEnd - clip.trimStart).toFixed(2)}s`);
+      if (updated) setMessage(`Clip salvata · ${(clip.trimEnd - clip.trimStart).toFixed(2)}s`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Salvataggio trim fallito");
       if (timelineId) await loadTimeline(timelineId);
@@ -1687,7 +1797,32 @@ function MontagesPanel({
     }
   }
 
-  async function uploadExternalAudio(file: File | undefined) {
+  async function saveAudioTrack(position: number, update: Omit<Partial<TimelineAudioTrack>, "file"> & { file?: string | null }) {
+    if (!timeline) return;
+    const existing = timeline.audioTracks.find(track => track.position === position);
+    if (existing) {
+      setTimeline({
+        ...timeline,
+        audioTracks: timeline.audioTracks.map(track => track.position === position ? { ...track, ...update } as TimelineAudioTrack : track),
+      });
+    }
+    try {
+      await timelineMutation(`/api/timelines/${timeline.id}/audio-tracks/${position}`, update);
+      setMessage(update.file === null ? `Traccia ${position + 1} rimossa` : `Traccia ${position + 1} salvata`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Traccia audio non salvata");
+      if (timelineId) await loadTimeline(timelineId);
+    }
+  }
+
+  function patchAudioTrack(position: number, update: Partial<TimelineAudioTrack>) {
+    setTimeline(current => current ? {
+      ...current,
+      audioTracks: current.audioTracks.map(track => track.position === position ? { ...track, ...update } : track),
+    } : current);
+  }
+
+  async function uploadExternalAudio(position: number, file: File | undefined) {
     if (!file || !timeline) return;
     setBusy(true);
     try {
@@ -1697,9 +1832,22 @@ function MontagesPanel({
         ? `?${new URLSearchParams({ projectId }).toString()}`
         : "";
       const response = await fetch(`${bridgeUrl}/api/assets/upload${query}`, { method: "POST", body });
-      const payload = (await response.json()) as { asset?: { kind: string; file: string; name: string }; error?: string };
+      const payload = (await response.json()) as { asset?: { kind: string; file: string; name: string; duration?: number | null }; error?: string };
       if (!response.ok || !payload.asset || payload.asset.kind !== "audio") throw new Error(payload.error ?? "Seleziona un file audio");
-      await saveMixer({ externalAudioFile: payload.asset.file, externalAudioName: payload.asset.name });
+      await saveAudioTrack(position, {
+        file: payload.asset.file,
+        name: payload.asset.name,
+        sourceDuration: payload.asset.duration ?? null,
+        startTime: 0,
+        trimStart: 0,
+        trimEnd: payload.asset.duration ?? null,
+        gain: 1,
+        muted: false,
+        solo: false,
+        loop: false,
+        fadeIn: 0,
+        fadeOut: 0,
+      });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Upload audio fallito");
     } finally { setBusy(false); }
@@ -1790,6 +1938,7 @@ function MontagesPanel({
       })),
   ), [projectJobs]);
   const currentClip = timeline?.clips[currentIndex] ?? null;
+  const timelineDuration = timeline?.clips.reduce((total, clip) => total + clip.trimEnd - clip.trimStart, 0) ?? 0;
   return (
     <section className="montages-workspace">
       <div className="history-heading">
@@ -1889,6 +2038,11 @@ function MontagesPanel({
                   key={`${currentClip.id}:${currentClip.sourceVariantId ?? "original"}`}
                   onLoadedMetadata={event => { event.currentTarget.currentTime = currentClip.trimStart; }}
                   onTimeUpdate={event => {
+                    const elapsedBefore = timeline.clips.slice(0, currentIndex).reduce(
+                      (total, clip) => total + clip.trimEnd - clip.trimStart,
+                      0,
+                    );
+                    setPlayheadSeconds(elapsedBefore + Math.max(0, event.currentTarget.currentTime - currentClip.trimStart));
                     if (event.currentTarget.currentTime < currentClip.trimEnd - 0.03) return;
                     if (currentIndex < timeline.clips.length - 1) setCurrentIndex(index => index + 1);
                     else { setPlaying(false); setCurrentIndex(0); }
@@ -1899,6 +2053,15 @@ function MontagesPanel({
                   src={`${bridgeUrl}${currentClip.output.mediaPath}`}
                 />
               ) : <div className="montage-empty">Aggiungi clip da Progetti</div>}
+              {currentClip && currentClip.cropZoom < 0.999 && <div
+                className="montage-crop-guide"
+                style={{
+                  left: `${currentClip.cropX * 100}%`,
+                  top: `${currentClip.cropY * 100}%`,
+                  width: `${currentClip.cropZoom * 100}%`,
+                  height: `${currentClip.cropZoom * 100}%`,
+                }}
+              ><span>AREA ESPORTATA</span></div>}
               {currentClip && <span className="montage-counter">{currentIndex + 1} / {timeline.clips.length}</span>}
               {currentClip && <button
                 aria-label={`Rimuovi ${currentClip.label} dal montaggio`}
@@ -1912,26 +2075,77 @@ function MontagesPanel({
             <aside className="audio-mixer">
               <span className="section-index">AUDIO</span>
               <h3>Mixer del montaggio</h3>
-              <label><span>Audio originale</span><input min="0" max="2" step="0.05" type="range" value={timeline.originalAudioGain} onChange={event => setTimeline({ ...timeline, originalAudioGain: Number(event.target.value) })} onPointerUp={() => void saveMixer({ originalAudioGain: timeline.originalAudioGain })} /><b>{timeline.originalAudioGain.toFixed(2)}</b></label>
-              <label><span>Audio esterno</span><input disabled={!timeline.externalAudioFile} min="0" max="2" step="0.05" type="range" value={timeline.externalAudioGain} onChange={event => setTimeline({ ...timeline, externalAudioGain: Number(event.target.value) })} onPointerUp={() => void saveMixer({ externalAudioGain: timeline.externalAudioGain })} /><b>{timeline.externalAudioGain.toFixed(2)}</b></label>
-              <label className="audio-upload">{busy ? "Caricamento…" : timeline.externalAudioName ?? "+ Carica musica / voce / SFX"}<input accept="audio/*" type="file" onChange={event => { void uploadExternalAudio(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} /></label>
-              {timeline.externalAudioFile && <div className="audio-file-actions">
-                <label><input checked={timeline.externalAudioLoop} type="checkbox" onChange={event => void saveMixer({ externalAudioLoop: event.target.checked })} /> Ripeti fino alla fine</label>
-                <button onClick={() => void saveMixer({ externalAudioFile: null, externalAudioName: null })} type="button">Rimuovi</button>
-              </div>}
-              <p>L’audio H3 è già mixato: qui controlli la traccia originale intera e una traccia esterna indipendente.</p>
+              <label className="original-audio-control"><span>Audio originale H3</span><input min="0" max="2" step="0.05" type="range" value={timeline.originalAudioGain} onChange={event => setTimeline({ ...timeline, originalAudioGain: Number(event.target.value) })} onPointerUp={() => void saveMixer({ originalAudioGain: timeline.originalAudioGain })} /><b>{timeline.originalAudioGain.toFixed(2)}</b></label>
+              <p>Due tracce indipendenti per musica, voce o effetti. Il mix viene applicato in esportazione.</p>
               <button disabled={!timeline.clips.length} onClick={() => { setCurrentIndex(0); setPlaying(true); }} type="button">▶ Riproduci montaggio</button>
               {exportedMediaPath && <a download href={`${bridgeUrl}${exportedMediaPath}`} rel="noopener" target="_blank">Scarica MP4 pronto</a>}
             </aside>
           </div>
 
+          <section className="audio-track-stack" aria-label="Tracce audio esterne">
+            {[0, 1].map(position => {
+              const track = timeline.audioTracks.find(item => item.position === position);
+              const duration = track?.sourceDuration ?? track?.trimEnd ?? 0;
+              const trimEnd = track?.trimEnd ?? duration;
+              return <article className={track?.muted ? "audio-track-card muted" : "audio-track-card"} key={position}>
+                <header>
+                  <div><span className="audio-track-number">A{position + 1}</span><strong>{track?.name ?? `Traccia audio ${position + 1}`}</strong></div>
+                  {track && <button className="remove" onClick={() => void saveAudioTrack(position, { file: null })} type="button">Rimuovi</button>}
+                </header>
+                {track ? <>
+                  <div className="audio-waveform-wrap">
+                    <AudioWaveform src={timelineAudioPath(track.file)} />
+                    {duration > 0 && <div className="audio-trim-window" style={{ left: `${(track.trimStart / duration) * 100}%`, right: `${100 - (trimEnd / duration) * 100}%` }} />}
+                  </div>
+                  {duration > 0 && <div className="dual-range audio-dual-range">
+                    <input aria-label={`Inizio trim traccia ${position + 1}`} max={duration} min="0" step="0.05" type="range" value={track.trimStart} onChange={event => patchAudioTrack(position, { trimStart: Math.min(Number(event.target.value), trimEnd - 0.05) })} onPointerUp={event => void saveAudioTrack(position, { trimStart: Number(event.currentTarget.value) })} />
+                    <input aria-label={`Fine trim traccia ${position + 1}`} max={duration} min="0" step="0.05" type="range" value={trimEnd} onChange={event => patchAudioTrack(position, { trimEnd: Math.max(Number(event.target.value), track.trimStart + 0.05) })} onPointerUp={event => void saveAudioTrack(position, { trimEnd: Number(event.currentTarget.value) })} />
+                  </div>}
+                  <div className="audio-track-controls">
+                    <label>Posizione <input max={Math.max(0, timelineDuration)} min="0" step="0.05" type="number" value={track.startTime} onChange={event => patchAudioTrack(position, { startTime: Number(event.target.value) })} onBlur={event => void saveAudioTrack(position, { startTime: Number(event.currentTarget.value) })} /><span>{timelineClock(track.startTime)}</span></label>
+                    <label>Da <input max={Math.max(0, trimEnd - 0.05)} min="0" step="0.05" type="number" value={track.trimStart} onChange={event => patchAudioTrack(position, { trimStart: Number(event.target.value) })} onBlur={event => void saveAudioTrack(position, { trimStart: Number(event.currentTarget.value) })} /></label>
+                    <label>A <input max={duration || undefined} min={track.trimStart + 0.05} step="0.05" type="number" value={trimEnd} onChange={event => patchAudioTrack(position, { trimEnd: Number(event.target.value) })} onBlur={event => void saveAudioTrack(position, { trimEnd: Number(event.currentTarget.value) })} /></label>
+                    <label>Volume <input max="2" min="0" step="0.05" type="number" value={track.gain} onChange={event => patchAudioTrack(position, { gain: Number(event.target.value) })} onBlur={event => void saveAudioTrack(position, { gain: Number(event.currentTarget.value) })} /></label>
+                    <label>Fade in <input max="60" min="0" step="0.05" type="number" value={track.fadeIn} onChange={event => patchAudioTrack(position, { fadeIn: Number(event.target.value) })} onBlur={event => void saveAudioTrack(position, { fadeIn: Number(event.currentTarget.value) })} /></label>
+                    <label>Fade out <input max="60" min="0" step="0.05" type="number" value={track.fadeOut} onChange={event => patchAudioTrack(position, { fadeOut: Number(event.target.value) })} onBlur={event => void saveAudioTrack(position, { fadeOut: Number(event.currentTarget.value) })} /></label>
+                  </div>
+                  <div className="audio-file-actions">
+                    <label><input checked={track.muted} type="checkbox" onChange={event => void saveAudioTrack(position, { muted: event.target.checked })} /> Mute</label>
+                    <label><input checked={track.solo} type="checkbox" onChange={event => void saveAudioTrack(position, { solo: event.target.checked })} /> Solo</label>
+                    <label><input checked={track.loop} type="checkbox" onChange={event => void saveAudioTrack(position, { loop: event.target.checked })} /> Loop</label>
+                    <audio controls preload="metadata" src={timelineAudioPath(track.file)} />
+                  </div>
+                </> : <label className="audio-upload audio-track-empty">
+                  <span>＋ Carica musica, voce o SFX</span>
+                  <small>MP3, WAV, FLAC, M4A · verrà creata una forma d’onda modificabile</small>
+                  <input accept="audio/*" type="file" onChange={event => { void uploadExternalAudio(position, event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} />
+                </label>}
+              </article>;
+            })}
+          </section>
+
+          <div className="timeline-master">
+            <header><strong>Timeline video</strong><span>{timelineClock(playheadSeconds)} / {timelineClock(timelineDuration)}</span></header>
+            <div className="timeline-master-ruler">
+              {Array.from({ length: 9 }, (_, index) => <span key={index} style={{ left: `${(index / 8) * 100}%` }}>{timelineClock((timelineDuration * index) / 8)}</span>)}
+              <i style={{ left: `${timelineDuration ? Math.min(100, (playheadSeconds / timelineDuration) * 100) : 0}%` }} />
+            </div>
+          </div>
           <div className="timeline-editor-strip">
             {timeline.clips.map((clip, index) => (
-              <article className={index === currentIndex ? "timeline-editor-clip active" : "timeline-editor-clip"} key={clip.id}>
+              <article className={index === currentIndex ? "timeline-editor-clip active" : "timeline-editor-clip"} key={clip.id} style={{ minWidth: `${Math.max(310, Math.min(620, (clip.trimEnd - clip.trimStart) * 54))}px` }}>
                 <button className="timeline-preview" onClick={() => { setCurrentIndex(index); setPlaying(false); }} type="button">
-                  <video muted playsInline preload="metadata" src={`${bridgeUrl}${clip.output.mediaPath}`} />
+                  <VideoFilmstrip clip={clip} />
                   <span>{index + 1}</span>
+                  <b>{timelineClock(clip.trimEnd - clip.trimStart)}</b>
                 </button>
+                <div className="video-trim-control">
+                  <div className="video-trim-selection" style={{ left: `${(clip.trimStart / clip.sourceDuration) * 100}%`, right: `${100 - (clip.trimEnd / clip.sourceDuration) * 100}%` }} />
+                  <div className="dual-range">
+                    <input aria-label={`Inizio trim ${clip.label}`} max={clip.sourceDuration} min="0" step="0.05" type="range" value={clip.trimStart} onChange={event => patchClip(clip.id, { trimStart: Math.min(Number(event.target.value), clip.trimEnd - 0.05) })} onPointerUp={event => void saveClip({ ...clip, trimStart: Number(event.currentTarget.value) })} />
+                    <input aria-label={`Fine trim ${clip.label}`} max={clip.sourceDuration} min="0" step="0.05" type="range" value={clip.trimEnd} onChange={event => patchClip(clip.id, { trimEnd: Math.max(Number(event.target.value), clip.trimStart + 0.05) })} onPointerUp={event => void saveClip({ ...clip, trimEnd: Number(event.currentTarget.value) })} />
+                  </div>
+                </div>
                 <div className="timeline-editor-fields">
                   <strong>{clip.label}</strong>
                   <div className="trim-fields">
@@ -1943,6 +2157,9 @@ function MontagesPanel({
                           trimStart: clip.trimStart,
                           trimEnd: clip.trimEnd,
                           volume: clip.volume,
+                          cropX: clip.cropX,
+                          cropY: clip.cropY,
+                          cropZoom: clip.cropZoom,
                           variantId,
                         }).then(() => setMessage(`Versione ${variantId ? "post-process" : "originale"} attiva`));
                       }}
@@ -1955,6 +2172,17 @@ function MontagesPanel({
                     <label>Da <input min="0" max={clip.trimEnd - 0.05} step="0.05" type="number" value={clip.trimStart} onChange={event => patchClip(clip.id, { trimStart: Number(event.target.value) })} onBlur={() => void saveClip(clip)} /></label>
                     <label>A <input min={clip.trimStart + 0.05} max={clip.sourceDuration} step="0.05" type="number" value={clip.trimEnd} onChange={event => patchClip(clip.id, { trimEnd: Number(event.target.value) })} onBlur={() => void saveClip(clip)} /></label>
                     <label>Vol <input min="0" max="2" step="0.05" type="number" value={clip.volume} onChange={event => patchClip(clip.id, { volume: Number(event.target.value) })} onBlur={() => void saveClip(clip)} /></label>
+                  </div>
+                  <div className="crop-controls">
+                    <label>Zoom crop <input min="1" max="5" step="0.05" type="range" value={1 / clip.cropZoom} onChange={event => {
+                      const cropZoom = 1 / Number(event.target.value);
+                      patchClip(clip.id, { cropZoom, cropX: Math.min(clip.cropX, 1 - cropZoom), cropY: Math.min(clip.cropY, 1 - cropZoom) });
+                    }} onPointerUp={event => {
+                      const cropZoom = 1 / Number(event.currentTarget.value);
+                      void saveClip({ ...clip, cropZoom, cropX: Math.min(clip.cropX, 1 - cropZoom), cropY: Math.min(clip.cropY, 1 - cropZoom) });
+                    }} /><b>{(1 / clip.cropZoom).toFixed(2)}×</b></label>
+                    <label>Orizzontale <input disabled={clip.cropZoom >= 0.999} min="0" max={1 - clip.cropZoom} step="0.005" type="range" value={clip.cropX} onChange={event => patchClip(clip.id, { cropX: Number(event.target.value) })} onPointerUp={event => void saveClip({ ...clip, cropX: Number(event.currentTarget.value) })} /></label>
+                    <label>Verticale <input disabled={clip.cropZoom >= 0.999} min="0" max={1 - clip.cropZoom} step="0.005" type="range" value={clip.cropY} onChange={event => patchClip(clip.id, { cropY: Number(event.target.value) })} onPointerUp={event => void saveClip({ ...clip, cropY: Number(event.currentTarget.value) })} /></label>
                   </div>
                   <small>{(clip.trimEnd - clip.trimStart).toFixed(2)}s usati di {clip.sourceDuration}s</small>
                   <div className="timeline-clip-actions">

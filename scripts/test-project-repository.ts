@@ -136,10 +136,20 @@ try {
       trimStart: 0.5,
       trimEnd: 3.5,
       volume: 0.75,
+      cropZoom: 0.6,
+      cropX: 0.2,
+      cropY: 0.1,
     });
     assert.equal(trimmed?.clips[0].trimStart, 0.5);
     assert.equal(trimmed?.clips[0].trimEnd, 3.5);
     assert.equal(trimmed?.clips[0].volume, 0.75);
+    assert.equal(trimmed?.clips[0].cropZoom, 0.6);
+    assert.equal(trimmed?.clips[0].cropX, 0.2);
+    assert.equal(trimmed?.clips[0].cropY, 0.1);
+    assert.throws(
+      () => projects.updateClip(switched!.clips[0].id, { cropZoom: 0.8, cropX: 0.3 }),
+      /Posizione crop orizzontale/,
+    );
     const mixed = projects.updateTimeline(alternate.id, {
       externalAudioFile: "music/test.wav [input]",
       externalAudioName: "test.wav",
@@ -150,6 +160,33 @@ try {
     assert.equal(mixed?.externalAudioFile, "music/test.wav [input]");
     assert.equal(mixed?.originalAudioGain, 0.6);
     assert.equal(mixed?.externalAudioLoop, true);
+    const firstTrack = projects.upsertAudioTrack(alternate.id, 0, {
+      file: "music/score.wav [input]",
+      name: "Colonna sonora",
+      sourceDuration: 42,
+      startTime: 1.25,
+      trimStart: 2,
+      trimEnd: 22,
+      gain: 0.8,
+      loop: true,
+      fadeIn: 1,
+      fadeOut: 2,
+    });
+    assert.equal(firstTrack?.audioTracks.length, 1);
+    assert.equal(firstTrack?.audioTracks[0].startTime, 1.25);
+    assert.equal(firstTrack?.audioTracks[0].fadeOut, 2);
+    const secondTrack = projects.upsertAudioTrack(alternate.id, 1, {
+      file: "voice/narration.wav [input]",
+      name: "Voce",
+      sourceDuration: 12,
+      muted: true,
+      solo: true,
+    });
+    assert.equal(secondTrack?.audioTracks.length, 2);
+    assert.equal(secondTrack?.audioTracks[1].muted, true);
+    assert.equal(secondTrack?.audioTracks[1].solo, true);
+    const removedTrack = projects.upsertAudioTrack(alternate.id, 1, { file: null });
+    assert.equal(removedTrack?.audioTracks.length, 1);
     assert.equal(projects.get(first.id)?.timelines.length, 2);
     const deletedTimeline = projects.deleteTimeline(alternate.id);
     assert.equal(deletedTimeline.name, "Versione breve");

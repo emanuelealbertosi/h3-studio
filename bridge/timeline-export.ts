@@ -26,10 +26,27 @@ type ExportTimeline = {
   originalAudioGain: number;
   externalAudioGain: number;
   externalAudioLoop: boolean;
+  audioTracks?: Array<{
+    file: string;
+    name: string;
+    sourceDuration: number | null;
+    startTime: number;
+    trimStart: number;
+    trimEnd: number | null;
+    gain: number;
+    muted: boolean;
+    solo: boolean;
+    loop: boolean;
+    fadeIn: number;
+    fadeOut: number;
+  }>;
   clips: Array<{
     trimStart: number;
     trimEnd: number;
     volume: number;
+    cropX?: number;
+    cropY?: number;
+    cropZoom?: number;
     output: { mediaPath: string; filename: string };
   }>;
 };
@@ -80,11 +97,17 @@ export class TimelineExportService {
         await pipeline(Readable.fromWeb(source.body as never), createWriteStream(originalPath));
         const processedPath = path.join(workDir, `clip_${index + 1}.mp4`);
         const duration = Math.max(0.05, clip.trimEnd - clip.trimStart);
+        const crop = Math.min(1, Math.max(0.1, clip.cropZoom ?? 1));
+        const cropX = Math.min(1 - crop, Math.max(0, clip.cropX ?? 0));
+        const cropY = Math.min(1 - crop, Math.max(0, clip.cropY ?? 0));
+        const videoFilters = crop < 0.999
+          ? `crop=w='trunc(iw*${crop}/2)*2':h='trunc(ih*${crop}/2)*2':x='trunc(iw*${cropX}/2)*2':y='trunc(ih*${cropY}/2)*2',scale=w='trunc(iw/${crop}/2)*2':h='trunc(ih/${crop}/2)*2',setsar=1,setpts=PTS-STARTPTS`
+          : "setpts=PTS-STARTPTS";
         await runFile(
           this.ffmpegPath,
           [
             "-y", "-ss", String(clip.trimStart), "-i", originalPath, "-t", String(duration),
-            "-map", "0:v:0", "-map", "0:a:0?", "-vf", "setpts=PTS-STARTPTS",
+            "-map", "0:v:0", "-map", "0:a:0?", "-vf", videoFilters,
             "-af", `volume=${clip.volume},asetpts=PTS-STARTPTS`,
             "-c:v", "libx264", "-preset", "medium", "-crf", "16",
             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
@@ -104,25 +127,72 @@ export class TimelineExportService {
         { windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
       );
 
-      if (timeline.externalAudioFile) {
-        const audio = annotatedMedia(timeline.externalAudioFile);
-        const response = await this.comfy.mediaResponse(audio.filename, audio.subfolder, audio.type);
-        if (!response.ok || !response.body) throw new Error("Audio esterno non leggibile da ComfyUI");
-        const audioPath = path.join(workDir, `external${path.extname(audio.filename) || ".audio"}`);
-        await pipeline(Readable.fromWeb(response.body as never), createWriteStream(audioPath));
+      const timelineDuration = timeline.clips.reduce(
+        (total, clip) => total + Math.max(0.05, clip.trimEnd - clip.trimStart),
+        0,
+      );
+      const configuredTracks = timeline.audioTracks?.length
+        ? timeline.audioTracks
+        : timeline.externalAudioFile ? [{
+            file: timeline.externalAudioFile,
+            name: timeline.externalAudioName ?? "Traccia audio",
+            sourceDuration: null,
+            startTime: 0,
+            trimStart: 0,
+            trimEnd: null,
+            gain: timeline.externalAudioGain,
+            muted: false,
+            solo: false,
+            loop: timeline.externalAudioLoop,
+            fadeIn: 0,
+            fadeOut: 0,
+          }] : [];
+      const hasSolo = configuredTracks.some(track => track.solo && !track.muted);
+      const activeTracks = configuredTracks.filter(track => !track.muted && (!hasSolo || track.solo));
+      if (activeTracks.length) {
         const args = ["-y", "-i", joinedPath];
-        if (timeline.externalAudioLoop) args.push("-stream_loop", "-1");
-        args.push("-i", audioPath);
-        if (timeline.originalAudioGain <= 0) {
-          args.push("-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-af", `volume=${timeline.externalAudioGain}`, "-c:a", "aac", "-b:a", "192k", "-shortest", outputPath);
-        } else {
-          args.push(
-            "-filter_complex",
-            `[0:a:0]volume=${timeline.originalAudioGain}[original];[1:a:0]volume=${timeline.externalAudioGain}[external];[original][external]amix=inputs=2:duration=first:dropout_transition=2[mixed]`,
-            "-map", "0:v:0", "-map", "[mixed]", "-c:v", "copy", "-c:a", "aac",
-            "-b:a", "192k", "-shortest", outputPath,
-          );
+        const downloaded: Array<{ track: (typeof activeTracks)[number]; path: string }> = [];
+        for (const [index, track] of activeTracks.entries()) {
+          const audio = annotatedMedia(track.file);
+          const response = await this.comfy.mediaResponse(audio.filename, audio.subfolder, audio.type);
+          if (!response.ok || !response.body) throw new Error(`Traccia audio ${index + 1} non leggibile da ComfyUI`);
+          const audioPath = path.join(workDir, `external_${index + 1}${path.extname(audio.filename) || ".audio"}`);
+          await pipeline(Readable.fromWeb(response.body as never), createWriteStream(audioPath));
+          downloaded.push({ track, path: audioPath });
+          if (track.loop) args.push("-stream_loop", "-1");
+          args.push("-i", audioPath);
         }
+        const filters: string[] = [];
+        const mixInputs: string[] = [];
+        if (timeline.originalAudioGain > 0) {
+          filters.push(`[0:a:0]volume=${timeline.originalAudioGain},apad=whole_dur=${timelineDuration}[original]`);
+          mixInputs.push("[original]");
+        }
+        downloaded.forEach(({ track }, index) => {
+          const available = track.trimEnd ?? track.sourceDuration ?? timelineDuration + track.trimStart;
+          const naturalDuration = Math.max(0.05, available - track.trimStart);
+          const remaining = Math.max(0.05, timelineDuration - track.startTime);
+          const playDuration = track.loop ? remaining : Math.min(naturalDuration, remaining);
+          const fadeIn = Math.min(track.fadeIn, playDuration);
+          const fadeOut = Math.min(track.fadeOut, playDuration);
+          const chain = [
+            `atrim=start=${track.trimStart}:duration=${playDuration}`,
+            "asetpts=PTS-STARTPTS",
+            `volume=${track.gain}`,
+          ];
+          if (fadeIn > 0.001) chain.push(`afade=t=in:st=0:d=${fadeIn}`);
+          if (fadeOut > 0.001) chain.push(`afade=t=out:st=${Math.max(0, playDuration - fadeOut)}:d=${fadeOut}`);
+          if (track.startTime > 0.001) chain.push(`adelay=${Math.round(track.startTime * 1000)}:all=1`);
+          chain.push(`apad=whole_dur=${timelineDuration}`);
+          filters.push(`[${index + 1}:a:0]${chain.join(",")}[track${index}]`);
+          mixInputs.push(`[track${index}]`);
+        });
+        filters.push(`${mixInputs.join("")}amix=inputs=${mixInputs.length}:duration=longest:dropout_transition=0[mixed]`);
+        args.push(
+          "-filter_complex", filters.join(";"),
+          "-map", "0:v:0", "-map", "[mixed]", "-c:v", "copy", "-c:a", "aac",
+          "-b:a", "192k", "-t", String(timelineDuration), outputPath,
+        );
         await runFile(this.ffmpegPath, args, { windowsHide: true, maxBuffer: 8 * 1024 * 1024 });
       } else if (timeline.originalAudioGain <= 0) {
         await runFile(this.ffmpegPath, ["-y", "-i", joinedPath, "-map", "0:v:0", "-c:v", "copy", "-an", outputPath], { windowsHide: true, maxBuffer: 8 * 1024 * 1024 });

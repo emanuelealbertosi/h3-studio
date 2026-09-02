@@ -632,4 +632,50 @@ export const JOB_DATABASE_MIGRATIONS = [
        CHECK (system_prompt_enabled IN (0, 1))`,
     ],
   },
+  {
+    version: 29,
+    statements: [
+      `ALTER TABLE project_clips ADD COLUMN crop_x REAL NOT NULL DEFAULT 0
+       CHECK (crop_x BETWEEN 0 AND 1)`,
+      `ALTER TABLE project_clips ADD COLUMN crop_y REAL NOT NULL DEFAULT 0
+       CHECK (crop_y BETWEEN 0 AND 1)`,
+      `ALTER TABLE project_clips ADD COLUMN crop_zoom REAL NOT NULL DEFAULT 1
+       CHECK (crop_zoom BETWEEN 0.1 AND 1)`,
+      `CREATE TABLE timeline_audio_tracks (
+        id TEXT PRIMARY KEY,
+        timeline_id TEXT NOT NULL REFERENCES project_timelines(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 7),
+        file TEXT NOT NULL,
+        name TEXT NOT NULL,
+        source_duration REAL CHECK (source_duration IS NULL OR source_duration > 0),
+        start_time REAL NOT NULL DEFAULT 0 CHECK (start_time >= 0),
+        trim_start REAL NOT NULL DEFAULT 0 CHECK (trim_start >= 0),
+        trim_end REAL CHECK (trim_end IS NULL OR trim_end > 0),
+        gain REAL NOT NULL DEFAULT 1 CHECK (gain BETWEEN 0 AND 2),
+        muted INTEGER NOT NULL DEFAULT 0 CHECK (muted IN (0, 1)),
+        solo INTEGER NOT NULL DEFAULT 0 CHECK (solo IN (0, 1)),
+        loop INTEGER NOT NULL DEFAULT 0 CHECK (loop IN (0, 1)),
+        fade_in REAL NOT NULL DEFAULT 0 CHECK (fade_in >= 0),
+        fade_out REAL NOT NULL DEFAULT 0 CHECK (fade_out >= 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(timeline_id, position)
+      ) STRICT`,
+      `CREATE INDEX idx_timeline_audio_tracks_timeline_position
+       ON timeline_audio_tracks(timeline_id, position)`,
+      `CREATE INDEX idx_timeline_audio_tracks_file
+       ON timeline_audio_tracks(file)`,
+      `INSERT INTO timeline_audio_tracks(
+         id, timeline_id, position, file, name, source_duration, start_time,
+         trim_start, trim_end, gain, muted, solo, loop, fade_in, fade_out,
+         created_at, updated_at
+       )
+       SELECT lower(hex(randomblob(16))), id, 0, external_audio_file,
+              COALESCE(external_audio_name, 'Traccia audio 1'), NULL, 0,
+              0, NULL, external_audio_gain, 0, 0, external_audio_loop, 0, 0,
+              created_at, updated_at
+       FROM project_timelines
+       WHERE external_audio_file IS NOT NULL`,
+    ],
+  },
 ] as const;

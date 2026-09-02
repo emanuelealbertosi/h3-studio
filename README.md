@@ -40,12 +40,14 @@ I job sono persistiti in `data/h3-studio.sqlite`. I video restano negli output d
 
 La sezione **Progetti** mostra la cronologia locale e permette di riaprire un job nello Studio. Anche il candidato scelto viene salvato in SQLite e ripristinato dopo il riavvio del bridge.
 
-La stessa sezione include ora progetti e timeline non distruttive: le clip possono
-essere riordinate, copiate o spostate fra progetti e riprodotte come montaggio
-virtuale. Il composer supporta il mapping dei sei modi H3 e conserva asset,
-keyframe e ruoli Reference; nessun render parte senza il pulsante Genera. La
-timeline può essere esportata in un MP4 unico con FFmpeg: prima tenta il concat
-senza ricodifica e, se i segmenti non sono compatibili, usa una ricodifica H.264/AAC.
+La sezione **Montaggi** offre timeline non distruttive: le clip possono essere
+riordinate, copiate o spostate fra progetti, tagliate con una filmstrip a doppia
+maniglia e reinquadrate con crop/zoom. Due tracce audio esterne mostrano la forma
+d’onda e supportano posizione, trim, volume, mute, solo, loop e fade, oltre al
+gain dell’audio H3 originale. Il composer supporta il mapping dei sei modi H3 e
+conserva asset, keyframe e ruoli Reference; nessun render parte senza il pulsante
+Genera. L’export FFmpeg produce un MP4 H.264/AAC applicando realmente tagli,
+crop e mix multitraccia.
 
 Ogni candidato video può contenere da **1 a 12 shot H3 concatenati con frame
 memory**. La durata scelta è per shot e la UI mostra durata totale indicativa,

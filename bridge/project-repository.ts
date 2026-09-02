@@ -24,11 +24,18 @@ type ClipRow = {
   variant_target_megapixels: 1 | 2 | null;
   position: number; label: string; created_at: string;
   seed: string; source_duration: number; trim_start: number; trim_end: number | null;
-  volume: number; output_filename: string; output_subfolder: string | null;
+  volume: number; crop_x: number; crop_y: number; crop_zoom: number;
+  output_filename: string; output_subfolder: string | null;
   output_type: MediaOutput["type"]; output_format: string | null;
   candidate_status: string; candidate_created_at: string; candidate_updated_at: string;
   variant_status: string | null; variant_created_at: string | null;
   variant_updated_at: string | null;
+};
+type AudioTrackRow = {
+  id: string; timeline_id: string; position: number; file: string; name: string;
+  source_duration: number | null; start_time: number; trim_start: number;
+  trim_end: number | null; gain: number; muted: number; solo: number; loop: number;
+  fade_in: number; fade_out: number; created_at: string; updated_at: string;
 };
 
 function normalizeName(value: unknown, label = "progetto") {
@@ -62,7 +69,7 @@ function mapClip(row: ClipRow) {
     position: row.position, label: row.label, createdAt: row.created_at,
     seed: Number(row.seed), sourceDuration: row.source_duration,
     trimStart: row.trim_start, trimEnd: row.trim_end ?? row.source_duration,
-    volume: row.volume,
+    volume: row.volume, cropX: row.crop_x, cropY: row.crop_y, cropZoom: row.crop_zoom,
     processingSeconds: row.source_variant_id
       ? processingSeconds(
           row.variant_created_at ?? "",
@@ -75,6 +82,17 @@ function mapClip(row: ClipRow) {
           row.candidate_status === "ready" || row.candidate_status === "failed",
         ),
     output: mediaFromClip(row),
+  };
+}
+function mapAudioTrack(row: AudioTrackRow) {
+  return {
+    id: row.id, timelineId: row.timeline_id, position: row.position,
+    file: row.file, name: row.name, sourceDuration: row.source_duration,
+    startTime: row.start_time, trimStart: row.trim_start,
+    trimEnd: row.trim_end ?? row.source_duration, gain: row.gain,
+    muted: Boolean(row.muted), solo: Boolean(row.solo), loop: Boolean(row.loop),
+    fadeIn: row.fade_in, fadeOut: row.fade_out,
+    createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
 function mapTimeline(row: TimelineRow) {
@@ -356,7 +374,8 @@ export class ProjectRepository {
        project_clips.source_variant_id, candidate_variants.kind AS variant_kind,
        candidate_variants.target_megapixels AS variant_target_megapixels,
        project_clips.label, project_clips.created_at, project_clips.trim_start,
-       project_clips.trim_end, project_clips.volume, candidates.seed,
+       project_clips.trim_end, project_clips.volume, project_clips.crop_x,
+       project_clips.crop_y, project_clips.crop_zoom, candidates.seed,
        candidates.status AS candidate_status,
        candidates.created_at AS candidate_created_at,
        candidates.updated_at AS candidate_updated_at,
@@ -380,7 +399,68 @@ export class ProjectRepository {
         ...mapClip(row),
         variants: this.clipVariants(row.source_job_id, row.source_candidate_index),
       })),
+      audioTracks: this.listAudioTracks(timelineId),
     };
+  }
+  listAudioTracks(timelineId: string) {
+    return (this.database.prepare(
+      "SELECT * FROM timeline_audio_tracks WHERE timeline_id = ? ORDER BY position",
+    ).all(timelineId) as unknown as AudioTrackRow[]).map(mapAudioTrack);
+  }
+  upsertAudioTrack(timelineId: string, positionValue: unknown, value: {
+    file?: unknown; name?: unknown; sourceDuration?: unknown; startTime?: unknown;
+    trimStart?: unknown; trimEnd?: unknown; gain?: unknown; muted?: unknown;
+    solo?: unknown; loop?: unknown; fadeIn?: unknown; fadeOut?: unknown;
+  }) {
+    const timeline = this.timelineRow(timelineId);
+    if (!timeline) throw new Error("Montaggio non trovato");
+    const position = Number(positionValue);
+    if (!Number.isInteger(position) || position < 0 || position > 7) throw new Error("Posizione traccia non valida");
+    const existing = this.database.prepare(
+      "SELECT * FROM timeline_audio_tracks WHERE timeline_id = ? AND position = ?",
+    ).get(timelineId, position) as AudioTrackRow | undefined;
+    if (value.file === null || value.file === "") {
+      if (existing) this.database.prepare("DELETE FROM timeline_audio_tracks WHERE id = ?").run(existing.id);
+      const now = new Date().toISOString();
+      this.touchTimeline(timelineId, now); this.touchProject(timeline.project_id, now);
+      return this.getTimeline(timelineId);
+    }
+    const file = value.file === undefined ? existing?.file : typeof value.file === "string" ? value.file.trim() : "";
+    if (!file) throw new Error("File audio mancante");
+    const rawName = value.name === undefined ? existing?.name ?? `Traccia audio ${position + 1}` : value.name;
+    const name = typeof rawName === "string" ? rawName.trim().slice(0, 160) : "";
+    if (!name) throw new Error("Nome traccia non valido");
+    const sourceDuration = value.sourceDuration === undefined
+      ? existing?.source_duration ?? null
+      : value.sourceDuration === null || value.sourceDuration === "" ? null : numberBetween(value.sourceDuration, 0.01, 21600, "Durata audio");
+    const startTime = value.startTime === undefined ? existing?.start_time ?? 0 : numberBetween(value.startTime, 0, 21600, "Posizione audio");
+    const trimStart = value.trimStart === undefined ? existing?.trim_start ?? 0 : numberBetween(value.trimStart, 0, sourceDuration ?? 21600, "Inizio trim audio");
+    const defaultEnd = existing?.trim_end ?? sourceDuration;
+    const trimEnd = value.trimEnd === undefined ? defaultEnd : value.trimEnd === null || value.trimEnd === "" ? null : numberBetween(value.trimEnd, 0.01, sourceDuration ?? 21600, "Fine trim audio");
+    if (trimEnd !== null && trimEnd - trimStart < 0.05) throw new Error("La traccia audio deve durare almeno 0,05 secondi");
+    const gain = value.gain === undefined ? existing?.gain ?? 1 : numberBetween(value.gain, 0, 2, "Volume traccia");
+    const fadeIn = value.fadeIn === undefined ? existing?.fade_in ?? 0 : numberBetween(value.fadeIn, 0, 21600, "Fade in");
+    const fadeOut = value.fadeOut === undefined ? existing?.fade_out ?? 0 : numberBetween(value.fadeOut, 0, 21600, "Fade out");
+    const muted = value.muted === undefined ? existing?.muted ?? 0 : value.muted ? 1 : 0;
+    const solo = value.solo === undefined ? existing?.solo ?? 0 : value.solo ? 1 : 0;
+    const loop = value.loop === undefined ? existing?.loop ?? 0 : value.loop ? 1 : 0;
+    const now = new Date().toISOString();
+    if (existing) {
+      this.database.prepare(
+        `UPDATE timeline_audio_tracks SET file = ?, name = ?, source_duration = ?, start_time = ?,
+         trim_start = ?, trim_end = ?, gain = ?, muted = ?, solo = ?, loop = ?, fade_in = ?, fade_out = ?, updated_at = ?
+         WHERE id = ?`,
+      ).run(file, name, sourceDuration, startTime, trimStart, trimEnd, gain, muted, solo, loop, fadeIn, fadeOut, now, existing.id);
+    } else {
+      this.database.prepare(
+        `INSERT INTO timeline_audio_tracks(
+           id, timeline_id, position, file, name, source_duration, start_time, trim_start,
+           trim_end, gain, muted, solo, loop, fade_in, fade_out, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(randomUUID(), timelineId, position, file, name, sourceDuration, startTime, trimStart, trimEnd, gain, muted, solo, loop, fadeIn, fadeOut, now, now);
+    }
+    this.touchTimeline(timelineId, now); this.touchProject(timeline.project_id, now);
+    return this.getTimeline(timelineId);
   }
   updateTimeline(timelineId: string, value: {
     name?: unknown; externalAudioFile?: unknown; externalAudioName?: unknown;
@@ -448,7 +528,7 @@ export class ProjectRepository {
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
     return this.getTimeline(timelineId);
   }
-  updateClip(clipId: string, value: { trimStart?: unknown; trimEnd?: unknown; volume?: unknown; variantId?: unknown }) {
+  updateClip(clipId: string, value: { trimStart?: unknown; trimEnd?: unknown; volume?: unknown; variantId?: unknown; cropX?: unknown; cropY?: unknown; cropZoom?: unknown }) {
     const clip = this.clip(clipId);
     if (!clip) throw new Error("Clip non trovata");
     const durationRow = this.database.prepare(
@@ -460,11 +540,14 @@ export class ProjectRepository {
     const trimEnd = value.trimEnd === undefined || value.trimEnd === null || value.trimEnd === "" ? clip.trim_end ?? sourceDuration : numberBetween(value.trimEnd, 0.05, sourceDuration, "Fine trim");
     if (trimEnd - trimStart < 0.05) throw new Error("La clip deve durare almeno 0,05 secondi");
     const volume = value.volume === undefined ? clip.volume : numberBetween(value.volume, 0, 2, "Volume clip");
+    const cropZoom = value.cropZoom === undefined ? clip.crop_zoom : numberBetween(value.cropZoom, 0.1, 1, "Zoom crop");
+    const cropX = value.cropX === undefined ? clip.crop_x : numberBetween(value.cropX, 0, 1 - cropZoom, "Posizione crop orizzontale");
+    const cropY = value.cropY === undefined ? clip.crop_y : numberBetween(value.cropY, 0, 1 - cropZoom, "Posizione crop verticale");
     const variantId = value.variantId === undefined
       ? clip.source_variant_id
       : this.resolveVariant(clip.source_job_id, clip.source_candidate_index, value.variantId);
     const now = new Date().toISOString();
-    this.database.prepare("UPDATE project_clips SET trim_start = ?, trim_end = ?, volume = ?, source_variant_id = ?, updated_at = ? WHERE id = ?").run(trimStart, trimEnd, volume, variantId, now, clipId);
+    this.database.prepare("UPDATE project_clips SET trim_start = ?, trim_end = ?, volume = ?, crop_x = ?, crop_y = ?, crop_zoom = ?, source_variant_id = ?, updated_at = ? WHERE id = ?").run(trimStart, trimEnd, volume, cropX, cropY, cropZoom, variantId, now, clipId);
     this.touchTimeline(clip.timeline_id, now); this.touchProject(clip.project_id, now);
     return this.getTimeline(clip.timeline_id);
   }
@@ -475,7 +558,7 @@ export class ProjectRepository {
     if (!timeline) throw new Error("Montaggio di destinazione non trovato");
     const result = this.addClipToTimeline(timeline.id, clip.source_job_id, clip.source_candidate_index, clip.label, clip.source_variant_id);
     const copied = result?.clips.at(-1);
-    if (copied) this.updateClip(copied.id, { trimStart: clip.trim_start, trimEnd: clip.trim_end, volume: clip.volume });
+    if (copied) this.updateClip(copied.id, { trimStart: clip.trim_start, trimEnd: clip.trim_end, volume: clip.volume, cropX: clip.crop_x, cropY: clip.crop_y, cropZoom: clip.crop_zoom });
     return this.getTimeline(timeline.id);
   }
   moveClip(clipId: string, targetId: string) {
@@ -549,6 +632,7 @@ export class ProjectRepository {
       source_candidate_index: number; position: number; label: string;
       source_variant_id: string | null;
       trim_start: number; trim_end: number | null; volume: number;
+      crop_x: number; crop_y: number; crop_zoom: number;
     } | undefined;
   }
   private resolveVariant(jobId: string, candidateIndex: number, value: unknown) {
@@ -607,6 +691,11 @@ export class ProjectRepository {
             WHERE project_id <> ? AND external_audio_file = ?
           )
           OR EXISTS (
+            SELECT 1 FROM timeline_audio_tracks
+            JOIN project_timelines ON project_timelines.id = timeline_audio_tracks.timeline_id
+            WHERE project_timelines.project_id <> ? AND timeline_audio_tracks.file = ?
+          )
+          OR EXISTS (
             SELECT 1 FROM image_job_references
             JOIN image_jobs ON image_jobs.id = image_job_references.job_id
             WHERE image_job_references.file = ? AND (
@@ -620,6 +709,8 @@ export class ProjectRepository {
             )
           )`,
     ).get(
+      media.file,
+      projectId,
       media.file,
       projectId,
       media.file,

@@ -1637,6 +1637,29 @@ app.post<{
   }
 });
 
+app.post<{
+  Params: { timelineId: string; position: string };
+  Body: {
+    file?: string | null; name?: string; sourceDuration?: number | null;
+    startTime?: number; trimStart?: number; trimEnd?: number | null; gain?: number;
+    muted?: boolean; solo?: boolean; loop?: boolean; fadeIn?: number; fadeOut?: number;
+  };
+}>("/api/timelines/:timelineId/audio-tracks/:position", async (request, reply) => {
+  try {
+    return {
+      ok: true,
+      timeline: projectRepository.upsertAudioTrack(
+        request.params.timelineId,
+        request.params.position,
+        request.body ?? {},
+      ),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Aggiornamento traccia audio fallito";
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
 app.delete<{ Params: { timelineId: string } }>(
   "/api/timelines/:timelineId",
   async (request, reply) => {
@@ -1726,7 +1749,10 @@ app.delete<{ Params: { clipId: string } }>(
 
 app.post<{
   Params: { clipId: string };
-  Body: { trimStart?: number; trimEnd?: number; volume?: number; variantId?: string | null };
+  Body: {
+    trimStart?: number; trimEnd?: number; volume?: number; variantId?: string | null;
+    cropX?: number; cropY?: number; cropZoom?: number;
+  };
 }>("/api/project-clips/:clipId/trim", async (request, reply) => {
   try {
     const timeline = projectRepository.updateClip(request.params.clipId, request.body ?? {});
