@@ -1660,6 +1660,24 @@ app.post<{
   }
 });
 
+app.post<{
+  Params: { timelineId: string };
+  Body: { aspect?: string };
+}>("/api/timelines/:timelineId/crop-aspect", async (request, reply) => {
+  try {
+    return {
+      ok: true,
+      timeline: projectRepository.setTimelineCropAspect(
+        request.params.timelineId,
+        request.body?.aspect,
+      ),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Aggiornamento formato timeline fallito";
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
 app.delete<{ Params: { timelineId: string } }>(
   "/api/timelines/:timelineId",
   async (request, reply) => {
@@ -1751,7 +1769,8 @@ app.post<{
   Params: { clipId: string };
   Body: {
     trimStart?: number; trimEnd?: number; volume?: number; variantId?: string | null;
-    cropX?: number; cropY?: number; cropZoom?: number;
+    cropX?: number; cropY?: number; cropZoom?: number; cropWidth?: number;
+    cropHeight?: number; cropAspect?: string;
   };
 }>("/api/project-clips/:clipId/trim", async (request, reply) => {
   try {

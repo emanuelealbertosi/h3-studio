@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
+} from "react";
 import { createPortal } from "react-dom";
 import ImageStudioPanel, {
   type ImageStudioIncomingReference,
@@ -776,6 +783,20 @@ type ProjectTimelineSummary = {
   clipCount: number;
 };
 
+type CropAspect = "original" | "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9";
+
+const cropAspectOptions: Array<{ value: CropAspect; label: string }> = [
+  { value: "original", label: "Originale" },
+  { value: "1:1", label: "1:1" },
+  { value: "2:3", label: "2:3" },
+  { value: "3:2", label: "3:2" },
+  { value: "3:4", label: "3:4" },
+  { value: "4:3", label: "4:3" },
+  { value: "9:16", label: "9:16" },
+  { value: "16:9", label: "16:9" },
+  { value: "21:9", label: "21:9" },
+];
+
 type ProjectClip = {
   id: string;
   projectId: string;
@@ -795,6 +816,10 @@ type ProjectClip = {
   cropX: number;
   cropY: number;
   cropZoom: number;
+  cropWidth: number;
+  cropHeight: number;
+  cropAspect: CropAspect;
+  sourceAspectFormat: string;
   output: { mediaPath: string; filename: string };
   variants: Array<{
     id: string;
@@ -1543,6 +1568,10 @@ function timelineClock(seconds: number) {
   return `${String(minutes).padStart(2, "0")}:${remainder.toFixed(2).padStart(5, "0")}`;
 }
 
+function clampCrop(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function timelineAudioPath(file: string) {
   const match = file.match(/^(.*?)(?: \[(input|output|temp)\])?$/i);
   const relative = (match?.[1] ?? file).replace(/\\/g, "/");
@@ -1642,7 +1671,16 @@ function MontagesPanel({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("Caricamento montaggi…");
   const [exportedMediaPath, setExportedMediaPath] = useState("");
+  const [cropEditing, setCropEditing] = useState(false);
+  const [videoNatural, setVideoNatural] = useState({ key: "", width: 0, height: 0 });
+  const [playerSize, setPlayerSize] = useState({ width: 0, height: 0 });
   const videoRef = useRef<HTMLVideoElement>(null);
+  const playerRef = useRef<HTMLDivElement>(null);
+  const cropDragRef = useRef<null | {
+    pointerId: number; clientX: number; clientY: number; cropX: number; cropY: number;
+  }>(null);
+  const cropDraftRef = useRef<Partial<ProjectClip>>({});
+  const cropWheelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function loadProjects() {
     const response = await fetch(`${bridgeUrl}/api/projects`, { cache: "no-store" });
@@ -1770,6 +1808,9 @@ function MontagesPanel({
         cropX: clip.cropX,
         cropY: clip.cropY,
         cropZoom: clip.cropZoom,
+        cropWidth: clip.cropWidth,
+        cropHeight: clip.cropHeight,
+        cropAspect: clip.cropAspect,
         variantId: clip.sourceVariantId,
       });
       if (updated) setMessage(`Clip salvata · ${(clip.trimEnd - clip.trimStart).toFixed(2)}s`);
@@ -1925,6 +1966,18 @@ function MontagesPanel({
     if (playing) void videoRef.current?.play();
     else videoRef.current?.pause();
   }, [playing, currentIndex]);
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!player) return;
+    const measure = () => setPlayerSize({ width: player.clientWidth, height: player.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(player);
+    return () => observer.disconnect();
+  }, [timelineId, timeline?.id]);
+  useEffect(() => () => {
+    if (cropWheelTimerRef.current) clearTimeout(cropWheelTimerRef.current);
+  }, []);
 
   const projectSources = useMemo(() => projectJobs.flatMap(job =>
     job.candidates
@@ -1939,6 +1992,95 @@ function MontagesPanel({
   ), [projectJobs]);
   const currentClip = timeline?.clips[currentIndex] ?? null;
   const timelineDuration = timeline?.clips.reduce((total, clip) => total + clip.trimEnd - clip.trimStart, 0) ?? 0;
+  const currentVideoKey = currentClip ? `${currentClip.id}:${currentClip.sourceVariantId ?? "original"}` : "";
+  const cropViewport = useMemo(() => {
+    if (videoNatural.key !== currentVideoKey || !videoNatural.width || !videoNatural.height || !playerSize.width || !playerSize.height) return null;
+    const scale = Math.min(playerSize.width / videoNatural.width, playerSize.height / videoNatural.height);
+    const width = videoNatural.width * scale;
+    const height = videoNatural.height * scale;
+    return { left: (playerSize.width - width) / 2, top: (playerSize.height - height) / 2, width, height };
+  }, [currentVideoKey, playerSize, videoNatural]);
+  const cropOutput = currentClip && videoNatural.key === currentVideoKey && videoNatural.width && videoNatural.height ? {
+    width: Math.max(2, Math.floor(videoNatural.width * currentClip.cropWidth / 2) * 2),
+    height: Math.max(2, Math.floor(videoNatural.height * currentClip.cropHeight / 2) * 2),
+  } : null;
+
+  async function setSequenceAspect(aspect: CropAspect) {
+    if (!timeline) return;
+    setBusy(true);
+    try {
+      await timelineMutation(`/api/timelines/${timeline.id}/crop-aspect`, { aspect });
+      setCropEditing(aspect !== "original");
+      setMessage(aspect === "original" ? "Formato originale ripristinato" : `Formato ${aspect} applicato a tutte le clip`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Formato crop non salvato");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function cropPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!cropEditing || !currentClip || !cropViewport) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    cropDragRef.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      cropX: currentClip.cropX,
+      cropY: currentClip.cropY,
+    };
+    cropDraftRef.current = {};
+  }
+
+  function cropPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = cropDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !currentClip || !cropViewport) return;
+    const cropX = clampCrop(drag.cropX + (event.clientX - drag.clientX) / cropViewport.width, 0, 1 - currentClip.cropWidth);
+    const cropY = clampCrop(drag.cropY + (event.clientY - drag.clientY) / cropViewport.height, 0, 1 - currentClip.cropHeight);
+    cropDraftRef.current = { cropX, cropY };
+    patchClip(currentClip.id, { cropX, cropY });
+  }
+
+  function cropPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!cropDragRef.current || !currentClip) return;
+    cropDragRef.current = null;
+    const update = cropDraftRef.current;
+    cropDraftRef.current = {};
+    if (typeof update.cropX === "number" && typeof update.cropY === "number") {
+      void saveClip({ ...currentClip, cropX: update.cropX, cropY: update.cropY });
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+
+  function cropWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    if (!cropEditing || !currentClip || !cropViewport || !playerRef.current) return;
+    event.preventDefault();
+    const bounds = playerRef.current.getBoundingClientRect();
+    const pointX = clampCrop((event.clientX - bounds.left - cropViewport.left) / cropViewport.width, 0, 1);
+    const pointY = clampCrop((event.clientY - bounds.top - cropViewport.top) / cropViewport.height, 0, 1);
+    const anchorX = clampCrop((pointX - currentClip.cropX) / currentClip.cropWidth, 0, 1);
+    const anchorY = clampCrop((pointY - currentClip.cropY) / currentClip.cropHeight, 0, 1);
+    const minWidth = Math.min(1, 64 / Math.max(64, videoNatural.width));
+    const minHeight = Math.min(1, 64 / Math.max(64, videoNatural.height));
+    const requestedScale = event.deltaY < 0 ? 1.08 : 0.92;
+    const scale = clampCrop(
+      requestedScale,
+      Math.max(minWidth / currentClip.cropWidth, minHeight / currentClip.cropHeight),
+      Math.min(1 / currentClip.cropWidth, 1 / currentClip.cropHeight),
+    );
+    const cropWidth = currentClip.cropWidth * scale;
+    const cropHeight = currentClip.cropHeight * scale;
+    const cropX = clampCrop(pointX - anchorX * cropWidth, 0, 1 - cropWidth);
+    const cropY = clampCrop(pointY - anchorY * cropHeight, 0, 1 - cropHeight);
+    const next = { cropWidth, cropHeight, cropX, cropY };
+    cropDraftRef.current = next;
+    patchClip(currentClip.id, next);
+    if (cropWheelTimerRef.current) clearTimeout(cropWheelTimerRef.current);
+    cropWheelTimerRef.current = setTimeout(() => {
+      void saveClip({ ...currentClip, ...next });
+      cropWheelTimerRef.current = null;
+    }, 280);
+  }
   return (
     <section className="montages-workspace">
       <div className="history-heading">
@@ -1953,11 +2095,11 @@ function MontagesPanel({
       </div>
 
       <div className="montage-selector-bar">
-        <label><span>Progetto</span><select value={projectId} onChange={event => setProjectId(event.target.value)}>
+        <label><span>Progetto</span><select value={projectId} onChange={event => { setCropEditing(false); setProjectId(event.target.value); }}>
           <option value="">Nessun progetto</option>
           {projects.map(project => <option key={project.id} value={project.id}>{project.name} · {project.timelineCount} montaggi</option>)}
         </select></label>
-        <label><span>Montaggio</span><select value={timelineId} onChange={event => setTimelineId(event.target.value)}>
+        <label><span>Montaggio</span><select value={timelineId} onChange={event => { setCropEditing(false); setTimelineId(event.target.value); }}>
           {timelines.map(item => <option key={item.id} value={item.id}>{item.name} · {item.clipCount} clip</option>)}
         </select></label>
         <label><span>Nuovo montaggio</span><input maxLength={80} placeholder="Es. Director's cut" value={newName} onChange={event => setNewName(event.target.value)} /></label>
@@ -2030,13 +2172,16 @@ function MontagesPanel({
       ) : timeline ? (
         <>
           <div className="montage-editor-grid">
-            <div className="montage-player">
+            <div className="montage-player" ref={playerRef}>
               {currentClip ? (
                 <video
                   autoPlay={playing}
                   controls
                   key={`${currentClip.id}:${currentClip.sourceVariantId ?? "original"}`}
-                  onLoadedMetadata={event => { event.currentTarget.currentTime = currentClip.trimStart; }}
+                  onLoadedMetadata={event => {
+                    event.currentTarget.currentTime = currentClip.trimStart;
+                    setVideoNatural({ key: currentVideoKey, width: event.currentTarget.videoWidth, height: event.currentTarget.videoHeight });
+                  }}
                   onTimeUpdate={event => {
                     const elapsedBefore = timeline.clips.slice(0, currentIndex).reduce(
                       (total, clip) => total + clip.trimEnd - clip.trimStart,
@@ -2053,15 +2198,23 @@ function MontagesPanel({
                   src={`${bridgeUrl}${currentClip.output.mediaPath}`}
                 />
               ) : <div className="montage-empty">Aggiungi clip da Progetti</div>}
-              {currentClip && currentClip.cropZoom < 0.999 && <div
-                className="montage-crop-guide"
+              {currentClip && cropViewport && (cropEditing || currentClip.cropWidth < 0.999 || currentClip.cropHeight < 0.999) && <div
+                className={cropEditing ? "montage-crop-guide editing" : "montage-crop-guide"}
+                onPointerCancel={cropPointerUp}
+                onPointerDown={cropPointerDown}
+                onPointerMove={cropPointerMove}
+                onPointerUp={cropPointerUp}
+                onWheel={cropWheel}
                 style={{
-                  left: `${currentClip.cropX * 100}%`,
-                  top: `${currentClip.cropY * 100}%`,
-                  width: `${currentClip.cropZoom * 100}%`,
-                  height: `${currentClip.cropZoom * 100}%`,
+                  left: `${cropViewport.left + currentClip.cropX * cropViewport.width}px`,
+                  top: `${cropViewport.top + currentClip.cropY * cropViewport.height}px`,
+                  width: `${currentClip.cropWidth * cropViewport.width}px`,
+                  height: `${currentClip.cropHeight * cropViewport.height}px`,
                 }}
-              ><span>AREA ESPORTATA</span></div>}
+              >
+                <span>{cropOutput ? `${cropOutput.width} × ${cropOutput.height}` : "AREA ESPORTATA"}</span>
+                {cropEditing && <i aria-hidden="true" />}
+              </div>}
               {currentClip && <span className="montage-counter">{currentIndex + 1} / {timeline.clips.length}</span>}
               {currentClip && <button
                 aria-label={`Rimuovi ${currentClip.label} dal montaggio`}
@@ -2081,6 +2234,20 @@ function MontagesPanel({
               {exportedMediaPath && <a download href={`${bridgeUrl}${exportedMediaPath}`} rel="noopener" target="_blank">Scarica MP4 pronto</a>}
             </aside>
           </div>
+
+          <section className="crop-wysiwyg-toolbar">
+            <div>
+              <span className="section-index">CROP WYSIWYG</span>
+              <strong>{currentClip?.label ?? "Nessuna clip selezionata"}</strong>
+            </div>
+            <label>Formato sequenza <select disabled={!currentClip || busy} value={currentClip?.cropAspect ?? "original"} onChange={event => void setSequenceAspect(event.target.value as CropAspect)}>
+              {cropAspectOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select></label>
+            <button className={cropEditing ? "active" : ""} disabled={!currentClip} onClick={() => { setPlaying(false); setCropEditing(value => !value); }} type="button">
+              {cropEditing ? "✓ Termina crop" : "✥ Modifica sul video"}
+            </button>
+            <p>{cropEditing ? "Trascina il riquadro per reinquadrare. Usa la rotella sopra l’area per zoomare attorno al puntatore." : cropOutput ? `Area sorgente ${cropOutput.width} × ${cropOutput.height} px · il formato viene mantenuto su tutte le clip.` : "Seleziona una clip per modificarne l’inquadratura."}</p>
+          </section>
 
           <section className="audio-track-stack" aria-label="Tracce audio esterne">
             {[0, 1].map(position => {
@@ -2160,6 +2327,9 @@ function MontagesPanel({
                           cropX: clip.cropX,
                           cropY: clip.cropY,
                           cropZoom: clip.cropZoom,
+                          cropWidth: clip.cropWidth,
+                          cropHeight: clip.cropHeight,
+                          cropAspect: clip.cropAspect,
                           variantId,
                         }).then(() => setMessage(`Versione ${variantId ? "post-process" : "originale"} attiva`));
                       }}
@@ -2173,16 +2343,9 @@ function MontagesPanel({
                     <label>A <input min={clip.trimStart + 0.05} max={clip.sourceDuration} step="0.05" type="number" value={clip.trimEnd} onChange={event => patchClip(clip.id, { trimEnd: Number(event.target.value) })} onBlur={() => void saveClip(clip)} /></label>
                     <label>Vol <input min="0" max="2" step="0.05" type="number" value={clip.volume} onChange={event => patchClip(clip.id, { volume: Number(event.target.value) })} onBlur={() => void saveClip(clip)} /></label>
                   </div>
-                  <div className="crop-controls">
-                    <label>Zoom crop <input min="1" max="5" step="0.05" type="range" value={1 / clip.cropZoom} onChange={event => {
-                      const cropZoom = 1 / Number(event.target.value);
-                      patchClip(clip.id, { cropZoom, cropX: Math.min(clip.cropX, 1 - cropZoom), cropY: Math.min(clip.cropY, 1 - cropZoom) });
-                    }} onPointerUp={event => {
-                      const cropZoom = 1 / Number(event.currentTarget.value);
-                      void saveClip({ ...clip, cropZoom, cropX: Math.min(clip.cropX, 1 - cropZoom), cropY: Math.min(clip.cropY, 1 - cropZoom) });
-                    }} /><b>{(1 / clip.cropZoom).toFixed(2)}×</b></label>
-                    <label>Orizzontale <input disabled={clip.cropZoom >= 0.999} min="0" max={1 - clip.cropZoom} step="0.005" type="range" value={clip.cropX} onChange={event => patchClip(clip.id, { cropX: Number(event.target.value) })} onPointerUp={event => void saveClip({ ...clip, cropX: Number(event.currentTarget.value) })} /></label>
-                    <label>Verticale <input disabled={clip.cropZoom >= 0.999} min="0" max={1 - clip.cropZoom} step="0.005" type="range" value={clip.cropY} onChange={event => patchClip(clip.id, { cropY: Number(event.target.value) })} onPointerUp={event => void saveClip({ ...clip, cropY: Number(event.currentTarget.value) })} /></label>
+                  <div className="crop-clip-summary">
+                    <span>Crop {clip.cropAspect === "original" ? "originale" : clip.cropAspect}</span>
+                    <button onClick={() => { setCurrentIndex(index); setPlaying(false); setCropEditing(true); }} type="button">✥ Reinquadra sul player</button>
                   </div>
                   <small>{(clip.trimEnd - clip.trimStart).toFixed(2)}s usati di {clip.sourceDuration}s</small>
                   <div className="timeline-clip-actions">
@@ -6733,7 +6896,11 @@ function StudioApp() {
     <main className="studio-shell">
       <aside className="rail" aria-label="Navigazione principale">
         <a className="brand" href="#" aria-label="H3 Studio home">
-          H3
+          <span className="brand-mark">H3</span>
+          <span className="brand-copy">
+            H3 <em>studio</em>
+            <small>PRODUZIONE GENERATIVA</small>
+          </span>
         </a>
         <nav className="rail-nav">
           <button className={`rail-item ${activeView === "chat" ? "active" : ""}`} onClick={() => setActiveView("chat")} type="button">
@@ -6796,6 +6963,11 @@ function StudioApp() {
           <span className="rail-icon">&lt;/&gt;</span>
           Sorgente
         </a>
+        <div className="rail-bottom">
+          <div className="rail-local"><i /> Produzione sul tuo PC</div>
+          <p>Il modello può essere lontano.<br />Il tuo studio resta qui.</p>
+          <span className="rail-version">H3 STUDIO · 0.2.0</span>
+        </div>
       </aside>
 
       <section className="workspace">

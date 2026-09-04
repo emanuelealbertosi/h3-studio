@@ -144,12 +144,23 @@ try {
     assert.equal(trimmed?.clips[0].trimEnd, 3.5);
     assert.equal(trimmed?.clips[0].volume, 0.75);
     assert.equal(trimmed?.clips[0].cropZoom, 0.6);
+    assert.equal(trimmed?.clips[0].cropWidth, 0.6);
+    assert.equal(trimmed?.clips[0].cropHeight, 0.6);
     assert.equal(trimmed?.clips[0].cropX, 0.2);
     assert.equal(trimmed?.clips[0].cropY, 0.1);
     assert.throws(
       () => projects.updateClip(switched!.clips[0].id, { cropZoom: 0.8, cropX: 0.3 }),
       /Posizione crop orizzontale/,
     );
+    const portraitCrop = projects.setTimelineCropAspect(alternate.id, "9:16");
+    assert.equal(portraitCrop?.clips[0].cropAspect, "9:16");
+    assert.equal(portraitCrop?.clips[0].cropHeight, 1);
+    assert(Math.abs((portraitCrop?.clips[0].cropWidth ?? 0) - 81 / 256) < 0.000001);
+    assert(Math.abs((portraitCrop?.clips[0].cropX ?? 0) - (1 - 81 / 256) / 2) < 0.000001);
+    assert.throws(() => projects.setTimelineCropAspect(alternate.id, "cinema"), /Rapporto crop non valido/);
+    const portraitWithAddedClip = projects.addClipToTimeline(alternate.id, "test-job", 1, "Seconda verticale");
+    assert.equal(portraitWithAddedClip?.clips[1].cropAspect, "9:16");
+    assert.equal(portraitWithAddedClip?.clips[1].cropHeight, 1);
     const mixed = projects.updateTimeline(alternate.id, {
       externalAudioFile: "music/test.wav [input]",
       externalAudioName: "test.wav",
@@ -190,7 +201,7 @@ try {
     assert.equal(projects.get(first.id)?.timelines.length, 2);
     const deletedTimeline = projects.deleteTimeline(alternate.id);
     assert.equal(deletedTimeline.name, "Versione breve");
-    assert.equal(deletedTimeline.removedClips, 1);
+    assert.equal(deletedTimeline.removedClips, 2);
     assert.equal(projects.getTimeline(alternate.id), null);
     assert.equal(projects.get(first.id)?.timelines.length, 1);
     assert.throws(() => projects.deleteTimeline(alternate.id), /Montaggio non trovato/);

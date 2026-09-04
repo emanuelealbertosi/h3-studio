@@ -25,6 +25,7 @@ type ClipRow = {
   position: number; label: string; created_at: string;
   seed: string; source_duration: number; trim_start: number; trim_end: number | null;
   volume: number; crop_x: number; crop_y: number; crop_zoom: number;
+  crop_width: number; crop_height: number; crop_aspect: string; source_aspect_format: string;
   output_filename: string; output_subfolder: string | null;
   output_type: MediaOutput["type"]; output_format: string | null;
   candidate_status: string; candidate_created_at: string; candidate_updated_at: string;
@@ -54,6 +55,21 @@ function numberBetween(value: unknown, min: number, max: number, label: string) 
   if (!Number.isFinite(number) || number < min || number > max) throw new Error(`${label} deve essere compreso tra ${min} e ${max}`);
   return number;
 }
+const CROP_ASPECTS = new Set(["original", "1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"]);
+function ratioFromFormat(value: string, fallback = 16 / 9) {
+  const match = /(^|\D)(\d+):(\d+)(\D|$)/.exec(value);
+  if (!match) return fallback;
+  const width = Number(match[2]), height = Number(match[3]);
+  return width > 0 && height > 0 ? width / height : fallback;
+}
+function centeredCrop(sourceFormat: string, aspect: string) {
+  if (aspect === "original") return { width: 1, height: 1, x: 0, y: 0 };
+  const sourceRatio = ratioFromFormat(sourceFormat);
+  const targetRatio = ratioFromFormat(aspect, sourceRatio);
+  const width = targetRatio >= sourceRatio ? 1 : targetRatio / sourceRatio;
+  const height = targetRatio >= sourceRatio ? sourceRatio / targetRatio : 1;
+  return { width, height, x: (1 - width) / 2, y: (1 - height) / 2 };
+}
 function mediaFromClip(row: ClipRow): MediaOutput {
   const subfolder = row.output_subfolder ?? "";
   const query = new URLSearchParams({ filename: row.output_filename, subfolder, type: row.output_type });
@@ -70,6 +86,8 @@ function mapClip(row: ClipRow) {
     seed: Number(row.seed), sourceDuration: row.source_duration,
     trimStart: row.trim_start, trimEnd: row.trim_end ?? row.source_duration,
     volume: row.volume, cropX: row.crop_x, cropY: row.crop_y, cropZoom: row.crop_zoom,
+    cropWidth: row.crop_width, cropHeight: row.crop_height, cropAspect: row.crop_aspect,
+    sourceAspectFormat: row.source_aspect_format,
     processingSeconds: row.source_variant_id
       ? processingSeconds(
           row.variant_created_at ?? "",
@@ -375,7 +393,9 @@ export class ProjectRepository {
        candidate_variants.target_megapixels AS variant_target_megapixels,
        project_clips.label, project_clips.created_at, project_clips.trim_start,
        project_clips.trim_end, project_clips.volume, project_clips.crop_x,
-       project_clips.crop_y, project_clips.crop_zoom, candidates.seed,
+       project_clips.crop_y, project_clips.crop_zoom, project_clips.crop_width,
+       project_clips.crop_height, project_clips.crop_aspect,
+       jobs.aspect_format AS source_aspect_format, candidates.seed,
        candidates.status AS candidate_status,
        candidates.created_at AS candidate_created_at,
        candidates.updated_at AS candidate_updated_at,
@@ -482,6 +502,35 @@ export class ProjectRepository {
     this.touchProject(timeline.project_id, now);
     return this.getTimeline(timelineId);
   }
+  setTimelineCropAspect(timelineId: string, aspectValue: unknown) {
+    const timeline = this.timelineRow(timelineId);
+    if (!timeline) throw new Error("Montaggio non trovato");
+    const aspect = String(aspectValue ?? "");
+    if (!CROP_ASPECTS.has(aspect)) throw new Error("Rapporto crop non valido");
+    const clips = this.database.prepare(
+      `SELECT project_clips.id, jobs.aspect_format
+       FROM project_clips JOIN jobs ON jobs.id = project_clips.source_job_id
+       WHERE project_clips.timeline_id = ?`,
+    ).all(timelineId) as unknown as Array<{ id: string; aspect_format: string }>;
+    const now = new Date().toISOString();
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const update = this.database.prepare(
+        `UPDATE project_clips SET crop_x = ?, crop_y = ?, crop_zoom = ?,
+         crop_width = ?, crop_height = ?, crop_aspect = ?, updated_at = ? WHERE id = ?`,
+      );
+      for (const clip of clips) {
+        const crop = centeredCrop(clip.aspect_format, aspect);
+        update.run(crop.x, crop.y, Math.min(crop.width, crop.height), crop.width, crop.height, aspect, now, clip.id);
+      }
+      this.touchTimeline(timelineId, now); this.touchProject(timeline.project_id, now);
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+    return this.getTimeline(timelineId);
+  }
   deleteTimeline(timelineId: string) {
     const timeline = this.timelineRow(timelineId);
     if (!timeline) throw new Error("Montaggio non trovato");
@@ -510,25 +559,40 @@ export class ProjectRepository {
   addClipToTimeline(timelineId: string, jobId: string, candidateIndex: number, labelValue?: unknown, variantValue?: unknown) {
     const timeline = this.getTimeline(timelineId);
     if (!timeline) throw new Error("Montaggio non trovato");
-    const candidate = this.database.prepare("SELECT status, output_filename FROM candidates WHERE job_id = ? AND candidate_index = ?").get(jobId, candidateIndex) as { status: string; output_filename: string | null } | undefined;
+    const candidate = this.database.prepare(
+      `SELECT candidates.status, candidates.output_filename, jobs.aspect_format
+       FROM candidates JOIN jobs ON jobs.id = candidates.job_id
+       WHERE candidates.job_id = ? AND candidates.candidate_index = ?`,
+    ).get(jobId, candidateIndex) as { status: string; output_filename: string | null; aspect_format: string } | undefined;
     if (!candidate || candidate.status !== "ready" || !candidate.output_filename) throw new Error("Il candidato deve essere completato e avere un video");
     const variantId = this.resolveVariant(jobId, candidateIndex, variantValue);
     const position = timeline.clips.length, id = randomUUID(), now = new Date().toISOString();
     const label = normalizeLabel(labelValue, `Clip ${position + 1}`);
+    const cropAspect = timeline.clips[0]?.cropAspect ?? "original";
+    const crop = centeredCrop(candidate.aspect_format, cropAspect);
     this.database.exec("BEGIN IMMEDIATE");
     try {
       this.database.prepare(
         `INSERT INTO project_clips(id, project_id, timeline_id, source_job_id,
-         source_candidate_index, source_variant_id, position, label, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(id, timeline.projectId, timelineId, jobId, candidateIndex, variantId, position, label, now, now);
+         source_candidate_index, source_variant_id, position, label, crop_x, crop_y,
+         crop_zoom, crop_width, crop_height, crop_aspect, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        id, timeline.projectId, timelineId, jobId, candidateIndex, variantId, position,
+        label, crop.x, crop.y, Math.min(crop.width, crop.height), crop.width,
+        crop.height, cropAspect, now, now,
+      );
       this.database.prepare("UPDATE jobs SET project_id = ?, updated_at = ? WHERE id = ?").run(timeline.projectId, now, jobId);
       this.touchTimeline(timelineId, now); this.touchProject(timeline.projectId, now);
       this.database.exec("COMMIT");
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
     return this.getTimeline(timelineId);
   }
-  updateClip(clipId: string, value: { trimStart?: unknown; trimEnd?: unknown; volume?: unknown; variantId?: unknown; cropX?: unknown; cropY?: unknown; cropZoom?: unknown }) {
+  updateClip(clipId: string, value: {
+    trimStart?: unknown; trimEnd?: unknown; volume?: unknown; variantId?: unknown;
+    cropX?: unknown; cropY?: unknown; cropZoom?: unknown; cropWidth?: unknown;
+    cropHeight?: unknown; cropAspect?: unknown;
+  }) {
     const clip = this.clip(clipId);
     if (!clip) throw new Error("Clip non trovata");
     const durationRow = this.database.prepare(
@@ -540,14 +604,28 @@ export class ProjectRepository {
     const trimEnd = value.trimEnd === undefined || value.trimEnd === null || value.trimEnd === "" ? clip.trim_end ?? sourceDuration : numberBetween(value.trimEnd, 0.05, sourceDuration, "Fine trim");
     if (trimEnd - trimStart < 0.05) throw new Error("La clip deve durare almeno 0,05 secondi");
     const volume = value.volume === undefined ? clip.volume : numberBetween(value.volume, 0, 2, "Volume clip");
-    const cropZoom = value.cropZoom === undefined ? clip.crop_zoom : numberBetween(value.cropZoom, 0.1, 1, "Zoom crop");
-    const cropX = value.cropX === undefined ? clip.crop_x : numberBetween(value.cropX, 0, 1 - cropZoom, "Posizione crop orizzontale");
-    const cropY = value.cropY === undefined ? clip.crop_y : numberBetween(value.cropY, 0, 1 - cropZoom, "Posizione crop verticale");
+    const legacyZoom = value.cropZoom === undefined ? undefined : numberBetween(value.cropZoom, 0.1, 1, "Zoom crop");
+    const cropWidth = value.cropWidth === undefined
+      ? legacyZoom ?? clip.crop_width
+      : numberBetween(value.cropWidth, 0.05, 1, "Larghezza crop");
+    const cropHeight = value.cropHeight === undefined
+      ? legacyZoom ?? clip.crop_height
+      : numberBetween(value.cropHeight, 0.05, 1, "Altezza crop");
+    const cropX = value.cropX === undefined
+      ? Math.min(clip.crop_x, 1 - cropWidth)
+      : numberBetween(value.cropX, 0, 1 - cropWidth, "Posizione crop orizzontale");
+    const cropY = value.cropY === undefined
+      ? Math.min(clip.crop_y, 1 - cropHeight)
+      : numberBetween(value.cropY, 0, 1 - cropHeight, "Posizione crop verticale");
+    const cropAspect = value.cropAspect === undefined ? clip.crop_aspect : String(value.cropAspect);
+    if (!CROP_ASPECTS.has(cropAspect)) throw new Error("Rapporto crop non valido");
     const variantId = value.variantId === undefined
       ? clip.source_variant_id
       : this.resolveVariant(clip.source_job_id, clip.source_candidate_index, value.variantId);
     const now = new Date().toISOString();
-    this.database.prepare("UPDATE project_clips SET trim_start = ?, trim_end = ?, volume = ?, crop_x = ?, crop_y = ?, crop_zoom = ?, source_variant_id = ?, updated_at = ? WHERE id = ?").run(trimStart, trimEnd, volume, cropX, cropY, cropZoom, variantId, now, clipId);
+    this.database.prepare(
+      "UPDATE project_clips SET trim_start = ?, trim_end = ?, volume = ?, crop_x = ?, crop_y = ?, crop_zoom = ?, crop_width = ?, crop_height = ?, crop_aspect = ?, source_variant_id = ?, updated_at = ? WHERE id = ?",
+    ).run(trimStart, trimEnd, volume, cropX, cropY, Math.min(cropWidth, cropHeight), cropWidth, cropHeight, cropAspect, variantId, now, clipId);
     this.touchTimeline(clip.timeline_id, now); this.touchProject(clip.project_id, now);
     return this.getTimeline(clip.timeline_id);
   }
@@ -558,7 +636,18 @@ export class ProjectRepository {
     if (!timeline) throw new Error("Montaggio di destinazione non trovato");
     const result = this.addClipToTimeline(timeline.id, clip.source_job_id, clip.source_candidate_index, clip.label, clip.source_variant_id);
     const copied = result?.clips.at(-1);
-    if (copied) this.updateClip(copied.id, { trimStart: clip.trim_start, trimEnd: clip.trim_end, volume: clip.volume, cropX: clip.crop_x, cropY: clip.crop_y, cropZoom: clip.crop_zoom });
+    if (copied) this.updateClip(copied.id, {
+      trimStart: clip.trim_start,
+      trimEnd: clip.trim_end,
+      volume: clip.volume,
+      ...(copied.cropAspect === clip.crop_aspect ? {
+        cropX: clip.crop_x,
+        cropY: clip.crop_y,
+        cropWidth: clip.crop_width,
+        cropHeight: clip.crop_height,
+        cropAspect: clip.crop_aspect,
+      } : {}),
+    });
     return this.getTimeline(timeline.id);
   }
   moveClip(clipId: string, targetId: string) {
@@ -566,10 +655,21 @@ export class ProjectRepository {
     if (!clip || !target) throw new Error("Clip o montaggio di destinazione non trovato");
     if (clip.timeline_id === target.id) return this.getTimeline(target.id);
     const targetDetail = this.getTimeline(target.id), now = new Date().toISOString();
+    const source = this.database.prepare("SELECT aspect_format FROM jobs WHERE id = ?").get(clip.source_job_id) as { aspect_format: string } | undefined;
+    const targetAspect = targetDetail?.clips[0]?.cropAspect ?? "original";
+    const crop = centeredCrop(source?.aspect_format ?? "16:9 landscape", targetAspect);
     this.database.exec("BEGIN IMMEDIATE");
     try {
       this.database.prepare("UPDATE project_clips SET position = position - 1, updated_at = ? WHERE timeline_id = ? AND position > ?").run(now, clip.timeline_id, clip.position);
-      this.database.prepare("UPDATE project_clips SET project_id = ?, timeline_id = ?, position = ?, updated_at = ? WHERE id = ?").run(target.project_id, target.id, targetDetail?.clips.length ?? 0, now, clipId);
+      this.database.prepare(
+        `UPDATE project_clips SET project_id = ?, timeline_id = ?, position = ?,
+         crop_x = ?, crop_y = ?, crop_zoom = ?, crop_width = ?, crop_height = ?,
+         crop_aspect = ?, updated_at = ? WHERE id = ?`,
+      ).run(
+        target.project_id, target.id, targetDetail?.clips.length ?? 0,
+        crop.x, crop.y, Math.min(crop.width, crop.height), crop.width, crop.height,
+        targetAspect, now, clipId,
+      );
       this.touchTimeline(clip.timeline_id, now); this.touchTimeline(target.id, now);
       this.touchProject(clip.project_id, now); this.touchProject(target.project_id, now);
       this.database.exec("COMMIT");
@@ -633,6 +733,7 @@ export class ProjectRepository {
       source_variant_id: string | null;
       trim_start: number; trim_end: number | null; volume: number;
       crop_x: number; crop_y: number; crop_zoom: number;
+      crop_width: number; crop_height: number; crop_aspect: string;
     } | undefined;
   }
   private resolveVariant(jobId: string, candidateIndex: number, value: unknown) {

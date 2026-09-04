@@ -47,6 +47,10 @@ type ExportTimeline = {
     cropX?: number;
     cropY?: number;
     cropZoom?: number;
+    cropWidth?: number;
+    cropHeight?: number;
+    cropAspect?: string;
+    sourceAspectFormat?: string;
     output: { mediaPath: string; filename: string };
   }>;
 };
@@ -68,6 +72,21 @@ function annotatedMedia(value: string) {
   };
 }
 
+function ratioFromLabel(value: string | undefined, fallback = 16 / 9) {
+  const match = /(^|\D)(\d+):(\d+)(\D|$)/.exec(value ?? "");
+  if (!match) return fallback;
+  const width = Number(match[2]);
+  const height = Number(match[3]);
+  return width > 0 && height > 0 ? width / height : fallback;
+}
+
+function evenDimensionsForRatio(ratio: number) {
+  const targetArea = 1280 * 720;
+  const height = Math.max(64, Math.round(Math.sqrt(targetArea / ratio) / 2) * 2);
+  const width = Math.max(64, Math.round((height * ratio) / 2) * 2);
+  return { width, height };
+}
+
 export class TimelineExportService {
   constructor(
     private readonly comfy: ComfyClient,
@@ -77,6 +96,18 @@ export class TimelineExportService {
 
   async export(timeline: ExportTimeline) {
     if (timeline.clips.length === 0) throw new Error("La timeline non contiene clip");
+    const usesAspectCrop = timeline.clips.some(clip => (clip.cropAspect ?? "original") !== "original");
+    const cropRatios = timeline.clips.map(clip => {
+      const sourceRatio = ratioFromLabel(clip.sourceAspectFormat);
+      if ((clip.cropAspect ?? "original") !== "original") return ratioFromLabel(clip.cropAspect, sourceRatio);
+      const width = clip.cropWidth ?? clip.cropZoom ?? 1;
+      const height = clip.cropHeight ?? clip.cropZoom ?? 1;
+      return sourceRatio * width / height;
+    });
+    if (usesAspectCrop && cropRatios.some(ratio => Math.abs(ratio - cropRatios[0]) > 0.015)) {
+      throw new Error("Tutte le clip devono usare lo stesso rapporto crop prima dell’export");
+    }
+    const targetDimensions = usesAspectCrop ? evenDimensionsForRatio(cropRatios[0]) : null;
     const workDir = mkdtempSync(path.join(tmpdir(), "h3-studio-export-"));
     const exportDir = path.join(this.dataDir, "exports", timeline.projectId);
     mkdirSync(exportDir, { recursive: true });
@@ -97,12 +128,22 @@ export class TimelineExportService {
         await pipeline(Readable.fromWeb(source.body as never), createWriteStream(originalPath));
         const processedPath = path.join(workDir, `clip_${index + 1}.mp4`);
         const duration = Math.max(0.05, clip.trimEnd - clip.trimStart);
-        const crop = Math.min(1, Math.max(0.1, clip.cropZoom ?? 1));
-        const cropX = Math.min(1 - crop, Math.max(0, clip.cropX ?? 0));
-        const cropY = Math.min(1 - crop, Math.max(0, clip.cropY ?? 0));
-        const videoFilters = crop < 0.999
-          ? `crop=w='trunc(iw*${crop}/2)*2':h='trunc(ih*${crop}/2)*2':x='trunc(iw*${cropX}/2)*2':y='trunc(ih*${cropY}/2)*2',scale=w='trunc(iw/${crop}/2)*2':h='trunc(ih/${crop}/2)*2',setsar=1,setpts=PTS-STARTPTS`
-          : "setpts=PTS-STARTPTS";
+        const cropWidth = Math.min(1, Math.max(0.05, clip.cropWidth ?? clip.cropZoom ?? 1));
+        const cropHeight = Math.min(1, Math.max(0.05, clip.cropHeight ?? clip.cropZoom ?? 1));
+        const cropX = Math.min(1 - cropWidth, Math.max(0, clip.cropX ?? 0));
+        const cropY = Math.min(1 - cropHeight, Math.max(0, clip.cropY ?? 0));
+        const hasCrop = cropWidth < 0.999 || cropHeight < 0.999 || cropX > 0.001 || cropY > 0.001;
+        const filters: string[] = [];
+        if (hasCrop) {
+          filters.push(`crop=w='trunc(iw*${cropWidth}/2)*2':h='trunc(ih*${cropHeight}/2)*2':x='trunc(iw*${cropX}/2)*2':y='trunc(ih*${cropY}/2)*2'`);
+        }
+        if (targetDimensions) {
+          filters.push(`scale=${targetDimensions.width}:${targetDimensions.height}:flags=lanczos`);
+        } else if (hasCrop) {
+          filters.push(`scale=w='trunc(iw/${cropWidth}/2)*2':h='trunc(ih/${cropHeight}/2)*2':flags=lanczos`);
+        }
+        filters.push("setsar=1", "setpts=PTS-STARTPTS");
+        const videoFilters = filters.join(",");
         await runFile(
           this.ffmpegPath,
           [

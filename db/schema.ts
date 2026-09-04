@@ -675,7 +675,20 @@ export const JOB_DATABASE_MIGRATIONS = [
               0, NULL, external_audio_gain, 0, 0, external_audio_loop, 0, 0,
               created_at, updated_at
        FROM project_timelines
-       WHERE external_audio_file IS NOT NULL`,
+      WHERE external_audio_file IS NOT NULL`,
+    ],
+  },
+  {
+    version: 30,
+    statements: [
+      `ALTER TABLE project_clips ADD COLUMN crop_width REAL NOT NULL DEFAULT 1
+       CHECK (crop_width BETWEEN 0.05 AND 1)`,
+      `ALTER TABLE project_clips ADD COLUMN crop_height REAL NOT NULL DEFAULT 1
+       CHECK (crop_height BETWEEN 0.05 AND 1)`,
+      `ALTER TABLE project_clips ADD COLUMN crop_aspect TEXT NOT NULL DEFAULT 'original'
+       CHECK (crop_aspect IN ('original', '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9'))`,
+      `UPDATE project_clips
+       SET crop_width = crop_zoom, crop_height = crop_zoom`,
     ],
   },
 ] as const;

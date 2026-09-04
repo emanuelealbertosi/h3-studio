@@ -42,9 +42,11 @@ La sezione **Progetti** mostra la cronologia locale e permette di riaprire un jo
 
 La sezione **Montaggi** offre timeline non distruttive: le clip possono essere
 riordinate, copiate o spostate fra progetti, tagliate con una filmstrip a doppia
-maniglia e reinquadrate con crop/zoom. Due tracce audio esterne mostrano la forma
-d’onda e supportano posizione, trim, volume, mute, solo, loop e fade, oltre al
-gain dell’audio H3 originale. Il composer supporta il mapping dei sei modi H3 e
+maniglia e reinquadrate direttamente sul player. Il crop WYSIWYG supporta drag,
+zoom con rotella ancorato al puntatore, dimensioni in pixel e rapporti comuni alla
+sequenza da Originale a 21:9. Due tracce audio esterne mostrano la forma d’onda e
+supportano posizione, trim, volume, mute, solo, loop e fade, oltre al gain
+dell’audio H3 originale. Il composer supporta il mapping dei sei modi H3 e
 conserva asset, keyframe e ruoli Reference; nessun render parte senza il pulsante
 Genera. L’export FFmpeg produce un MP4 H.264/AAC applicando realmente tagli,
 crop e mix multitraccia.
