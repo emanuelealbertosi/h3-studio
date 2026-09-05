@@ -13,6 +13,7 @@ import {
 import { normalizePromptPlan } from "../bridge/prompt-planner.js";
 import { JobRepository } from "../bridge/job-repository.js";
 import { ProjectRepository } from "../bridge/project-repository.js";
+import { JOB_DATABASE_MIGRATIONS } from "../db/schema.js";
 
 const dataDir = mkdtempSync(path.join(tmpdir(), "h3-studio-audio-"));
 const jobs = new JobRepository(dataDir);
@@ -156,14 +157,19 @@ try {
   assert.equal(audio.list(10, project.id).length, 4);
   assert.equal(audio.pending().length, 3);
 
+  const latestMigration = JOB_DATABASE_MIGRATIONS.at(-1);
+  assert.ok(latestMigration);
   const database = new DatabaseSync(jobs.databasePath);
-  const migration = database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number };
-  assert.equal(migration.version, 23);
-  database.close();
+  try {
+    const migration = database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number };
+    assert.equal(migration.version, latestMigration.version);
+  } finally {
+    database.close();
+  }
   console.log("Audio Studio persistence, output and migration: OK");
 } finally {
   audio.close();
   projects.close();
   jobs.close();
-  rmSync(dataDir, { recursive: true, force: true });
+  rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
