@@ -674,6 +674,29 @@ button {
   color: #e2c78f;
 }
 
+.montage-video-upload {
+  border-color: var(--gold);
+  background: var(--gold);
+  color: #173638;
+}
+
+.montage-video-upload.image {
+  border-color: rgba(205, 169, 107, 0.48);
+  background: rgba(205, 169, 107, 0.1);
+  color: #e2c78f;
+}
+
+.montage-slide-duration,
+.montage-slide-duration input {
+  border-color: var(--line);
+  background: #0b1d20;
+  color: var(--ink);
+}
+
+.still-duration-track > span {
+  color: #e2c78f;
+}
+
 .montage-counter,
 .timeline-preview span,
 .timeline-preview b,

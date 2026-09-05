@@ -177,6 +177,12 @@ export class ExternalMediaRepository {
   }
 
   delete(id: string) {
+    const montageReference = this.database
+      .prepare("SELECT 1 FROM project_clips WHERE external_media_id = ? LIMIT 1")
+      .get(id);
+    if (montageReference) {
+      throw new Error("Il media è usato in un montaggio. Rimuovilo prima dalla timeline.");
+    }
     const result = this.database.prepare("DELETE FROM external_media WHERE id = ?").run(id);
     if (result.changes !== 1) throw new Error("Media esterno non trovato");
   }

@@ -44,6 +44,8 @@ type ExportTimeline = {
     trimStart: number;
     trimEnd: number;
     volume: number;
+    hasAudio?: boolean;
+    isStillImage?: boolean;
     cropX?: number;
     cropY?: number;
     cropZoom?: number;
@@ -124,7 +126,8 @@ export class TimelineExportService {
           (url.searchParams.get("type") as "input" | "output" | "temp") ?? "output",
         );
         if (!source.ok || !source.body) throw new Error(`Clip ${index + 1} non leggibile da ComfyUI`);
-        const originalPath = path.join(workDir, `source_${index + 1}.mp4`);
+        const sourceExtension = path.extname(clip.output.filename) || (clip.isStillImage ? ".png" : ".mp4");
+        const originalPath = path.join(workDir, `source_${index + 1}${sourceExtension}`);
         await pipeline(Readable.fromWeb(source.body as never), createWriteStream(originalPath));
         const processedPath = path.join(workDir, `clip_${index + 1}.mp4`);
         const duration = Math.max(0.05, clip.trimEnd - clip.trimStart);
@@ -141,19 +144,28 @@ export class TimelineExportService {
           filters.push(`scale=${targetDimensions.width}:${targetDimensions.height}:flags=lanczos`);
         } else if (hasCrop) {
           filters.push(`scale=w='trunc(iw/${cropWidth}/2)*2':h='trunc(ih/${cropHeight}/2)*2':flags=lanczos`);
+        } else if (clip.isStillImage) {
+          filters.push("scale=w='trunc(iw/2)*2':h='trunc(ih/2)*2':flags=lanczos");
         }
         filters.push("setsar=1", "setpts=PTS-STARTPTS");
         const videoFilters = filters.join(",");
+        const sourceArgs = clip.isStillImage
+          ? ["-y", "-loop", "1", "-i", originalPath]
+          : ["-y", "-ss", String(clip.trimStart), "-i", originalPath];
+        if (clip.hasAudio === false) {
+          sourceArgs.push("-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo");
+        }
+        sourceArgs.push(
+          "-t", String(duration),
+          "-map", "0:v:0", "-map", clip.hasAudio === false ? "1:a:0" : "0:a:0?", "-vf", videoFilters,
+          "-af", `volume=${clip.volume},asetpts=PTS-STARTPTS`,
+          "-c:v", "libx264", "-preset", "medium", "-crf", "16",
+          "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+          processedPath,
+        );
         await runFile(
           this.ffmpegPath,
-          [
-            "-y", "-ss", String(clip.trimStart), "-i", originalPath, "-t", String(duration),
-            "-map", "0:v:0", "-map", "0:a:0?", "-vf", videoFilters,
-            "-af", `volume=${clip.volume},asetpts=PTS-STARTPTS`,
-            "-c:v", "libx264", "-preset", "medium", "-crf", "16",
-            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
-            processedPath,
-          ],
+          sourceArgs,
           { windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
         );
         processed.push(processedPath);

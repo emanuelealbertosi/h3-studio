@@ -691,4 +691,70 @@ export const JOB_DATABASE_MIGRATIONS = [
        SET crop_width = crop_zoom, crop_height = crop_zoom`,
     ],
   },
+  {
+    version: 31,
+    statements: [
+      `CREATE TABLE project_clips_v31 (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        source_job_id TEXT,
+        source_candidate_index INTEGER CHECK (source_candidate_index BETWEEN 1 AND 4),
+        position INTEGER NOT NULL CHECK (position >= 0),
+        label TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        timeline_id TEXT NOT NULL REFERENCES project_timelines(id) ON DELETE CASCADE,
+        trim_start REAL NOT NULL DEFAULT 0.0 CHECK (trim_start >= 0.0),
+        trim_end REAL CHECK (trim_end IS NULL OR trim_end > 0.0),
+        volume REAL NOT NULL DEFAULT 1.0 CHECK (volume BETWEEN 0.0 AND 2.0),
+        source_variant_id TEXT REFERENCES candidate_variants(id) ON DELETE SET NULL,
+        crop_x REAL NOT NULL DEFAULT 0 CHECK (crop_x BETWEEN 0 AND 1),
+        crop_y REAL NOT NULL DEFAULT 0 CHECK (crop_y BETWEEN 0 AND 1),
+        crop_zoom REAL NOT NULL DEFAULT 1 CHECK (crop_zoom BETWEEN 0.1 AND 1),
+        crop_width REAL NOT NULL DEFAULT 1 CHECK (crop_width BETWEEN 0.05 AND 1),
+        crop_height REAL NOT NULL DEFAULT 1 CHECK (crop_height BETWEEN 0.05 AND 1),
+        crop_aspect TEXT NOT NULL DEFAULT 'original'
+          CHECK (crop_aspect IN ('original', '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9')),
+        external_media_id TEXT REFERENCES external_media(id) ON DELETE RESTRICT,
+        FOREIGN KEY (source_job_id, source_candidate_index)
+          REFERENCES candidates(job_id, candidate_index)
+          ON DELETE RESTRICT,
+        CHECK (
+          (external_media_id IS NULL AND source_job_id IS NOT NULL AND source_candidate_index IS NOT NULL)
+          OR
+          (external_media_id IS NOT NULL AND source_job_id IS NULL AND source_candidate_index IS NULL AND source_variant_id IS NULL)
+        )
+      ) STRICT`,
+      `INSERT INTO project_clips_v31(
+         id, project_id, source_job_id, source_candidate_index, position, label,
+         created_at, updated_at, timeline_id, trim_start, trim_end, volume,
+         source_variant_id, crop_x, crop_y, crop_zoom, crop_width, crop_height,
+         crop_aspect, external_media_id
+       )
+       SELECT id, project_id, source_job_id, source_candidate_index, position, label,
+              created_at, updated_at, timeline_id, trim_start, trim_end, volume,
+              source_variant_id, crop_x, crop_y, crop_zoom, crop_width, crop_height,
+              crop_aspect, NULL
+       FROM project_clips`,
+      `DROP TABLE project_clips`,
+      `ALTER TABLE project_clips_v31 RENAME TO project_clips`,
+      `CREATE INDEX idx_project_clips_project_position
+       ON project_clips(project_id, position)`,
+      `CREATE INDEX idx_project_clips_timeline_position
+       ON project_clips(timeline_id, position)`,
+      `CREATE INDEX idx_project_clips_variant
+       ON project_clips(source_variant_id)
+       WHERE source_variant_id IS NOT NULL`,
+      `CREATE INDEX idx_project_clips_external_media
+       ON project_clips(external_media_id)
+       WHERE external_media_id IS NOT NULL`,
+    ],
+  },
+  {
+    version: 32,
+    statements: [
+      `ALTER TABLE project_clips ADD COLUMN source_duration_override REAL
+       CHECK (source_duration_override IS NULL OR source_duration_override BETWEEN 0.5 AND 600)`,
+    ],
+  },
 ] as const;

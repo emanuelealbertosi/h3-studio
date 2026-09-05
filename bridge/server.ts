@@ -1547,10 +1547,12 @@ app.delete<{ Params: { projectId: string } }>(
       for (const media of plan.externalMedia) {
         const descriptor = externalMediaFile(media.file);
         if (descriptor) files.push(descriptor);
-        try { externalMedia.delete(media.id); } catch { /* eliminato insieme al job audio */ }
       }
 
       const deletion = projectRepository.delete(request.params.projectId);
+      for (const media of plan.externalMedia) {
+        try { externalMedia.delete(media.id); } catch { /* eliminato insieme al job audio */ }
+      }
       const [storage, exports] = await Promise.all([
         removeComfyManagedFiles(files),
         removeProjectExports(request.params.projectId),
@@ -1709,6 +1711,26 @@ app.post<{
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Aggiunta clip fallita";
+    return reply.status(400).send({ ok: false, error: message });
+  }
+});
+
+app.post<{
+  Params: { timelineId: string };
+  Body: { externalMediaId?: string; label?: string; durationSeconds?: number };
+}>("/api/timelines/:timelineId/external-clips", async (request, reply) => {
+  try {
+    return reply.status(201).send({
+      ok: true,
+      timeline: projectRepository.addExternalClipToTimeline(
+        request.params.timelineId,
+        String(request.body?.externalMediaId ?? ""),
+        request.body?.label,
+        request.body?.durationSeconds,
+      ),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Importazione video esterno fallita";
     return reply.status(400).send({ ok: false, error: message });
   }
 });

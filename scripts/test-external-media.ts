@@ -64,6 +64,86 @@ try {
 
   external.delete(first.id);
   assert.equal(external.count(), 0);
+
+  const video = external.upsert({
+    kind: "video",
+    file: "minimax_h3/external_scene.mp4 [input]",
+    name: "external_scene.mp4",
+    original: "Scena esterna.mp4",
+    size: 987_654,
+    duration: 8.5,
+    width: 1920,
+    height: 1080,
+    has_audio: true,
+  }, project.id);
+  const mainTimeline = projects.get(project.id)?.timelines[0];
+  assert.ok(mainTimeline);
+  const withExternalVideo = projects.addExternalClipToTimeline(mainTimeline.id, video.id);
+  assert.equal(withExternalVideo?.clips.length, 1);
+  assert.equal(withExternalVideo?.clips[0].sourceKind, "external");
+  assert.equal(withExternalVideo?.clips[0].externalMediaId, video.id);
+  assert.equal(withExternalVideo?.clips[0].sourceJobId, null);
+  assert.equal(withExternalVideo?.clips[0].sourceCandidateIndex, null);
+  assert.equal(withExternalVideo?.clips[0].seed, null);
+  assert.equal(withExternalVideo?.clips[0].hasAudio, true);
+  assert.equal(withExternalVideo?.clips[0].sourceDuration, 8.5);
+  assert.equal(withExternalVideo?.clips[0].trimEnd, 8.5);
+  assert.equal(withExternalVideo?.clips[0].variants.length, 0);
+  assert.match(withExternalVideo?.clips[0].output.mediaPath ?? "", /type=input/);
+  const trimmedVideo = projects.updateClip(withExternalVideo!.clips[0].id, {
+    trimStart: 1,
+    trimEnd: 6,
+    volume: 0.7,
+    cropWidth: 0.8,
+    cropHeight: 0.8,
+    cropX: 0.1,
+    cropY: 0.1,
+  });
+  assert.equal(trimmedVideo?.clips[0].trimStart, 1);
+  assert.equal(trimmedVideo?.clips[0].trimEnd, 6);
+  assert.equal(trimmedVideo?.clips[0].volume, 0.7);
+  const secondProject = projects.create("Destinazione video esterno");
+  if (!secondProject) throw new Error("Progetto di destinazione non creato");
+  const copiedVideo = projects.copyClip(withExternalVideo!.clips[0].id, secondProject.id);
+  const externalCopy = copiedVideo?.clips.find((clip) => clip.externalMediaId === video.id);
+  assert.ok(externalCopy);
+  assert.equal(externalCopy.trimStart, 1);
+  assert.equal(externalCopy.trimEnd, 6);
+  assert.equal(projects.deletionPlan(project.id).preserved.externalMedia, 1);
+  assert.throws(() => external.delete(video.id), /usato in un montaggio/);
+  projects.removeClip(externalCopy.id);
+  projects.removeClip(withExternalVideo!.clips[0].id);
+  external.delete(video.id);
+  assert.equal(external.count(), 0);
+  projects.delete(secondProject.id);
+
+  const slide = external.upsert({
+    kind: "picture",
+    file: "minimax_h3/documentary_slide.png [input]",
+    name: "documentary_slide.png",
+    original: "Slide capitolo.png",
+    size: 456_789,
+    width: 1600,
+    height: 900,
+    has_audio: false,
+  }, project.id);
+  const withSlide = projects.addExternalClipToTimeline(mainTimeline.id, slide.id, undefined, 4.5);
+  const slideClip = withSlide?.clips.find((clip) => clip.externalMediaId === slide.id);
+  assert.ok(slideClip);
+  assert.equal(slideClip.sourceKind, "external");
+  assert.equal(slideClip.mediaKind, "image");
+  assert.equal(slideClip.isStillImage, true);
+  assert.equal(slideClip.hasAudio, false);
+  assert.equal(slideClip.sourceDuration, 4.5);
+  assert.equal(slideClip.trimStart, 0);
+  assert.equal(slideClip.trimEnd, 4.5);
+  const longerSlide = projects.updateClip(slideClip.id, { durationSeconds: 7.5 });
+  assert.equal(longerSlide?.clips[0].sourceDuration, 7.5);
+  assert.equal(longerSlide?.clips[0].trimEnd, 7.5);
+  assert.throws(() => external.delete(slide.id), /usato in un montaggio/);
+  projects.removeClip(slideClip.id);
+  external.delete(slide.id);
+  assert.equal(external.count(), 0);
   console.log("External media persistence + extended SQLite constraints: OK");
 } finally {
   external.close();
@@ -124,7 +204,38 @@ try {
     ) STRICT;
     CREATE TABLE candidates (
       job_id TEXT NOT NULL,
-      candidate_index INTEGER NOT NULL
+      candidate_index INTEGER NOT NULL,
+      PRIMARY KEY (job_id, candidate_index)
+    ) STRICT;
+    CREATE TABLE candidate_variants (
+      id TEXT PRIMARY KEY
+    ) STRICT;
+    CREATE TABLE project_timelines (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      external_audio_file TEXT,
+      external_audio_name TEXT,
+      original_audio_gain REAL NOT NULL DEFAULT 1,
+      external_audio_gain REAL NOT NULL DEFAULT 1,
+      external_audio_loop INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+    CREATE TABLE project_clips (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      source_job_id TEXT NOT NULL,
+      source_candidate_index INTEGER NOT NULL,
+      position INTEGER NOT NULL,
+      label TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      timeline_id TEXT,
+      trim_start REAL NOT NULL DEFAULT 0,
+      trim_end REAL,
+      volume REAL NOT NULL DEFAULT 1,
+      source_variant_id TEXT
     ) STRICT;
     CREATE TABLE image_candidates (
       job_id TEXT NOT NULL,

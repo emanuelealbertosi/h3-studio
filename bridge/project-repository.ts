@@ -18,17 +18,20 @@ type TimelineRow = {
   created_at: string; updated_at: string; clip_count: number;
 };
 type ClipRow = {
-  id: string; project_id: string; timeline_id: string; source_job_id: string;
-  source_candidate_index: number; source_variant_id: string | null;
+  id: string; project_id: string; timeline_id: string; source_job_id: string | null;
+  source_candidate_index: number | null; source_variant_id: string | null;
+  external_media_id: string | null; external_file: string | null;
+  external_name: string | null; external_original_name: string | null;
+  external_kind: "picture" | "video" | "audio" | null; external_has_audio: number | null;
   variant_kind: "face" | "upscale" | "face_upscale" | null;
   variant_target_megapixels: 1 | 2 | null;
   position: number; label: string; created_at: string;
-  seed: string; source_duration: number; trim_start: number; trim_end: number | null;
+  seed: string | null; source_duration: number; trim_start: number; trim_end: number | null;
   volume: number; crop_x: number; crop_y: number; crop_zoom: number;
   crop_width: number; crop_height: number; crop_aspect: string; source_aspect_format: string;
-  output_filename: string; output_subfolder: string | null;
-  output_type: MediaOutput["type"]; output_format: string | null;
-  candidate_status: string; candidate_created_at: string; candidate_updated_at: string;
+  output_filename: string | null; output_subfolder: string | null;
+  output_type: MediaOutput["type"] | null; output_format: string | null;
+  candidate_status: string | null; candidate_created_at: string | null; candidate_updated_at: string | null;
   variant_status: string | null; variant_created_at: string | null;
   variant_updated_at: string | null;
 };
@@ -70,7 +73,35 @@ function centeredCrop(sourceFormat: string, aspect: string) {
   const height = targetRatio >= sourceRatio ? sourceRatio / targetRatio : 1;
   return { width, height, x: (1 - width) / 2, y: (1 - height) / 2 };
 }
+function canonicalAspect(sourceFormat: string) {
+  const sourceRatio = ratioFromFormat(sourceFormat);
+  return ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"]
+    .find((aspect) => Math.abs(ratioFromFormat(aspect) - sourceRatio) < 0.015) ?? "original";
+}
+function inferredMediaFormat(filename: string) {
+  const extension = filename.split(".").pop()?.toLowerCase();
+  if (extension === "png") return "image/png";
+  if (extension === "webp") return "image/webp";
+  if (extension === "gif") return "image/gif";
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+  if (extension === "webm") return "video/webm";
+  if (extension === "mov") return "video/quicktime";
+  if (extension === "mkv") return "video/x-matroska";
+  return "video/mp4";
+}
+function annotatedMedia(file: string): MediaOutput {
+  const match = /^(.*?)(?: \[(input|output|temp)\])?$/.exec(file.trim());
+  const annotatedPath = (match?.[1] ?? file).replace(/\\/g, "/");
+  const type = (match?.[2] ?? "input") as MediaOutput["type"];
+  const slash = annotatedPath.lastIndexOf("/");
+  const filename = slash >= 0 ? annotatedPath.slice(slash + 1) : annotatedPath;
+  const subfolder = slash >= 0 ? annotatedPath.slice(0, slash) : "";
+  const query = new URLSearchParams({ filename, subfolder, type });
+  return { filename, subfolder, type, format: inferredMediaFormat(filename), mediaPath: `/api/media?${query.toString()}` };
+}
 function mediaFromClip(row: ClipRow): MediaOutput {
+  if (row.external_media_id && row.external_file) return annotatedMedia(row.external_file);
+  if (!row.output_filename || !row.output_type) throw new Error("File sorgente della clip non disponibile");
   const subfolder = row.output_subfolder ?? "";
   const query = new URLSearchParams({ filename: row.output_filename, subfolder, type: row.output_type });
   return { filename: row.output_filename, subfolder, type: row.output_type, format: row.output_format ?? "video/mp4", mediaPath: `/api/media?${query.toString()}` };
@@ -78,25 +109,30 @@ function mediaFromClip(row: ClipRow): MediaOutput {
 function mapClip(row: ClipRow) {
   return {
     id: row.id, projectId: row.project_id, timelineId: row.timeline_id,
+    sourceKind: row.external_media_id ? "external" as const : "generated" as const,
     sourceJobId: row.source_job_id, sourceCandidateIndex: row.source_candidate_index,
+    externalMediaId: row.external_media_id,
+    mediaKind: row.external_kind === "picture" ? "image" as const : "video" as const,
+    isStillImage: row.external_kind === "picture",
     sourceVariantId: row.source_variant_id, variantKind: row.variant_kind ?? "original",
     targetMegapixels: row.variant_target_megapixels
       ?? (row.variant_kind === "upscale" || row.variant_kind === "face_upscale" ? 1 : null),
     position: row.position, label: row.label, createdAt: row.created_at,
-    seed: Number(row.seed), sourceDuration: row.source_duration,
+    seed: row.seed === null ? null : Number(row.seed), sourceDuration: row.source_duration,
+    hasAudio: row.external_media_id ? row.external_has_audio === 1 : true,
     trimStart: row.trim_start, trimEnd: row.trim_end ?? row.source_duration,
     volume: row.volume, cropX: row.crop_x, cropY: row.crop_y, cropZoom: row.crop_zoom,
     cropWidth: row.crop_width, cropHeight: row.crop_height, cropAspect: row.crop_aspect,
     sourceAspectFormat: row.source_aspect_format,
-    processingSeconds: row.source_variant_id
+    processingSeconds: row.external_media_id ? null : row.source_variant_id
       ? processingSeconds(
           row.variant_created_at ?? "",
           row.variant_updated_at ?? "",
           row.variant_status === "ready" || row.variant_status === "failed",
         )
       : processingSeconds(
-          row.candidate_created_at,
-          row.candidate_updated_at,
+          row.candidate_created_at ?? "",
+          row.candidate_updated_at ?? "",
           row.candidate_status === "ready" || row.candidate_status === "failed",
         ),
     output: mediaFromClip(row),
@@ -389,13 +425,23 @@ export class ProjectRepository {
     const rows = this.database.prepare(
       `SELECT project_clips.id, project_clips.project_id, project_clips.timeline_id,
        project_clips.source_job_id, project_clips.source_candidate_index, project_clips.position,
+       project_clips.external_media_id, external_media.file AS external_file,
+       external_media.name AS external_name, external_media.original_name AS external_original_name,
+       external_media.kind AS external_kind, external_media.has_audio AS external_has_audio,
        project_clips.source_variant_id, candidate_variants.kind AS variant_kind,
        candidate_variants.target_megapixels AS variant_target_megapixels,
        project_clips.label, project_clips.created_at, project_clips.trim_start,
        project_clips.trim_end, project_clips.volume, project_clips.crop_x,
        project_clips.crop_y, project_clips.crop_zoom, project_clips.crop_width,
        project_clips.crop_height, project_clips.crop_aspect,
-       jobs.aspect_format AS source_aspect_format, candidates.seed,
+       COALESCE(
+         jobs.aspect_format,
+         CASE WHEN external_media.width > 0 AND external_media.height > 0
+           THEN CAST(external_media.width AS TEXT) || ':' || CAST(external_media.height AS TEXT)
+           ELSE '16:9 landscape'
+         END
+       ) AS source_aspect_format,
+       candidates.seed,
        candidates.status AS candidate_status,
        candidates.created_at AS candidate_created_at,
        candidates.updated_at AS candidate_updated_at,
@@ -406,18 +452,21 @@ export class ProjectRepository {
        COALESCE(candidate_variants.output_subfolder, candidates.output_subfolder) AS output_subfolder,
        COALESCE(candidate_variants.output_type, candidates.output_type) AS output_type,
        COALESCE(candidate_variants.output_format, candidates.output_format) AS output_format,
-       (jobs.duration_seconds * jobs.shot_count) AS source_duration
-       FROM project_clips JOIN candidates ON candidates.job_id = project_clips.source_job_id
+       COALESCE(project_clips.source_duration_override, jobs.duration_seconds * jobs.shot_count, external_media.duration, 0) AS source_duration
+       FROM project_clips LEFT JOIN candidates ON candidates.job_id = project_clips.source_job_id
        AND candidates.candidate_index = project_clips.source_candidate_index
        LEFT JOIN candidate_variants ON candidate_variants.id = project_clips.source_variant_id
-       JOIN jobs ON jobs.id = project_clips.source_job_id
+       LEFT JOIN jobs ON jobs.id = project_clips.source_job_id
+       LEFT JOIN external_media ON external_media.id = project_clips.external_media_id
        WHERE project_clips.timeline_id = ? ORDER BY project_clips.position, project_clips.created_at`
     ).all(timelineId) as unknown as ClipRow[];
     return {
       ...mapTimeline(timeline),
       clips: rows.map((row) => ({
         ...mapClip(row),
-        variants: this.clipVariants(row.source_job_id, row.source_candidate_index),
+        variants: row.source_job_id !== null && row.source_candidate_index !== null
+          ? this.clipVariants(row.source_job_id, row.source_candidate_index)
+          : [],
       })),
       audioTracks: this.listAudioTracks(timelineId),
     };
@@ -508,8 +557,16 @@ export class ProjectRepository {
     const aspect = String(aspectValue ?? "");
     if (!CROP_ASPECTS.has(aspect)) throw new Error("Rapporto crop non valido");
     const clips = this.database.prepare(
-      `SELECT project_clips.id, jobs.aspect_format
-       FROM project_clips JOIN jobs ON jobs.id = project_clips.source_job_id
+      `SELECT project_clips.id, COALESCE(
+         jobs.aspect_format,
+         CASE WHEN external_media.width > 0 AND external_media.height > 0
+           THEN CAST(external_media.width AS TEXT) || ':' || CAST(external_media.height AS TEXT)
+           ELSE '16:9 landscape'
+         END
+       ) AS aspect_format
+       FROM project_clips
+       LEFT JOIN jobs ON jobs.id = project_clips.source_job_id
+       LEFT JOIN external_media ON external_media.id = project_clips.external_media_id
        WHERE project_clips.timeline_id = ?`,
     ).all(timelineId) as unknown as Array<{ id: string; aspect_format: string }>;
     const now = new Date().toISOString();
@@ -568,7 +625,10 @@ export class ProjectRepository {
     const variantId = this.resolveVariant(jobId, candidateIndex, variantValue);
     const position = timeline.clips.length, id = randomUUID(), now = new Date().toISOString();
     const label = normalizeLabel(labelValue, `Clip ${position + 1}`);
-    const cropAspect = timeline.clips[0]?.cropAspect ?? "original";
+    const firstClip = timeline.clips[0];
+    const cropAspect = firstClip
+      ? firstClip.cropAspect === "original" ? canonicalAspect(firstClip.sourceAspectFormat) : firstClip.cropAspect
+      : "original";
     const crop = centeredCrop(candidate.aspect_format, cropAspect);
     this.database.exec("BEGIN IMMEDIATE");
     try {
@@ -588,20 +648,85 @@ export class ProjectRepository {
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
     return this.getTimeline(timelineId);
   }
+  addExternalClipToTimeline(timelineId: string, externalMediaId: string, labelValue?: unknown, durationValue?: unknown) {
+    const timeline = this.getTimeline(timelineId);
+    if (!timeline) throw new Error("Montaggio non trovato");
+    const media = this.database.prepare(
+      `SELECT id, kind, original_name, duration, width, height
+       FROM external_media WHERE id = ?`,
+    ).get(externalMediaId) as {
+      id: string; kind: string; original_name: string; duration: number | null;
+      width: number | null; height: number | null;
+    } | undefined;
+    if (!media || (media.kind !== "video" && media.kind !== "picture")) {
+      throw new Error("Seleziona un video o un'immagine validi");
+    }
+    const isStillImage = media.kind === "picture";
+    const duration = isStillImage
+      ? numberBetween(durationValue ?? 5, 0.5, 600, "Durata slide")
+      : media.duration;
+    if (!duration || duration <= 0.05) {
+      throw new Error("Durata del video non disponibile: prova a caricarlo di nuovo");
+    }
+    const position = timeline.clips.length, id = randomUUID(), now = new Date().toISOString();
+    const fallbackLabel = media.original_name.replace(/\.[^.]+$/, "")
+      || `${isStillImage ? "Slide" : "Video esterno"} ${position + 1}`;
+    const label = normalizeLabel(labelValue, fallbackLabel);
+    const firstClip = timeline.clips[0];
+    const cropAspect = firstClip
+      ? firstClip.cropAspect === "original" ? canonicalAspect(firstClip.sourceAspectFormat) : firstClip.cropAspect
+      : "original";
+    const sourceAspect = media.width && media.height ? `${media.width}:${media.height}` : "16:9 landscape";
+    const crop = centeredCrop(sourceAspect, cropAspect);
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.prepare(
+        `INSERT INTO project_clips(
+           id, project_id, timeline_id, source_job_id, source_candidate_index,
+           source_variant_id, external_media_id, position, label, trim_end,
+           source_duration_override,
+           crop_x, crop_y, crop_zoom, crop_width, crop_height, crop_aspect,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id, timeline.projectId, timelineId, media.id, position, label, duration,
+        isStillImage ? duration : null,
+        crop.x, crop.y, Math.min(crop.width, crop.height), crop.width, crop.height,
+        cropAspect, now, now,
+      );
+      this.touchTimeline(timelineId, now); this.touchProject(timeline.projectId, now);
+      this.database.exec("COMMIT");
+    } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+    return this.getTimeline(timelineId);
+  }
   updateClip(clipId: string, value: {
     trimStart?: unknown; trimEnd?: unknown; volume?: unknown; variantId?: unknown;
+    durationSeconds?: unknown;
     cropX?: unknown; cropY?: unknown; cropZoom?: unknown; cropWidth?: unknown;
     cropHeight?: unknown; cropAspect?: unknown;
   }) {
     const clip = this.clip(clipId);
     if (!clip) throw new Error("Clip non trovata");
     const durationRow = this.database.prepare(
-      "SELECT duration_seconds * shot_count AS source_duration FROM jobs WHERE id = ?",
-    ).get(clip.source_job_id) as { source_duration: number } | undefined;
-    if (!durationRow) throw new Error("Sorgente della clip non trovata");
-    const sourceDuration = durationRow.source_duration;
-    const trimStart = value.trimStart === undefined ? clip.trim_start : numberBetween(value.trimStart, 0, sourceDuration - 0.05, "Inizio trim");
-    const trimEnd = value.trimEnd === undefined || value.trimEnd === null || value.trimEnd === "" ? clip.trim_end ?? sourceDuration : numberBetween(value.trimEnd, 0.05, sourceDuration, "Fine trim");
+      `SELECT COALESCE(project_clips.source_duration_override, jobs.duration_seconds * jobs.shot_count, external_media.duration) AS source_duration
+       FROM project_clips
+       LEFT JOIN jobs ON jobs.id = project_clips.source_job_id
+       LEFT JOIN external_media ON external_media.id = project_clips.external_media_id
+       WHERE project_clips.id = ?`,
+    ).get(clipId) as { source_duration: number | null } | undefined;
+    if (!durationRow?.source_duration) throw new Error("Sorgente della clip non trovata");
+    const durationOverride = clip.source_duration_override === null
+      ? null
+      : value.durationSeconds === undefined
+        ? clip.source_duration_override
+        : numberBetween(value.durationSeconds, 0.5, 600, "Durata slide");
+    const sourceDuration = durationOverride ?? durationRow.source_duration;
+    const trimStart = durationOverride !== null
+      ? 0
+      : value.trimStart === undefined ? clip.trim_start : numberBetween(value.trimStart, 0, sourceDuration - 0.05, "Inizio trim");
+    const trimEnd = durationOverride !== null
+      ? durationOverride
+      : value.trimEnd === undefined || value.trimEnd === null || value.trimEnd === "" ? clip.trim_end ?? sourceDuration : numberBetween(value.trimEnd, 0.05, sourceDuration, "Fine trim");
     if (trimEnd - trimStart < 0.05) throw new Error("La clip deve durare almeno 0,05 secondi");
     const volume = value.volume === undefined ? clip.volume : numberBetween(value.volume, 0, 2, "Volume clip");
     const legacyZoom = value.cropZoom === undefined ? undefined : numberBetween(value.cropZoom, 0.1, 1, "Zoom crop");
@@ -619,13 +744,18 @@ export class ProjectRepository {
       : numberBetween(value.cropY, 0, 1 - cropHeight, "Posizione crop verticale");
     const cropAspect = value.cropAspect === undefined ? clip.crop_aspect : String(value.cropAspect);
     if (!CROP_ASPECTS.has(cropAspect)) throw new Error("Rapporto crop non valido");
-    const variantId = value.variantId === undefined
-      ? clip.source_variant_id
-      : this.resolveVariant(clip.source_job_id, clip.source_candidate_index, value.variantId);
+    if (clip.external_media_id && value.variantId !== undefined && value.variantId !== null && value.variantId !== "" && value.variantId !== "original") {
+      throw new Error("I media esterni non hanno varianti di rendering");
+    }
+    const variantId = clip.external_media_id
+      ? null
+      : value.variantId === undefined
+        ? clip.source_variant_id
+        : this.resolveVariant(clip.source_job_id!, clip.source_candidate_index!, value.variantId);
     const now = new Date().toISOString();
     this.database.prepare(
-      "UPDATE project_clips SET trim_start = ?, trim_end = ?, volume = ?, crop_x = ?, crop_y = ?, crop_zoom = ?, crop_width = ?, crop_height = ?, crop_aspect = ?, source_variant_id = ?, updated_at = ? WHERE id = ?",
-    ).run(trimStart, trimEnd, volume, cropX, cropY, Math.min(cropWidth, cropHeight), cropWidth, cropHeight, cropAspect, variantId, now, clipId);
+      "UPDATE project_clips SET trim_start = ?, trim_end = ?, volume = ?, source_duration_override = ?, crop_x = ?, crop_y = ?, crop_zoom = ?, crop_width = ?, crop_height = ?, crop_aspect = ?, source_variant_id = ?, updated_at = ? WHERE id = ?",
+    ).run(trimStart, trimEnd, volume, durationOverride, cropX, cropY, Math.min(cropWidth, cropHeight), cropWidth, cropHeight, cropAspect, variantId, now, clipId);
     this.touchTimeline(clip.timeline_id, now); this.touchProject(clip.project_id, now);
     return this.getTimeline(clip.timeline_id);
   }
@@ -634,7 +764,9 @@ export class ProjectRepository {
     if (!clip) throw new Error("Clip non trovata");
     const timeline = this.resolveTimeline(targetId);
     if (!timeline) throw new Error("Montaggio di destinazione non trovato");
-    const result = this.addClipToTimeline(timeline.id, clip.source_job_id, clip.source_candidate_index, clip.label, clip.source_variant_id);
+    const result = clip.external_media_id
+      ? this.addExternalClipToTimeline(timeline.id, clip.external_media_id, clip.label, clip.source_duration_override ?? undefined)
+      : this.addClipToTimeline(timeline.id, clip.source_job_id!, clip.source_candidate_index!, clip.label, clip.source_variant_id);
     const copied = result?.clips.at(-1);
     if (copied) this.updateClip(copied.id, {
       trimStart: clip.trim_start,
@@ -655,7 +787,19 @@ export class ProjectRepository {
     if (!clip || !target) throw new Error("Clip o montaggio di destinazione non trovato");
     if (clip.timeline_id === target.id) return this.getTimeline(target.id);
     const targetDetail = this.getTimeline(target.id), now = new Date().toISOString();
-    const source = this.database.prepare("SELECT aspect_format FROM jobs WHERE id = ?").get(clip.source_job_id) as { aspect_format: string } | undefined;
+    const source = this.database.prepare(
+      `SELECT COALESCE(
+         jobs.aspect_format,
+         CASE WHEN external_media.width > 0 AND external_media.height > 0
+           THEN CAST(external_media.width AS TEXT) || ':' || CAST(external_media.height AS TEXT)
+           ELSE '16:9 landscape'
+         END
+       ) AS aspect_format
+       FROM project_clips
+       LEFT JOIN jobs ON jobs.id = project_clips.source_job_id
+       LEFT JOIN external_media ON external_media.id = project_clips.external_media_id
+       WHERE project_clips.id = ?`,
+    ).get(clipId) as { aspect_format: string } | undefined;
     const targetAspect = targetDetail?.clips[0]?.cropAspect ?? "original";
     const crop = centeredCrop(source?.aspect_format ?? "16:9 landscape", targetAspect);
     this.database.exec("BEGIN IMMEDIATE");
@@ -728,8 +872,10 @@ export class ProjectRepository {
   }
   private clip(clipId: string) {
     return this.database.prepare("SELECT * FROM project_clips WHERE id = ?").get(clipId) as {
-      id: string; project_id: string; timeline_id: string; source_job_id: string;
-      source_candidate_index: number; position: number; label: string;
+      id: string; project_id: string; timeline_id: string; source_job_id: string | null;
+      source_candidate_index: number | null; external_media_id: string | null;
+      source_duration_override: number | null;
+      position: number; label: string;
       source_variant_id: string | null;
       trim_start: number; trim_end: number | null; volume: number;
       crop_x: number; crop_y: number; crop_zoom: number;
@@ -786,6 +932,11 @@ export class ProjectRepository {
     const directReference = this.database.prepare(
       `SELECT 1
        WHERE EXISTS (SELECT 1 FROM creative_asset_references WHERE file = ?)
+          OR EXISTS (
+            SELECT 1 FROM project_clips
+            WHERE project_clips.external_media_id = ?
+              AND project_clips.project_id <> ?
+          )
           OR EXISTS (SELECT 1 FROM audio_jobs WHERE project_id <> ? AND reference_file = ?)
           OR EXISTS (
             SELECT 1 FROM project_timelines
@@ -811,6 +962,8 @@ export class ProjectRepository {
           )`,
     ).get(
       media.file,
+      media.id,
+      projectId,
       projectId,
       media.file,
       projectId,

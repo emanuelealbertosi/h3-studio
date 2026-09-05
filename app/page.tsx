@@ -801,14 +801,19 @@ type ProjectClip = {
   id: string;
   projectId: string;
   timelineId: string;
-  sourceJobId: string;
-  sourceCandidateIndex: number;
+  sourceKind: "generated" | "external";
+  sourceJobId: string | null;
+  sourceCandidateIndex: number | null;
+  externalMediaId: string | null;
+  mediaKind: "video" | "image";
+  isStillImage: boolean;
   sourceVariantId: string | null;
   variantKind: VariantKind | "original";
   position: number;
   label: string;
   createdAt: string;
-  seed: number;
+  seed: number | null;
+  hasAudio: boolean;
   sourceDuration: number;
   trimStart: number;
   trimEnd: number;
@@ -1305,7 +1310,9 @@ function HistoryPanel({
       {project && (
         <section className="montage-panel" hidden>
           <div className="montage-stage">
-            {currentClip ? (
+            {currentClip?.isStillImage ? (
+              <img alt={currentClip.label} src={`${bridgeUrl}${currentClip.output.mediaPath}`} />
+            ) : currentClip ? (
               <video
                 autoPlay={montagePlaying}
                 controls
@@ -1382,15 +1389,17 @@ function HistoryPanel({
                   }}
                   type="button"
                 >
-                  <video muted playsInline preload="metadata" src={`${bridgeUrl}${clip.output.mediaPath}`} />
+                  {clip.isStillImage
+                    ? <img alt="" src={`${bridgeUrl}${clip.output.mediaPath}`} />
+                    : <video muted playsInline preload="metadata" src={`${bridgeUrl}${clip.output.mediaPath}`} />}
                   <span>{index + 1}</span>
                 </button>
                 <div className="timeline-clip-body">
                   <strong>{clip.label}</strong>
-                  <small>Seed {clip.seed}</small>
+                  <small>{clip.isStillImage ? `Slide · ${clip.sourceDuration.toFixed(2)}s` : clip.sourceKind === "external" ? "Video esterno" : `Seed ${clip.seed}`}</small>
                   <div>
-                    <button onClick={() => onUseClip(clip, "continue")} type="button">Continua</button>
-                    <button onClick={() => onUseClip(clip, "edit")} type="button">Edita</button>
+                    {!clip.isStillImage && <button onClick={() => onUseClip(clip, "continue")} type="button">Continua</button>}
+                    {!clip.isStillImage && <button onClick={() => onUseClip(clip, "edit")} type="button">Edita</button>}
                     <button
                       disabled={index === 0}
                       onClick={() => void reorderTimelineClip(clip, index - 1)}
@@ -1586,6 +1595,13 @@ function timelineAudioPath(file: string) {
 
 function VideoFilmstrip({ clip }: { clip: ProjectClip }) {
   const count = Math.max(6, Math.min(12, Math.ceil(clip.sourceDuration * 1.4)));
+  if (clip.isStillImage) {
+    return <div className="video-filmstrip still" aria-hidden="true">
+      {Array.from({ length: count }, (_, index) => (
+        <img alt="" key={`${clip.id}-${index}`} src={`${bridgeUrl}${clip.output.mediaPath}`} />
+      ))}
+    </div>;
+  }
   return (
     <div className="video-filmstrip" aria-hidden="true">
       {Array.from({ length: count }, (_, index) => {
@@ -1662,6 +1678,9 @@ function MontagesPanel({
   const [projectJobs, setProjectJobs] = useState<RemoteJob[]>([]);
   const [sourceVersions, setSourceVersions] = useState<Record<string, string>>({});
   const [addingSource, setAddingSource] = useState<string | null>(null);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageDuration, setImageDuration] = useState(5);
   const [removingClipId, setRemovingClipId] = useState<string | null>(null);
   const [loadingSources, setLoadingSources] = useState(false);
   const [newName, setNewName] = useState("");
@@ -1812,6 +1831,7 @@ function MontagesPanel({
         cropHeight: clip.cropHeight,
         cropAspect: clip.cropAspect,
         variantId: clip.sourceVariantId,
+        durationSeconds: clip.isStillImage ? clip.sourceDuration : undefined,
       });
       if (updated) setMessage(`Clip salvata · ${(clip.trimEnd - clip.trimStart).toFixed(2)}s`);
     } catch (error) {
@@ -1894,6 +1914,74 @@ function MontagesPanel({
     } finally { setBusy(false); }
   }
 
+  async function uploadExternalVideo(file: File | undefined) {
+    if (!file || !timelineId || !projectId) return;
+    setUploadingVideo(true);
+    setPlaying(false);
+    setMessage(`Importazione di “${file.name}”…`);
+    try {
+      const body = new FormData();
+      body.append("file", file, file.name);
+      const query = new URLSearchParams({ projectId });
+      const response = await fetch(`${bridgeUrl}/api/assets/upload?${query.toString()}`, {
+        method: "POST",
+        body,
+      });
+      const payload = (await response.json()) as {
+        external?: ExternalMediaAsset;
+        error?: string;
+      };
+      if (!response.ok || !payload.external || payload.external.kind !== "video") {
+        throw new Error(payload.error ?? "Seleziona un file video valido");
+      }
+      const updated = await timelineMutation(`/api/timelines/${timelineId}/external-clips`, {
+        externalMediaId: payload.external.id,
+      });
+      if (updated) setCurrentIndex(Math.max(0, updated.clips.length - 1));
+      setExportedMediaPath("");
+      setMessage(`“${payload.external.originalName}” aggiunto al montaggio · audio originale incluso`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Importazione video fallita");
+    } finally {
+      setUploadingVideo(false);
+    }
+  }
+
+  async function uploadExternalImage(file: File | undefined) {
+    if (!file || !timelineId || !projectId) return;
+    const durationSeconds = Math.min(600, Math.max(0.5, imageDuration));
+    setUploadingImage(true);
+    setPlaying(false);
+    setMessage(`Aggiunta della slide “${file.name}”…`);
+    try {
+      const body = new FormData();
+      body.append("file", file, file.name);
+      const query = new URLSearchParams({ projectId });
+      const response = await fetch(`${bridgeUrl}/api/assets/upload?${query.toString()}`, {
+        method: "POST",
+        body,
+      });
+      const payload = (await response.json()) as {
+        external?: ExternalMediaAsset;
+        error?: string;
+      };
+      if (!response.ok || !payload.external || payload.external.kind !== "picture") {
+        throw new Error(payload.error ?? "Seleziona un file immagine valido");
+      }
+      const updated = await timelineMutation(`/api/timelines/${timelineId}/external-clips`, {
+        externalMediaId: payload.external.id,
+        durationSeconds,
+      });
+      if (updated) setCurrentIndex(Math.max(0, updated.clips.length - 1));
+      setExportedMediaPath("");
+      setMessage(`Slide “${payload.external.originalName}” aggiunta · ${durationSeconds.toFixed(2)}s`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Aggiunta immagine fallita");
+    } finally {
+      setUploadingImage(false);
+    }
+  }
+
   async function exportTimeline() {
     if (!timeline?.clips.length) return;
     setBusy(true);
@@ -1918,7 +2006,7 @@ function MontagesPanel({
 
   async function removeClip(clip: ProjectClip) {
     if (!window.confirm(
-      `Rimuovere “${clip.label}” da questo montaggio?\n\nIl video originale resterà nel progetto e nella Libreria.`,
+      `Rimuovere “${clip.label}” da questo montaggio?\n\nIl media originale resterà nel progetto e nella Libreria.`,
     )) return;
     setRemovingClipId(clip.id);
     setPlaying(false);
@@ -1934,7 +2022,7 @@ function MontagesPanel({
       setCurrentIndex(index => Math.min(index, Math.max(0, payload.timeline!.clips.length - 1)));
       setExportedMediaPath("");
       if (projectId) await loadTimelines(projectId);
-      setMessage(`“${clip.label}” rimossa dal montaggio · il video originale è ancora in Libreria`);
+      setMessage(`“${clip.label}” rimossa dal montaggio · il media originale è ancora in Libreria`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Rimozione clip fallita");
       if (timelineId) await loadTimeline(timelineId);
@@ -1942,6 +2030,8 @@ function MontagesPanel({
       setRemovingClipId(null);
     }
   }
+
+  const currentClip = timeline?.clips[currentIndex] ?? null;
 
   useEffect(() => {
     void loadProjects().catch(error => setMessage(error instanceof Error ? error.message : "Progetti non disponibili"));
@@ -1967,6 +2057,30 @@ function MontagesPanel({
     else videoRef.current?.pause();
   }, [playing, currentIndex]);
   useEffect(() => {
+    if (!playing || !currentClip?.isStillImage || !timeline) return;
+    const duration = Math.max(0.5, currentClip.trimEnd - currentClip.trimStart);
+    const elapsedBefore = timeline.clips.slice(0, currentIndex).reduce(
+      (total, clip) => total + clip.trimEnd - clip.trimStart,
+      0,
+    );
+    const startedAt = performance.now();
+    const progressTimer = window.setInterval(() => {
+      setPlayheadSeconds(elapsedBefore + Math.min(duration, (performance.now() - startedAt) / 1000));
+    }, 100);
+    const advanceTimer = window.setTimeout(() => {
+      if (currentIndex < timeline.clips.length - 1) setCurrentIndex(index => index + 1);
+      else {
+        setPlaying(false);
+        setCurrentIndex(0);
+        setPlayheadSeconds(0);
+      }
+    }, duration * 1000);
+    return () => {
+      window.clearInterval(progressTimer);
+      window.clearTimeout(advanceTimer);
+    };
+  }, [playing, currentIndex, currentClip?.id, currentClip?.trimStart, currentClip?.trimEnd, currentClip?.isStillImage, timeline?.id]);
+  useEffect(() => {
     const player = playerRef.current;
     if (!player) return;
     const measure = () => setPlayerSize({ width: player.clientWidth, height: player.clientHeight });
@@ -1990,7 +2104,6 @@ function MontagesPanel({
         ),
       })),
   ), [projectJobs]);
-  const currentClip = timeline?.clips[currentIndex] ?? null;
   const timelineDuration = timeline?.clips.reduce((total, clip) => total + clip.trimEnd - clip.trimStart, 0) ?? 0;
   const currentVideoKey = currentClip ? `${currentClip.id}:${currentClip.sourceVariantId ?? "original"}` : "";
   const cropViewport = useMemo(() => {
@@ -2113,7 +2226,48 @@ function MontagesPanel({
               <span className="section-index">MEDIA DEL PROGETTO</span>
               <h3>Clip da aggiungere</h3>
             </div>
-            <span>{loadingSources ? "Caricamento…" : `${projectSources.length} candidate pronte`}</span>
+            <div className="montage-source-actions">
+              <span>{loadingSources ? "Caricamento…" : `${projectSources.length} candidate generate`}</span>
+              <div className="montage-import-controls">
+                <label className="montage-slide-duration">
+                  <span>Durata slide</span>
+                  <input
+                    aria-label="Durata iniziale della slide in secondi"
+                    max="600"
+                    min="0.5"
+                    onChange={event => setImageDuration(Number(event.target.value))}
+                    step="0.5"
+                    type="number"
+                    value={imageDuration}
+                  />
+                  <b>s</b>
+                </label>
+                <label className={uploadingImage || uploadingVideo || !timelineId ? "montage-video-upload image disabled" : "montage-video-upload image"}>
+                  <span>{uploadingImage ? "Aggiunta…" : "+ Aggiungi immagine"}</span>
+                  <input
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    disabled={uploadingImage || uploadingVideo || !timelineId}
+                    type="file"
+                    onChange={event => {
+                      void uploadExternalImage(event.currentTarget.files?.[0]);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+                <label className={uploadingVideo || uploadingImage || !timelineId ? "montage-video-upload disabled" : "montage-video-upload"}>
+                  <span>{uploadingVideo ? "Importazione…" : "+ Importa video"}</span>
+                  <input
+                    accept="video/*,.mkv"
+                    disabled={uploadingVideo || uploadingImage || !timelineId}
+                    type="file"
+                    onChange={event => {
+                      void uploadExternalVideo(event.currentTarget.files?.[0]);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
           </div>
           {projectSources.length ? (
             <div className="montage-source-strip">
@@ -2173,7 +2327,16 @@ function MontagesPanel({
         <>
           <div className="montage-editor-grid">
             <div className="montage-player" ref={playerRef}>
-              {currentClip ? (
+              {currentClip?.isStillImage ? (
+                <img
+                  alt={currentClip.label}
+                  key={`${currentClip.id}:still`}
+                  onLoad={event => {
+                    setVideoNatural({ key: currentVideoKey, width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight });
+                  }}
+                  src={`${bridgeUrl}${currentClip.output.mediaPath}`}
+                />
+              ) : currentClip ? (
                 <video
                   autoPlay={playing}
                   controls
@@ -2228,7 +2391,7 @@ function MontagesPanel({
             <aside className="audio-mixer">
               <span className="section-index">AUDIO</span>
               <h3>Mixer del montaggio</h3>
-              <label className="original-audio-control"><span>Audio originale H3</span><input min="0" max="2" step="0.05" type="range" value={timeline.originalAudioGain} onChange={event => setTimeline({ ...timeline, originalAudioGain: Number(event.target.value) })} onPointerUp={() => void saveMixer({ originalAudioGain: timeline.originalAudioGain })} /><b>{timeline.originalAudioGain.toFixed(2)}</b></label>
+              <label className="original-audio-control"><span>Audio originale clip</span><input min="0" max="2" step="0.05" type="range" value={timeline.originalAudioGain} onChange={event => setTimeline({ ...timeline, originalAudioGain: Number(event.target.value) })} onPointerUp={() => void saveMixer({ originalAudioGain: timeline.originalAudioGain })} /><b>{timeline.originalAudioGain.toFixed(2)}</b></label>
               <p>Due tracce indipendenti per musica, voce o effetti. Il mix viene applicato in esportazione.</p>
               <button disabled={!timeline.clips.length} onClick={() => { setCurrentIndex(0); setPlaying(true); }} type="button">▶ Riproduci montaggio</button>
               {exportedMediaPath && <a download href={`${bridgeUrl}${exportedMediaPath}`} rel="noopener" target="_blank">Scarica MP4 pronto</a>}
@@ -2306,18 +2469,26 @@ function MontagesPanel({
                   <span>{index + 1}</span>
                   <b>{timelineClock(clip.trimEnd - clip.trimStart)}</b>
                 </button>
-                <div className="video-trim-control">
-                  <div className="video-trim-selection" style={{ left: `${(clip.trimStart / clip.sourceDuration) * 100}%`, right: `${100 - (clip.trimEnd / clip.sourceDuration) * 100}%` }} />
-                  <div className="dual-range">
-                    <input aria-label={`Inizio trim ${clip.label}`} max={clip.sourceDuration} min="0" step="0.05" type="range" value={clip.trimStart} onChange={event => patchClip(clip.id, { trimStart: Math.min(Number(event.target.value), clip.trimEnd - 0.05) })} onPointerUp={event => void saveClip({ ...clip, trimStart: Number(event.currentTarget.value) })} />
-                    <input aria-label={`Fine trim ${clip.label}`} max={clip.sourceDuration} min="0" step="0.05" type="range" value={clip.trimEnd} onChange={event => patchClip(clip.id, { trimEnd: Math.max(Number(event.target.value), clip.trimStart + 0.05) })} onPointerUp={event => void saveClip({ ...clip, trimEnd: Number(event.currentTarget.value) })} />
+                {clip.isStillImage ? (
+                  <div className="video-trim-control still-duration-track">
+                    <div className="video-trim-selection" style={{ left: 0, right: 0 }} />
+                    <span>SLIDE · {clip.sourceDuration.toFixed(2)}s</span>
                   </div>
-                </div>
+                ) : (
+                  <div className="video-trim-control">
+                    <div className="video-trim-selection" style={{ left: `${(clip.trimStart / clip.sourceDuration) * 100}%`, right: `${100 - (clip.trimEnd / clip.sourceDuration) * 100}%` }} />
+                    <div className="dual-range">
+                      <input aria-label={`Inizio trim ${clip.label}`} max={clip.sourceDuration} min="0" step="0.05" type="range" value={clip.trimStart} onChange={event => patchClip(clip.id, { trimStart: Math.min(Number(event.target.value), clip.trimEnd - 0.05) })} onPointerUp={event => void saveClip({ ...clip, trimStart: Number(event.currentTarget.value) })} />
+                      <input aria-label={`Fine trim ${clip.label}`} max={clip.sourceDuration} min="0" step="0.05" type="range" value={clip.trimEnd} onChange={event => patchClip(clip.id, { trimEnd: Math.max(Number(event.target.value), clip.trimStart + 0.05) })} onPointerUp={event => void saveClip({ ...clip, trimEnd: Number(event.currentTarget.value) })} />
+                    </div>
+                  </div>
+                )}
                 <div className="timeline-editor-fields">
                   <strong>{clip.label}</strong>
                   <div className="trim-fields">
                     <label>Versione <select
-                      value={clip.sourceVariantId ?? "original"}
+                      disabled={clip.sourceKind === "external"}
+                      value={clip.sourceKind === "external" ? "external" : clip.sourceVariantId ?? "original"}
                       onChange={(event) => {
                         const variantId = event.target.value === "original" ? null : event.target.value;
                         void timelineMutation(`/api/project-clips/${clip.id}/trim`, {
@@ -2334,30 +2505,49 @@ function MontagesPanel({
                         }).then(() => setMessage(`Versione ${variantId ? "post-process" : "originale"} attiva`));
                       }}
                     >
-                      <option value="original">Originale</option>
-                      {clip.variants.map((variant) => (
+                      {clip.sourceKind === "external" && <option value="external">{clip.isStillImage ? "Immagine" : "Video esterno"}</option>}
+                      {clip.sourceKind === "generated" && <option value="original">Originale</option>}
+                      {clip.sourceKind === "generated" && clip.variants.map((variant) => (
                         <option key={variant.id} value={variant.id}>{variantLabel(variant.kind, variant.targetMegapixels)}</option>
                       ))}
                     </select></label>
-                    <label>Da <input min="0" max={clip.trimEnd - 0.05} step="0.05" type="number" value={clip.trimStart} onChange={event => patchClip(clip.id, { trimStart: Number(event.target.value) })} onBlur={() => void saveClip(clip)} /></label>
-                    <label>A <input min={clip.trimStart + 0.05} max={clip.sourceDuration} step="0.05" type="number" value={clip.trimEnd} onChange={event => patchClip(clip.id, { trimEnd: Number(event.target.value) })} onBlur={() => void saveClip(clip)} /></label>
-                    <label>Vol <input min="0" max="2" step="0.05" type="number" value={clip.volume} onChange={event => patchClip(clip.id, { volume: Number(event.target.value) })} onBlur={() => void saveClip(clip)} /></label>
+                    {clip.isStillImage ? (
+                      <label className="slide-duration-field">Durata <input
+                        max="600"
+                        min="0.5"
+                        step="0.5"
+                        type="number"
+                        value={clip.sourceDuration}
+                        onChange={event => {
+                          const duration = Math.min(600, Math.max(0.5, Number(event.target.value)));
+                          patchClip(clip.id, { sourceDuration: duration, trimStart: 0, trimEnd: duration });
+                        }}
+                        onBlur={event => {
+                          const duration = Math.min(600, Math.max(0.5, Number(event.currentTarget.value)));
+                          void saveClip({ ...clip, sourceDuration: duration, trimStart: 0, trimEnd: duration });
+                        }}
+                      /></label>
+                    ) : <>
+                      <label>Da <input min="0" max={clip.trimEnd - 0.05} step="0.05" type="number" value={clip.trimStart} onChange={event => patchClip(clip.id, { trimStart: Number(event.target.value) })} onBlur={() => void saveClip(clip)} /></label>
+                      <label>A <input min={clip.trimStart + 0.05} max={clip.sourceDuration} step="0.05" type="number" value={clip.trimEnd} onChange={event => patchClip(clip.id, { trimEnd: Number(event.target.value) })} onBlur={() => void saveClip(clip)} /></label>
+                      <label>Vol <input min="0" max="2" step="0.05" type="number" value={clip.volume} onChange={event => patchClip(clip.id, { volume: Number(event.target.value) })} onBlur={() => void saveClip(clip)} /></label>
+                    </>}
                   </div>
                   <div className="crop-clip-summary">
                     <span>Crop {clip.cropAspect === "original" ? "originale" : clip.cropAspect}</span>
                     <button onClick={() => { setCurrentIndex(index); setPlaying(false); setCropEditing(true); }} type="button">✥ Reinquadra sul player</button>
                   </div>
-                  <small>{(clip.trimEnd - clip.trimStart).toFixed(2)}s usati di {clip.sourceDuration}s</small>
+                  <small>{clip.isStillImage ? `Permanenza in timeline: ${clip.sourceDuration.toFixed(2)}s` : `${(clip.trimEnd - clip.trimStart).toFixed(2)}s usati di ${clip.sourceDuration}s`}</small>
                   <div className="timeline-clip-actions">
                     <button disabled={index === 0} onClick={() => void reorder(clip, index - 1)} type="button">←</button>
                     <button disabled={index === timeline.clips.length - 1} onClick={() => void reorder(clip, index + 1)} type="button">→</button>
-                    <button onClick={() => onUseClip(clip, "continue")} type="button">Continua</button>
-                    <button onClick={() => onUseClip(clip, "edit")} type="button">Edita</button>
+                    {!clip.isStillImage && <button onClick={() => onUseClip(clip, "continue")} type="button">Continua</button>}
+                    {!clip.isStillImage && <button onClick={() => onUseClip(clip, "edit")} type="button">Edita</button>}
                     <button
                       className="remove"
                       disabled={removingClipId === clip.id}
                       onClick={() => void removeClip(clip)}
-                      title="Il video originale resterà in Libreria"
+                      title="Il media originale resterà in Libreria"
                       type="button"
                     >🗑 Rimuovi</button>
                   </div>
@@ -2801,7 +2991,11 @@ function MediaLibraryPanel({
           {montages.map((timeline) => (
             <article className={libraryBulkSelected.includes(`timeline:${timeline.id}`) ? "bulk-selected" : ""} key={timeline.id}>
               <div className="media-library-preview">
-                {timeline.clips[0] ? <video muted playsInline preload="metadata" src={`${bridgeUrl}${timeline.clips[0].output.mediaPath}`} /> : <span>≋</span>}
+                {timeline.clips[0]?.isStillImage
+                  ? <img alt="" src={`${bridgeUrl}${timeline.clips[0].output.mediaPath}`} />
+                  : timeline.clips[0]
+                    ? <video muted playsInline preload="metadata" src={`${bridgeUrl}${timeline.clips[0].output.mediaPath}`} />
+                    : <span>≋</span>}
                 {libraryBulkMode && <button aria-label={`Seleziona ${timeline.name}`} aria-pressed={libraryBulkSelected.includes(`timeline:${timeline.id}`)} className="bulk-select-button" onClick={() => toggleLibraryBulk(`timeline:${timeline.id}`)} type="button">{libraryBulkSelected.includes(`timeline:${timeline.id}`) ? "✓" : ""}</button>}
                 <button aria-label={`Rinomina ${timeline.name}`} className="media-rename-button" disabled={renamingMedia === `timeline:${timeline.id}`} onClick={() => void renameTimeline(timeline)} title="Rinomina montaggio" type="button">✎</button>
                 <button aria-label={`Elimina ${timeline.name}`} className="video-trash-button" disabled={deletingTimeline === timeline.id} onClick={() => void deleteTimelineFromLibrary(timeline)} title="Elimina montaggio; conserva i video sorgente" type="button">🗑</button>
@@ -6512,7 +6706,7 @@ function StudioApp() {
       setQualityMode("fast");
       setTurboEnabled(false);
     }
-    setSourceJobId(context?.sourceJobId ?? currentJobId);
+    setSourceJobId(context ? context.sourceJobId ?? null : currentJobId);
     if (context?.projectId) setStudioProjectId(context.projectId);
     setActiveView("studio");
     setRunMessage(
